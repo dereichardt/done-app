@@ -1,0 +1,36 @@
+---
+description: Standard patterns for modal `<dialog>` components
+alwaysApply: true
+---
+
+# Dialog Patterns
+
+App modals use the native `<dialog>` element with `showModal()` and Canvas-aligned tokens. Keep every dialog header consistent with the rest of the app.
+
+## Dismiss affordance
+
+- Every **headered** dialog (search/list, detail, long form, multi-step) MUST use the shared `DialogCloseButton` in the header.
+- Import from `@/components/dialog-close-button`.
+- The control is an **icon-only X**, circular hover surface, `cursor: pointer`, keyboard-focusable, and labeled "Close" by default.
+
+## Do
+
+- Use `<DialogCloseButton onClick={closeX} />` at the end of the dialog header row.
+- Keep the header flex layout: title + optional subtitle on the left, `DialogCloseButton` right-aligned (`shrink-0`).
+- Render confirmation dialogs (destructive / discard / delete) with **text buttons** ("Cancel", "Delete", "Discard") instead of the X. Confirmation dialogs do not use `DialogCloseButton` so users never dismiss a destructive action by accident.
+
+## Don't
+
+- Do not add a text "Close" button inside a headered dialog.
+- Do not re-implement the X button inline; always use `DialogCloseButton` so theming and hover behavior stay consistent.
+- Do not use the X as the only way to trigger form submission/cancel — the X always dismisses without saving.
+
+## Styling source of truth
+
+`DialogCloseButton` composes Canvas token aliases:
+
+- `text-[var(--app-text-muted)]` → `hover:text-[var(--app-text)]`
+- `hover:bg-[var(--app-surface-alt)]`
+- `focus-visible:ring-2 ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]`
+
+If a dialog needs a variant (e.g. smaller, inverted surface), extend the shared component—do not fork the markup in feature code.

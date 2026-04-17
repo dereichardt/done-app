@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Done Prototype 2 - Canvas Tokens</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <nav class="sidebar is-collapsed" aria-label="Primary">
+        <div class="sidebar-top">
+          <button class="icon-btn sidebar-toggle-btn" type="button" aria-label="Expand sidebar">
+            <svg class="sidebar-toggle-icon" viewBox="0 0 16 16" role="img" aria-hidden="true">
+              <path d="M6 12l4-4-4-4"></path>
+            </svg>
+          </button>
+        </div>
+
+        <ul class="nav-list">
+          <li>
+            <a class="nav-item" href="#">
+              <span class="nav-icon-slot">
+                <span class="nav-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+                    <path d="M2.5 8L8 3.5 13.5 8"></path>
+                    <path d="M4 8v5.5h8V8"></path>
+                  </svg>
+                </span>
+              </span>
+              <span class="nav-text">Home</span>
+            </a>
+          </li>
+          <li>
+            <a class="nav-item active" href="#" aria-current="page">
+              <span class="nav-icon-slot">
+                <span class="nav-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+                    <path d="M2 5h5l1.5 2H14v6H2z"></path>
+                    <path d="M2 5V3h4l1 2"></path>
+                  </svg>
+                </span>
+              </span>
+              <span class="nav-text">Projects</span>
+            </a>
+          </li>
+          <li>
+            <span class="nav-item nav-item-placeholder" aria-disabled="true">
+              <span class="nav-icon-slot">
+                <span class="nav-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+                    <rect x="2" y="2" width="12" height="12" rx="2"></rect>
+                    <path d="M5 8l2 2 4-4"></path>
+                  </svg>
+                </span>
+              </span>
+              <span class="nav-text">Tasks</span>
+            </span>
+          </li>
+        </ul>
+      </nav>
+
+      <main class="dashboard" aria-label="Done Home">
+        <header class="utility-row">
+          <div class="utility-meta">Friday, March 27</div>
+          <div class="utility-actions">
+            <button class="user-pill" type="button" aria-label="Open profile">DR</button>
+          </div>
+        </header>
+
+        <section class="hero">
+          <h1>Good morning, David</h1>
+          <p class="muted">Your AI workspace to focus on what matters most today.</p>
+
+          <div class="chat-wrap">
+            <label for="work-chat" class="sr-only">AI work chat</label>
+            <div class="chat-bar" role="search">
+              <span class="chat-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+                  <circle cx="7" cy="7" r="4.5"></circle>
+                  <path d="M10.5 10.5L14 14"></path>
+                </svg>
+              </span>
+              <input
+                id="work-chat"
+                type="text"
+                placeholder="Ask Done AI about priorities, blockers, or your day..."
+              />
+              <button class="send-btn" type="button" aria-label="Send message">-></button>
+            </div>
+            <div class="chip-row quick-actions">
+              <button class="chip-btn" type="button">Horizon</button>
+              <button class="chip-btn" type="button">Request absence</button>
+              <button class="chip-btn" type="button">My payslips</button>
+              <button class="chip-btn" type="button">Browse jobs</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="section-heading-row" aria-label="Task highlights">
+          <h2 class="section-heading">Awaiting Your Action</h2>
+          <button class="icon-btn ghost-btn" type="button" aria-label="More actions">...</button>
+        </section>
+
+        <section class="content-grid" aria-label="Home sections">
+          <article class="card">
+            <div class="card-head">
+              <h2>High Priority Tasks</h2>
+              <span class="badge badge-danger">Top 3</span>
+            </div>
+            <ul class="list">
+              <li class="list-item">
+                <div>
+                  <p class="item-title">Finalize payroll integration design review</p>
+                  <p class="muted">Due today at 2:00 PM</p>
+                </div>
+                <span class="badge badge-warning">At Risk</span>
+              </li>
+              <li class="list-item">
+                <div>
+                  <p class="item-title">Approve APAC tenant migration checklist</p>
+                  <p class="muted">Due today at 4:30 PM</p>
+                </div>
+                <span class="badge badge-info">Needs Input</span>
+              </li>
+              <li class="list-item">
+                <div>
+                  <p class="item-title">Prepare steering committee briefing notes</p>
+                  <p class="muted">Due tomorrow at 9:00 AM</p>
+                </div>
+                <span class="badge">Planned</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <h2>Active Projects</h2>
+              <span class="badge badge-info">Top 3</span>
+            </div>
+            <ul class="list">
+              <li class="list-item">
+                <div>
+                  <p class="item-title">Global Payroll Harmonization</p>
+                  <p class="muted">Phase 3 rollout - 78% complete</p>
+                </div>
+                <span class="badge badge-success">On Track</span>
+              </li>
+              <li class="list-item">
+                <div>
+                  <p class="item-title">Talent Marketplace Launch</p>
+                  <p class="muted">UAT cycle - 54% complete</p>
+                </div>
+                <span class="badge badge-warning">Watch</span>
+              </li>
+              <li class="list-item">
+                <div>
+                  <p class="item-title">Expense Automation Refresh</p>
+                  <p class="muted">Discovery - 31% complete</p>
+                </div>
+                <span class="badge">Planned</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card workload-card">
+            <div class="card-head">
+              <h2>Today's Workload</h2>
+              <span class="badge badge-success">Balanced</span>
+            </div>
+            <div class="workload-metrics">
+              <div class="metric">
+                <span class="metric-label">Estimated Hours</span>
+                <strong>7.5h</strong>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Meetings</span>
+                <strong>2.5h</strong>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Focus Time</span>
+                <strong>4.0h</strong>
+              </div>
+            </div>
+            <p class="muted">
+              Capacity note: You have a heavy afternoon concentration. Consider moving one 30-minute review to tomorrow.
+            </p>
+          </article>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

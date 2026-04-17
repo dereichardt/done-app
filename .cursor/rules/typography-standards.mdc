@@ -1,0 +1,21 @@
+---
+description: Keep typography consistent with Roboto and deliberate emphasis
+alwaysApply: true
+---
+
+# Typography Standards
+
+- Primary UI font is `Roboto`.
+- Default body copy uses normal weight (`400`).
+- Use medium weight (`500`) for headings, labels, and controls.
+- Use bold (`700`) only for intentional emphasis (critical values, high-priority headings).
+
+## Do
+
+- Preserve clear visual hierarchy via size and spacing first, then weight.
+- Keep text readable with strong contrast on light surfaces.
+
+## Don't
+
+- Do not set broad containers or entire pages to bold.
+- Do not mix many font families unless explicitly approved in design docs.

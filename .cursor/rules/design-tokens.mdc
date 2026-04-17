@@ -1,0 +1,21 @@
+---
+description: Enforce Canvas token-based color usage
+alwaysApply: true
+---
+
+# Design Tokens First
+
+- Use Workday Canvas tokens as the source of truth for color, depth, and interaction layers.
+- Define app semantic aliases (for example: `--color-action`, `--color-info`, `--color-surface`) and map them to Canvas tokens.
+- Prefer system tokens before brand tokens for application-wide consistency.
+- Keep accent colors sparse and purpose-driven; use neutral surfaces for layout containers.
+
+## Do
+
+- Use token variables in CSS and component styles.
+- Create shared aliases in one central tokens file.
+
+## Don't
+
+- Do not hardcode hex/rgb/oklch values in feature components.
+- Do not invent one-off color meanings that conflict with action/info/success/warning/danger semantics.

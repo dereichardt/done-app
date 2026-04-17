@@ -1,0 +1,18 @@
+---
+description: UI implementation acceptance checklist for every cycle
+alwaysApply: true
+---
+
+# UI Review Checklist
+
+Before finalizing UI work, verify:
+
+- Token usage: no hardcoded colors in feature styles.
+- Semantics: action/info/success/warning/danger meanings are consistent.
+- Typography: Roboto with deliberate weight usage.
+- Motion: hover/pressed/focus behavior follows approved patterns.
+- Accessibility: contrast, focus-visible, and reduced-motion behavior are present.
+- Visual consistency: spacing, border radius, and depth match the design baseline.
+- Dialog dismiss: every headered `<dialog>` uses `DialogCloseButton` (icon-only X, circular hover); confirmation dialogs use text buttons instead.
+
+If any item fails, revise before marking the task complete.

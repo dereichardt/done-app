@@ -1,0 +1,23 @@
+---
+description: Apply Canvas-style motion and interaction behavior
+globs: "**/*.{css,scss,tsx,jsx}"
+alwaysApply: false
+---
+
+# Motion and Interaction Rules
+
+- Use subtle, purposeful motion; avoid decorative animation.
+- Drive timing/easing from token values when available.
+- Apply hover/pressed overlays correctly:
+  - neutral surfaces use surface overlay tokens
+  - accent elements use accent overlay tokens
+- Use elevation changes for interactive cards (for example depth-1 to depth-2 on hover).
+
+## Accessibility
+
+- Always support `prefers-reduced-motion: reduce`.
+- Ensure focus-visible states are clear and keyboard-friendly.
+
+## Don't
+
+- Do not use large parallax or long-duration animations for standard UI actions.

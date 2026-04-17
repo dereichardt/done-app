@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Done UI Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="site-header">
+      <div class="container header-row">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">D</span>
+          <span class="brand-name">Done</span>
+        </div>
+        <nav aria-label="Primary">
+          <ul class="nav-list">
+            <li><a href="#philosophy">Philosophy</a></li>
+            <li><a href="#foundations">Foundations</a></li>
+            <li><a href="#workflow">Workflow</a></li>
+            <li><a href="#components">Components</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="hero section">
+        <div class="container hero-grid">
+          <div>
+            <p class="eyebrow">Canvas-inspired direction</p>
+            <h1>Simple, fast, and clean UI for consultant execution.</h1>
+            <p class="lead">
+              This static page is a visual baseline for the `Done` product experience:
+              project-centered planning, integration ownership visibility, and focused task flow.
+            </p>
+            <div class="hero-actions">
+              <button class="btn btn-primary" type="button">Primary Action</button>
+              <button class="btn btn-secondary" type="button">Secondary Action</button>
+            </div>
+          </div>
+          <aside class="hero-card" aria-label="Preview card">
+            <h2>Today Snapshot</h2>
+            <ul class="stat-list">
+              <li><span>Active Projects</span><strong>3</strong></li>
+              <li><span>Owned Integrations</span><strong>7</strong></li>
+              <li><span>Tasks Due Today</span><strong>5</strong></li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section id="foundations" class="section">
+        <div class="container">
+          <h2>Foundations</h2>
+          <p>Token-like building blocks for visual consistency and iteration speed.</p>
+          <div class="foundation-grid">
+            <article class="panel">
+              <h3>Color Tokens</h3>
+              <div class="swatch-row">
+                <span class="swatch bg-primary"></span>
+                <span class="swatch bg-info"></span>
+                <span class="swatch bg-success"></span>
+                <span class="swatch bg-warning"></span>
+                <span class="swatch bg-critical"></span>
+              </div>
+            </article>
+            <article class="panel">
+              <h3>Type Scale</h3>
+              <p class="t-xl">Heading XL</p>
+              <p class="t-lg">Heading LG</p>
+              <p class="t-md">Body MD</p>
+            </article>
+            <article class="panel">
+              <h3>Spacing Rhythm</h3>
+              <div class="space-demo">
+                <span class="space s-1"></span>
+                <span class="space s-2"></span>
+                <span class="space s-3"></span>
+                <span class="space s-4"></span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="section section-alt">
+        <div class="container">
+          <h2>Workflow Preview</h2>
+          <p>Core model flow: Project assignment to integration delivery to task execution.</p>
+          <div class="workflow-grid">
+            <article class="panel">
+              <h3>Project</h3>
+              <p>HR Transformation - APAC Deployment</p>
+              <span class="chip">Primary Role: Architect</span>
+            </article>
+            <article class="panel">
+              <h3>Integration</h3>
+              <p>Workday to Payroll Vendor</p>
+              <span class="chip">Owned Integration</span>
+            </article>
+            <article class="panel">
+              <h3>Tasks</h3>
+              <ul class="task-list">
+                <li><input type="checkbox" /> Map inbound fields</li>
+                <li><input type="checkbox" checked /> Review EIB template</li>
+                <li><input type="checkbox" /> Confirm test data loads</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="components" class="section">
+        <div class="container">
+          <h2>Component Strip</h2>
+          <div class="component-strip">
+            <div class="panel">
+              <h3>Input Pattern</h3>
+              <label for="task-input">Task title</label>
+              <input id="task-input" type="text" placeholder="Add a task..." />
+            </div>
+            <div class="panel">
+              <h3>Purpose Colors</h3>
+              <ul class="purpose-list">
+                <li><span><span class="purpose-dot dot-action"></span>Action</span><span>Primary CTA</span></li>
+                <li><span><span class="purpose-dot dot-info"></span>Info</span><span>Context and hints</span></li>
+                <li><span><span class="purpose-dot dot-success"></span>Success</span><span>Completed states</span></li>
+                <li><span><span class="purpose-dot dot-warning"></span>Caution</span><span>At risk or blocked</span></li>
+                <li><span><span class="purpose-dot dot-critical"></span>Critical</span><span>Urgent issues</span></li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Status Chips</h3>
+              <div class="chip-row">
+                <span class="chip">Planned</span>
+                <span class="chip chip-warn">Blocked</span>
+                <span class="chip chip-ok">Done</span>
+                <span class="chip chip-critical">Critical</span>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>Design Principles</h3>
+              <ul>
+                <li>Simple: fewer, clearer decisions per screen.</li>
+                <li>Fast: optimized for quick updates and context switches.</li>
+                <li>Clever: AI support that stays transparent and controllable.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer id="philosophy" class="site-footer">
+      <div class="container footer-row">
+        <p>Static prototype for UI direction only.</p>
+        <button id="toggle-density" class="btn btn-secondary" type="button">
+          Toggle Compact Mode
+        </button>
+      </div>
+    </footer>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
