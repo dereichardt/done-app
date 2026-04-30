@@ -3,20 +3,19 @@
 import { patchProjectIntegrationStatus } from "@/lib/actions/projects";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import {
-  formatDeliveryProgressLabel,
   formatIntegrationStateLabel,
-  projectDeliveryProgressSelectOptions,
   projectIntegrationStateSelectOptions,
 } from "@/lib/integration-metadata";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const deliveryOptions: CanvasSelectOption[] = projectDeliveryProgressSelectOptions();
 const stateOptions: CanvasSelectOption[] = projectIntegrationStateSelectOptions();
 
 export function IntegrationStatusCard({
   projectIntegrationId,
   initial,
   className = "",
+  deliveryProgressOverride,
+  onDeliveryProgressChange,
 }: {
   projectIntegrationId: string;
   initial: {
@@ -25,6 +24,8 @@ export function IntegrationStatusCard({
     integration_state_reason: string | null;
   };
   className?: string;
+  deliveryProgressOverride?: string;
+  onDeliveryProgressChange?: (next: string) => void;
 }) {
   const [delivery, setDelivery] = useState(initial.delivery_progress);
   const [intState, setIntState] = useState(initial.integration_state);
@@ -39,6 +40,11 @@ export function IntegrationStatusCard({
     setIntState(initial.integration_state);
     setReason(initial.integration_state_reason ?? "");
   }, [initial.delivery_progress, initial.integration_state, initial.integration_state_reason]);
+
+  useEffect(() => {
+    if (!deliveryProgressOverride) return;
+    setDelivery(deliveryProgressOverride);
+  }, [deliveryProgressOverride]);
 
   const runPatch = useCallback(
     (payload: {
@@ -64,15 +70,6 @@ export function IntegrationStatusCard({
   const reasonOrNull = (r: string) => {
     const t = r.trim();
     return t === "" ? null : t;
-  };
-
-  const handleDeliveryChange = (next: string) => {
-    setDelivery(next);
-    runPatch({
-      delivery_progress: next,
-      integration_state: intState,
-      integration_state_reason: intState === "active" ? null : reasonOrNull(reason),
-    });
   };
 
   const handleStateChange = (next: string) => {
@@ -150,7 +147,7 @@ export function IntegrationStatusCard({
         ) : null}
         {!editing ? (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
-            <div className="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start">
+            <div className="grid shrink-0 grid-cols-1 gap-3">
               <button
                 type="button"
                 className={`${readonlyCardBase} flex flex-col items-stretch`}
@@ -164,22 +161,6 @@ export function IntegrationStatusCard({
                     style={{ color: "var(--app-text)" }}
                   >
                     {formatIntegrationStateLabel(intState)}
-                  </p>
-                </div>
-              </button>
-              <button
-                type="button"
-                className={`${readonlyCardBase} flex flex-col items-stretch`}
-                aria-label="Edit delivery progress"
-                onClick={openEdit}
-              >
-                <p className="self-start text-left text-xs font-medium text-muted-canvas">Delivery progress</p>
-                <div className="mt-2 flex min-h-[3.25rem] items-center justify-center px-0.5">
-                  <p
-                    className="text-center text-lg font-semibold leading-snug break-words"
-                    style={{ color: "var(--app-text)" }}
-                  >
-                    {formatDeliveryProgressLabel(delivery)}
                   </p>
                 </div>
               </button>
@@ -215,18 +196,6 @@ export function IntegrationStatusCard({
                 onValueChange={handleStateChange}
               />
             </label>
-            <label
-              className="canvas-select-field flex flex-col gap-1 text-xs"
-              style={{ color: "var(--app-text-muted)" }}
-            >
-              Delivery progress
-              <CanvasSelect
-                name="delivery_progress"
-                options={deliveryOptions}
-                value={delivery}
-                onValueChange={handleDeliveryChange}
-              />
-            </label>
             {showReason ? (
               <label className="flex flex-col gap-1 text-xs" style={{ color: "var(--app-text-muted)" }}>
                 Blocked / on hold reason
@@ -251,8 +220,12 @@ export function IntegrationStatusCard({
               </label>
             ) : null}
             <div className="flex justify-end pt-0.5">
-              <button type="button" className="btn-ghost cursor-pointer text-sm" onClick={() => setEditing(false)}>
-                Done
+              <button
+                type="button"
+                className="btn-cta-dark cursor-pointer whitespace-nowrap text-sm"
+                onClick={() => setEditing(false)}
+              >
+                Submit
               </button>
             </div>
           </>

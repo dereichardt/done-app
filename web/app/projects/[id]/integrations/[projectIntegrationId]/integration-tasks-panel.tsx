@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  createIntegrationTask,
   createIntegrationTaskWorkSession,
   deleteIntegrationTask,
   discardActiveWorkSession,
@@ -23,9 +22,21 @@ import {
   roundedMsToDurationHours,
   totalPausedMsForDisplay,
 } from "@/lib/work-session-duration";
-import { CalendarIcon, TrashIcon, UndoIcon } from "@/components/action-icons";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
+import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
+import { TaskQuickAdd } from "@/components/task-quick-add";
+import { TaskRow, type TaskRowCrumb } from "@/components/task-row";
+import {
+  formatDateDisplay,
+  isIntegrationTaskPastDue,
+  sortTasksByDueDate,
+  sortTasksByPriority,
+  sortTasksByTitle,
+  taskSortOptions,
+  type IntegrationTaskRow as IntegrationTaskRowType,
+  type IntegrationTaskWorkSessionRow as IntegrationTaskWorkSessionRowType,
+} from "@/lib/integration-task-helpers";
 import { useActionState } from "react";
 import {
   useCallback,
@@ -336,433 +347,18 @@ function ClickToEditSessionTime({
   );
 }
 
-export type IntegrationTaskRow = {
-  id: string;
-  title: string;
-  due_date: string | null;
-  status: string;
-  priority: "low" | "medium" | "high";
-  /** ISO timestamp when marked done; null if open or never recorded. */
-  completed_at: string | null;
-};
-
-export type IntegrationTaskWorkSessionRow = {
-  id: string;
-  integration_task_id: string;
-  started_at: string;
-  finished_at: string | null;
-  duration_hours: number;
-  work_accomplished: string | null;
-};
-
-const taskPriorityOptions: CanvasSelectOption[] = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-];
-
-const taskSortOptions: CanvasSelectOption[] = [
-  { value: "due_date", label: "Due date" },
-  { value: "priority", label: "Priority" },
-  { value: "title", label: "Title" },
-];
-
-function formatDateDisplay(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(`${iso}T12:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { dateStyle: "medium" });
-}
-
-/** Completion timestamp (timestamptz); date-only display, not struck through with task title. */
-function formatCompletedOnDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString(undefined, { dateStyle: "medium" });
-}
-
-function sortTasksByDueDate(a: IntegrationTaskRow, b: IntegrationTaskRow): number {
-  if (!a.due_date && !b.due_date) return 0;
-  if (!a.due_date) return 1;
-  if (!b.due_date) return -1;
-  return a.due_date.localeCompare(b.due_date);
-}
-
-function sortTasksByPriority(a: IntegrationTaskRow, b: IntegrationTaskRow): number {
-  const rank: Record<IntegrationTaskRow["priority"], number> = {
-    high: 0,
-    medium: 1,
-    low: 2,
-  };
-  return rank[a.priority] - rank[b.priority];
-}
-
-function sortTasksByTitle(a: IntegrationTaskRow, b: IntegrationTaskRow): number {
-  return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-}
-
-function addDaysIsoUtc(todayIso: string, days: number): string {
-  const d = new Date(`${todayIso}T12:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function nextMondayIsoUtc(todayIso: string): string {
-  const d = new Date(`${todayIso}T12:00:00.000Z`);
-  const weekday = d.getUTCDay(); // 0=Sunday, 1=Monday
-  const daysUntilMonday = (1 - weekday + 7) % 7;
-  return daysUntilMonday === 0 ? addDaysIsoUtc(todayIso, 7) : addDaysIsoUtc(todayIso, daysUntilMonday);
-}
+export type IntegrationTaskRow = IntegrationTaskRowType;
+export type IntegrationTaskWorkSessionRow = IntegrationTaskWorkSessionRowType;
 
 /** Activity / pulse — reads as “work in progress” next to the Work on task label. */
 function WorkOnTaskIcon() {
   return (
     <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden className="shrink-0">
       <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M22 12h-4l-3 9L9 3l-3 9H2"
+        fill="currentColor"
+        d="M13 2L4 14h6l-1 8 11-14h-6l1-6z"
       />
     </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M20 6 9 17l-5-5"
-      />
-    </svg>
-  );
-}
-
-/** ~2 lines at ~11px / leading-snug */
-const ADD_TASK_TITLE_MAX_PX = 48;
-
-/** Same as Updates “View All Updates” (`.btn-cta-tertiary`); weight/size aligned with add-row Priority (0.875rem, normal). */
-const ADD_TASK_DUE_TERTIARY_CLASS =
-  "btn-cta-tertiary shrink-0 whitespace-nowrap !font-normal text-sm leading-snug";
-
-function syncAddTaskTitleHeight(el: HTMLTextAreaElement | null) {
-  if (!el) return;
-  el.style.height = "auto";
-  const h = Math.min(el.scrollHeight, ADD_TASK_TITLE_MAX_PX);
-  el.style.height = `${h}px`;
-  el.style.overflowY = el.scrollHeight > ADD_TASK_TITLE_MAX_PX ? "auto" : "hidden";
-}
-
-function DueDateQuickButtons({
-  quickTomorrow,
-  quickNextMonday,
-  onPick,
-  variant = "dialog",
-}: {
-  quickTomorrow: string;
-  quickNextMonday: string;
-  onPick: (iso: string) => void;
-  /** `embedded`: compact tertiary inside the add-row Due box; `dialog`: modal-friendly ghost buttons */
-  variant?: "dialog" | "embedded";
-}) {
-  if (variant === "embedded") {
-    return (
-      <>
-        <button type="button" className={ADD_TASK_DUE_TERTIARY_CLASS} onClick={() => onPick(quickTomorrow)}>
-          Tomorrow
-        </button>
-        <button
-          type="button"
-          className={ADD_TASK_DUE_TERTIARY_CLASS}
-          title="Next Monday"
-          aria-label="Next Monday"
-          onClick={() => onPick(quickNextMonday)}
-        >
-          Monday
-        </button>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <button type="button" className="btn-ghost text-sm font-normal" onClick={() => onPick(quickTomorrow)}>
-        Tomorrow
-      </button>
-      <button type="button" className="btn-ghost text-sm font-normal" onClick={() => onPick(quickNextMonday)}>
-        Next Monday
-      </button>
-    </>
-  );
-}
-
-function DueDatePickerControl({
-  name,
-  todayIso,
-  dueDate,
-  onDueDateChange,
-  quickSelectMode = false,
-  variant = "default",
-}: {
-  name: string;
-  todayIso: string;
-  dueDate: string;
-  onDueDateChange: (iso: string) => void;
-  quickSelectMode?: boolean;
-  /** `inline`: one wrapping row for the add-task bar; `default`: stacked (dialogs). */
-  variant?: "default" | "inline";
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const quickTomorrow = useMemo(() => addDaysIsoUtc(todayIso, 1), [todayIso]);
-  const quickNextMonday = useMemo(() => nextMondayIsoUtc(todayIso), [todayIso]);
-
-  function openPicker() {
-    // Native browser date picker for a consistent “classic” experience.
-    inputRef.current?.showPicker?.();
-    inputRef.current?.focus();
-  }
-
-  const dateBar =
-    variant === "inline" ? null : (
-      <div className="input-canvas input-canvas--shell flex min-h-[2.25rem] items-center justify-between gap-2 px-3 py-1.5">
-        <span className="min-w-0 truncate text-sm" style={{ color: "var(--app-text)" }}>
-          {formatDateDisplay(dueDate)}
-        </span>
-        <button
-          type="button"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-[var(--app-surface)] text-[var(--app-text-muted)] transition-colors hover:bg-[var(--app-surface-alt)]"
-          style={{ borderColor: "var(--app-border)" }}
-          onClick={openPicker}
-          aria-label="Change due date"
-        >
-          <CalendarIcon />
-        </button>
-      </div>
-    );
-
-  const hiddenDateInput = (
-    <input
-      ref={inputRef}
-      type="date"
-      name={name}
-      value={dueDate}
-      onChange={(e) => onDueDateChange(e.target.value)}
-      className="sr-only"
-      aria-hidden
-      tabIndex={-1}
-    />
-  );
-
-  if (variant === "inline") {
-    return (
-      <div className="add-task-due-cluster input-canvas flex w-fit max-w-full min-w-0 items-stretch gap-1.5">
-        <button
-          type="button"
-          className={`${ADD_TASK_DUE_TERTIARY_CLASS} max-w-[11rem] min-w-0 !justify-start truncate text-left tabular-nums`}
-          onClick={openPicker}
-          aria-label="Choose due date"
-        >
-          {formatDateDisplay(dueDate)}
-        </button>
-        {hiddenDateInput}
-        {quickSelectMode ? (
-          <div className="hidden sm:contents">
-            <DueDateQuickButtons
-              variant="embedded"
-              quickTomorrow={quickTomorrow}
-              quickNextMonday={quickNextMonday}
-              onPick={onDueDateChange}
-            />
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          {dateBar}
-          {hiddenDateInput}
-        </div>
-      </div>
-
-      {quickSelectMode ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <DueDateQuickButtons
-            variant="dialog"
-            quickTomorrow={quickTomorrow}
-            quickNextMonday={quickNextMonday}
-            onPick={onDueDateChange}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function TaskCompleteButton({
-  taskId,
-  isDone,
-  onToggleSuccess,
-}: {
-  taskId: string;
-  isDone: boolean;
-  /** When set (e.g. client-cached task list), refetch snapshot after a successful toggle. */
-  onToggleSuccess?: () => void | Promise<void>;
-}) {
-  const [updState, updAction, updPending] = useActionState(
-    async (_prev: { error?: string } | void, _formData: FormData) => toggleIntegrationTaskCompletion(taskId),
-    {},
-  );
-
-  const toggleSubmitRef = useRef(false);
-  const onToggleSuccessRef = useRef(onToggleSuccess);
-  onToggleSuccessRef.current = onToggleSuccess;
-
-  // Suppress any server error UI on the smallest affordance; keep the interaction crisp.
-  void updState;
-
-  useEffect(() => {
-    if (!toggleSubmitRef.current) return;
-    if (updPending) return;
-    toggleSubmitRef.current = false;
-    if (updState?.error) return;
-    void onToggleSuccessRef.current?.();
-  }, [updPending, updState]);
-
-  return (
-    <form
-      action={updAction}
-      onSubmit={() => {
-        toggleSubmitRef.current = true;
-      }}
-    >
-      <button
-        type="submit"
-        disabled={updPending}
-        className={`task-complete-btn group relative inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
-          isDone ? "task-complete-btn--done" : ""
-        }`}
-        aria-label={isDone ? "Mark as not complete" : "Mark as complete"}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {isDone ? (
-          <CheckIcon />
-        ) : (
-          <span
-            className="pointer-events-none opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-            aria-hidden
-          >
-            <CheckIcon />
-          </span>
-        )}
-      </button>
-    </form>
-  );
-}
-
-function TaskUndoButton({
-  taskId,
-  onUndoSuccess,
-}: {
-  taskId: string;
-  onUndoSuccess?: () => void | Promise<void>;
-}) {
-  const [undoState, undoAction, undoPending] = useActionState(
-    async (_prev: { error?: string } | void, _formData: FormData) => toggleIntegrationTaskCompletion(taskId),
-    {},
-  );
-
-  const undoSubmitRef = useRef(false);
-  const onUndoSuccessRef = useRef(onUndoSuccess);
-  onUndoSuccessRef.current = onUndoSuccess;
-
-  void undoState;
-
-  useEffect(() => {
-    if (!undoSubmitRef.current) return;
-    if (undoPending) return;
-    undoSubmitRef.current = false;
-    if (undoState?.error) return;
-    void onUndoSuccessRef.current?.();
-  }, [undoPending, undoState]);
-
-  return (
-    <form
-      action={undoAction}
-      onSubmit={() => {
-        undoSubmitRef.current = true;
-      }}
-    >
-      <button
-        type="submit"
-        disabled={undoPending}
-        className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-[var(--app-text-muted)] transition-colors hover:bg-[var(--app-surface-alt)] disabled:cursor-default disabled:opacity-60"
-        style={{ borderColor: "var(--app-border)" }}
-        title="Undo completed task"
-        aria-label="Undo completed task"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <UndoIcon className="shrink-0 -translate-y-px" />
-      </button>
-    </form>
-  );
-}
-
-function TaskDueDateInline({
-  task,
-  pending,
-  onSubmit,
-}: {
-  task: IntegrationTaskRow;
-  pending: boolean;
-  onSubmit: (taskId: string, dueDateIso: string) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function openPicker(e: { preventDefault: () => void; stopPropagation: () => void }) {
-    e.preventDefault();
-    e.stopPropagation();
-    inputRef.current?.showPicker?.();
-    inputRef.current?.focus();
-  }
-
-  return (
-    <div className="mt-1">
-      <button
-        type="button"
-        className="cursor-pointer text-xs text-muted-canvas tabular-nums underline-offset-2 transition-colors hover:text-[var(--app-text)] hover:underline disabled:cursor-default disabled:opacity-60"
-        onClick={openPicker}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") openPicker(e);
-        }}
-        disabled={pending}
-        aria-label="Change due date"
-        title="Click to edit due date"
-      >
-        {pending ? "Saving…" : formatDateDisplay(task.due_date)}
-      </button>
-      <input
-        ref={inputRef}
-        type="date"
-        className="sr-only"
-        value={task.due_date ?? ""}
-        onChange={(e) => onSubmit(task.id, e.target.value)}
-        aria-hidden
-        tabIndex={-1}
-      />
-    </div>
   );
 }
 
@@ -1397,9 +993,11 @@ function OffListWorkSessionFinishDialog({
   );
 }
 
-function TaskWorkRow({
+export function TaskWorkRow({
   taskId,
   taskTitle,
+  taskCrumb,
+  taskDueDateIso,
   finishSessionIntegrationLabel,
   finishSessionProjectLabel,
   activeSession,
@@ -1408,6 +1006,10 @@ function TaskWorkRow({
 }: {
   taskId: string;
   taskTitle: string;
+  /** Optional project/integration crumb rendered under the task title. Used on the Tasks page where rows span multiple projects. */
+  taskCrumb?: TaskRowCrumb | null;
+  /** Optional ISO date shown under the task title (Tasks page). Omit on integration page where every row already shares a date column elsewhere. */
+  taskDueDateIso?: string | null;
   finishSessionIntegrationLabel: string;
   finishSessionProjectLabel: string;
   activeSession: ActiveWorkSessionDTO;
@@ -1606,7 +1208,7 @@ function TaskWorkRow({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <div
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[var(--app-info)]"
+              className="active-work-session-indicator--live inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[var(--app-info)]"
               style={{
                 borderColor: "color-mix(in oklab, var(--app-border) 80%, transparent)",
                 background: "color-mix(in oklab, var(--app-info) 8%, var(--app-surface) 92%)",
@@ -1626,6 +1228,31 @@ function TaskWorkRow({
                 >
                   {taskTitle}
                 </p>
+                {taskCrumb ? (
+                  <p className="mt-1 text-xs leading-snug text-muted-canvas">
+                    {taskCrumb.projectColorVar ? (
+                      <span
+                        className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
+                        style={{ backgroundColor: `var(${taskCrumb.projectColorVar})` }}
+                        aria-hidden
+                      />
+                    ) : null}
+                    <a
+                      href={taskCrumb.href}
+                      className="inline transition-colors hover:text-[var(--app-text)] hover:underline underline-offset-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span className="font-medium">{taskCrumb.projectName}</span>
+                      <span className="mx-1.5">·</span>
+                      <span>{taskCrumb.integrationLabel}</span>
+                    </a>
+                  </p>
+                ) : null}
+                {taskDueDateIso !== undefined ? (
+                  <p className="mt-1 text-xs leading-snug tabular-nums text-muted-canvas">
+                    {formatDateDisplay(taskDueDateIso)}
+                  </p>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-1.5 sm:shrink-0">
                 <WorkSessionStartedAtMiniCard
@@ -2291,7 +1918,8 @@ export function ActiveWorkSessionDialog({
 }
 
 export function IntegrationTasksPanel({
-  projectIntegrationId,
+  projectIntegrationId: _projectIntegrationId = "",
+  projectTrackId,
   tasks,
   workSessionsByTaskId,
   activeWorkSession: activeWorkSessionProp,
@@ -2303,9 +1931,11 @@ export function IntegrationTasksPanel({
   finishSessionProjectLabel = "",
   todayIso,
   className = "",
+  surface = "card",
   onClientTaskSnapshotInvalidate,
 }: {
-  projectIntegrationId: string;
+  projectIntegrationId?: string;
+  projectTrackId: string;
   tasks: IntegrationTaskRow[];
   workSessionsByTaskId: Record<string, IntegrationTaskWorkSessionRow[]>;
   activeWorkSession: ActiveWorkSessionDTO | null;
@@ -2320,6 +1950,8 @@ export function IntegrationTasksPanel({
   finishSessionProjectLabel?: string;
   todayIso: string;
   className?: string;
+  /** "card" (default) wraps in a bordered card-canvas; "plain" omits the card shell for use inside dialogs. */
+  surface?: "card" | "plain";
   /**
    * When this panel is fed from client-cached data (e.g. the project integrations “All Tasks” modal),
    * run after finish/discard/create/toggle-complete so props (`activeWorkSession`, `globalActiveWorkSession`, task list) match
@@ -2344,7 +1976,7 @@ export function IntegrationTasksPanel({
     setOptimisticTasks(tasks);
   }, [tasks]);
 
-  const { activeTasks, completedTasks } = useMemo(() => {
+  const { pastDueTasks, openTasks, completedTasks } = useMemo(() => {
     const compareBySort = (a: IntegrationTaskRow, b: IntegrationTaskRow): number => {
       if (taskSortBy === "priority") {
         const byPriority = sortTasksByPriority(a, b);
@@ -2361,43 +1993,14 @@ export function IntegrationTasksPanel({
       return sortTasksByPriority(a, b);
     };
 
-    const active = optimisticTasks.filter((t) => t.status !== "done");
+    const pastDue = optimisticTasks.filter((t) => t.status !== "done" && isIntegrationTaskPastDue(t, todayIso));
+    const open = optimisticTasks.filter((t) => t.status !== "done" && !isIntegrationTaskPastDue(t, todayIso));
     const completed = optimisticTasks.filter((t) => t.status === "done");
-    active.sort(compareBySort);
+    pastDue.sort(compareBySort);
+    open.sort(compareBySort);
     completed.sort(compareBySort);
-    return { activeTasks: active, completedTasks: completed };
-  }, [optimisticTasks, taskSortBy]);
-
-  const [createState, createAction, createPending] = useActionState(
-    async (_prev: { error?: string } | void, formData: FormData) => createIntegrationTask(projectIntegrationId, formData),
-    {},
-  );
-
-  const [title, setTitle] = useState("");
-  const [priority, setPriority] = useState<IntegrationTaskRow["priority"]>("medium");
-  const [dueDate, setDueDate] = useState(todayIso);
-  const submitDidRunRef = useRef(false);
-  const titleTextareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useLayoutEffect(() => {
-    syncAddTaskTitleHeight(titleTextareaRef.current);
-  }, [title]);
-
-  useEffect(() => {
-    // Keep defaults aligned to server-provided today (useful if user leaves the page open).
-    if (!submitDidRunRef.current) setDueDate(todayIso);
-  }, [todayIso]);
-
-  useEffect(() => {
-    if (!submitDidRunRef.current) return;
-    if (createPending) return;
-    if (createState?.error) return;
-    setTitle("");
-    setPriority("medium");
-    setDueDate(todayIso);
-    submitDidRunRef.current = false;
-    void refreshTaskSnapshotAndRoute();
-  }, [createState, createPending, todayIso, refreshTaskSnapshotAndRoute]);
+    return { pastDueTasks: pastDue, openTasks: open, completedTasks: completed };
+  }, [optimisticTasks, taskSortBy, todayIso]);
 
   const [activeWorkSession, setActiveWorkSession] = useState<ActiveWorkSessionDTO | null>(activeWorkSessionProp);
 
@@ -2450,6 +2053,8 @@ export function IntegrationTasksPanel({
     await refreshTaskSnapshotAndRoute();
   }
 
+  const [manualLogTask, setManualLogTask] = useState<IntegrationTaskRow | null>(null);
+
   const [deleteDialogTask, setDeleteDialogTask] = useState<IntegrationTaskRow | null>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -2476,14 +2081,6 @@ export function IntegrationTasksPanel({
     requestAnimationFrame(() => deleteDialogRef.current?.showModal());
   }
 
-  const [titleEdit, setTitleEdit] = useState<{ taskId: string; draft: string } | null>(null);
-  const [titleEditError, setTitleEditError] = useState<string | null>(null);
-  const [priorityEditTaskId, setPriorityEditTaskId] = useState<string | null>(null);
-  const [priorityEditError, setPriorityEditError] = useState<string | null>(null);
-  const [prioritySavingTaskId, setPrioritySavingTaskId] = useState<string | null>(null);
-  const priorityEditRootRef = useRef<HTMLDivElement | null>(null);
-  const [dueDateSavingTaskId, setDueDateSavingTaskId] = useState<string | null>(null);
-  const [dueDateEditError, setDueDateEditError] = useState<string | null>(null);
   const [historyDialogTask, setHistoryDialogTask] = useState<IntegrationTaskRow | null>(null);
   const historyDialogRef = useRef<HTMLDialogElement>(null);
   const [historyWorkEdit, setHistoryWorkEdit] = useState<{ sessionId: string; draft: string } | null>(null);
@@ -2492,18 +2089,6 @@ export function IntegrationTasksPanel({
   const historyWorkEditRef = useRef<HTMLTextAreaElement | null>(null);
   const historyWorkCommitRef = useRef(false);
   const skipHistoryWorkBlurRef = useRef(false);
-  const titleCommitRef = useRef(false);
-  const skipTitleBlurRef = useRef(false);
-  const titleRowEditRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useLayoutEffect(() => {
-    if (!titleEdit) return;
-    const el = titleRowEditRef.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-    syncAddTaskTitleHeight(el);
-  }, [titleEdit?.taskId]);
 
   useLayoutEffect(() => {
     if (!historyWorkEdit) return;
@@ -2513,109 +2098,89 @@ export function IntegrationTasksPanel({
     el.setSelectionRange(el.value.length, el.value.length);
   }, [historyWorkEdit?.sessionId]);
 
-  useEffect(() => {
-    if (!priorityEditTaskId) return;
-    function onPointerDown(event: MouseEvent | TouchEvent) {
-      const root = priorityEditRootRef.current;
-      const target = event.target;
-      if (!root || !(target instanceof Node)) return;
-      if (!root.contains(target)) setPriorityEditTaskId(null);
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPriorityEditTaskId(null);
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("touchstart", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("touchstart", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [priorityEditTaskId]);
-
-  async function commitTitleEdit(taskId: string, draftFromInput?: string) {
-    const edit = titleEdit;
-    if (!edit || edit.taskId !== taskId) return;
-    if (titleCommitRef.current) return;
-    const next = (draftFromInput ?? edit.draft).trim();
+  async function saveTaskTitle(taskId: string, nextTitle: string): Promise<{ error?: string }> {
     const orig = optimisticTasks.find((x: IntegrationTaskRow) => x.id === taskId)?.title ?? "";
-    if (next === orig) {
-      setTitleEdit(null);
-      setTitleEditError(null);
-      return;
-    }
-    if (!next) {
-      setTitleEdit(null);
-      setTitleEditError(null);
-      return;
-    }
-    titleCommitRef.current = true;
-    setTitleEditError(null);
-    setOptimisticTasks((prev) => prev.map((row) => (row.id === taskId ? { ...row, title: next } : row)));
+    if (nextTitle === orig) return {};
+    setOptimisticTasks((prev) =>
+      prev.map((row) => (row.id === taskId ? { ...row, title: nextTitle } : row)),
+    );
     try {
-      const res = await updateIntegrationTaskTitle(taskId, next);
+      const res = await updateIntegrationTaskTitle(taskId, nextTitle);
       if (res?.error) {
-        setOptimisticTasks((prev) => prev.map((row) => (row.id === taskId ? { ...row, title: orig } : row)));
-        setTitleEditError(res.error);
-        return;
+        setOptimisticTasks((prev) =>
+          prev.map((row) => (row.id === taskId ? { ...row, title: orig } : row)),
+        );
+        return { error: res.error };
       }
-      setTitleEdit(null);
+      return {};
     } finally {
-      titleCommitRef.current = false;
       router.refresh();
     }
   }
 
-  function cancelTitleEdit() {
-    skipTitleBlurRef.current = true;
-    setTitleEdit(null);
-    setTitleEditError(null);
-  }
-
-  async function commitPriorityEdit(taskId: string, nextPriority: IntegrationTaskRow["priority"]) {
+  async function saveTaskPriority(
+    taskId: string,
+    nextPriority: IntegrationTaskRow["priority"],
+  ): Promise<{ error?: string }> {
     const task = optimisticTasks.find((x) => x.id === taskId);
-    if (!task) return;
-    if (task.priority === nextPriority) {
-      setPriorityEditTaskId(null);
-      return;
-    }
-    setPrioritySavingTaskId(taskId);
-    setPriorityEditError(null);
-    setOptimisticTasks((prev) => prev.map((row) => (row.id === taskId ? { ...row, priority: nextPriority } : row)));
+    if (!task) return {};
+    if (task.priority === nextPriority) return {};
+    setOptimisticTasks((prev) =>
+      prev.map((row) => (row.id === taskId ? { ...row, priority: nextPriority } : row)),
+    );
     try {
       const res = await updateIntegrationTaskPriority(taskId, nextPriority);
       if (res?.error) {
-        setOptimisticTasks((prev) => prev.map((row) => (row.id === taskId ? { ...row, priority: task.priority } : row)));
-        setPriorityEditError(res.error);
-        return;
+        setOptimisticTasks((prev) =>
+          prev.map((row) => (row.id === taskId ? { ...row, priority: task.priority } : row)),
+        );
+        return { error: res.error };
       }
-      setPriorityEditTaskId(null);
+      return {};
     } finally {
-      setPrioritySavingTaskId(null);
       router.refresh();
     }
   }
 
-  async function commitDueDateEdit(taskId: string, dueDateIso: string) {
+  async function saveTaskDueDate(taskId: string, dueDateIso: string): Promise<{ error?: string }> {
     const task = optimisticTasks.find((x) => x.id === taskId);
-    if (!task) return;
+    if (!task) return {};
     const previousDueDate = task.due_date;
-    setDueDateSavingTaskId(taskId);
-    setDueDateEditError(null);
-    setOptimisticTasks((prev) => prev.map((row) => (row.id === taskId ? { ...row, due_date: dueDateIso || null } : row)));
+    setOptimisticTasks((prev) =>
+      prev.map((row) => (row.id === taskId ? { ...row, due_date: dueDateIso || null } : row)),
+    );
     const fd = new FormData();
     fd.set("due_date", dueDateIso);
     try {
       const res = await updateIntegrationTaskDueDate(taskId, fd);
       if (res?.error) {
-        setOptimisticTasks((prev) => prev.map((row) => (row.id === taskId ? { ...row, due_date: previousDueDate } : row)));
-        setDueDateEditError(res.error);
+        setOptimisticTasks((prev) =>
+          prev.map((row) => (row.id === taskId ? { ...row, due_date: previousDueDate } : row)),
+        );
+        return { error: res.error };
+      }
+      return {};
+    } finally {
+      router.refresh();
+    }
+  }
+
+  async function startWorkOnTask(task: IntegrationTaskRow) {
+    if (effectiveGlobalActiveTaskId != null && effectiveGlobalActiveTaskId !== task.id) return;
+    setWorkSessionActionError(null);
+    setStartWorkTaskId(task.id);
+    try {
+      const res = await startOrReplaceActiveWorkSession(task.id);
+      if (res.error) {
+        setWorkSessionActionError(res.error);
         return;
       }
+      if (res.session) {
+        setActiveWorkSession(res.session);
+        setExpandedWorkTaskId(task.id);
+      }
     } finally {
-      setDueDateSavingTaskId(null);
-      router.refresh();
+      setStartWorkTaskId(null);
     }
   }
 
@@ -2671,274 +2236,39 @@ export function IntegrationTasksPanel({
   }
 
   function renderTaskRow(t: IntegrationTaskRow) {
-                const isDone = t.status === "done";
-                const isThisActiveTimer = effectiveGlobalActiveTaskId === t.id;
-                const hasAnotherActiveTimer = effectiveGlobalActiveTaskId != null && !isThisActiveTimer;
-                const shouldDisableStartWork = startWorkTaskId === t.id || hasAnotherActiveTimer;
-                if (expandedWorkTaskId === t.id && activeWorkSession?.integration_task_id === t.id) {
-                  return (
-                    <li key={t.id} className="min-w-0">
-                      <TaskWorkRow
-                        taskId={t.id}
-                        taskTitle={t.title}
-                        finishSessionIntegrationLabel={finishSessionIntegrationLabel}
-                        finishSessionProjectLabel={finishSessionProjectLabel}
-                        activeSession={activeWorkSession}
-                        onActiveSessionChange={setActiveWorkSession}
-                        onClose={closeWorkRow}
-                      />
-                    </li>
-                  );
-                }
-                return (
-                  <li key={t.id} className="min-w-0">
-                    <div className="integration-task-row">
-                      <div className="group">
-                        <div className="flex items-center gap-3">
-                          <div className="flex shrink-0 items-center">
-                            <TaskCompleteButton taskId={t.id} isDone={isDone} onToggleSuccess={refreshTaskSnapshotAndRoute} />
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            {titleEdit?.taskId === t.id ? (
-                              <div className="min-w-0" onClick={(e) => e.stopPropagation()}>
-                                <textarea
-                                  ref={titleRowEditRef}
-                                  value={titleEdit.draft}
-                                  rows={1}
-                                  aria-label="Edit task title"
-                                  className="input-canvas w-full min-w-0 resize-none text-sm leading-snug"
-                                  style={{
-                                    color: "var(--app-text)",
-                                    maxHeight: `${ADD_TASK_TITLE_MAX_PX}px`,
-                                  }}
-                                  onChange={(e) => {
-                                    setTitleEdit((prev) =>
-                                      prev && prev.taskId === t.id ? { ...prev, draft: e.target.value } : prev,
-                                    );
-                                    syncAddTaskTitleHeight(e.target);
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onBlur={() => {
-                                    window.setTimeout(() => {
-                                      if (skipTitleBlurRef.current) {
-                                        skipTitleBlurRef.current = false;
-                                        return;
-                                      }
-                                      if (titleCommitRef.current) return;
-                                      void commitTitleEdit(t.id, titleRowEditRef.current?.value);
-                                    }, 0);
-                                  }}
-                                  onKeyDown={(e) => {
-                                    e.stopPropagation();
-                                    if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      cancelTitleEdit();
-                                      return;
-                                    }
-                                    if (e.key === "Enter" && !e.shiftKey) {
-                                      e.preventDefault();
-                                      void commitTitleEdit(t.id, titleRowEditRef.current?.value);
-                                    }
-                                  }}
-                                />
-                                {titleEditError ? (
-                                  <p className="mt-1 text-xs" style={{ color: "var(--app-danger)" }} role="alert">
-                                    {titleEditError}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ) : (
-                              <p
-                                className={`inline-block w-fit max-w-full cursor-text break-words leading-snug ${isDone ? "font-normal line-through" : "font-medium"}`}
-                                style={{
-                                  color: isDone ? "#7d8b99" : "var(--app-text)",
-                                }}
-                                title={isDone ? undefined : "Click to edit title"}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (isDone) return;
-                                  setTitleEditError(null);
-                                  setTitleEdit({ taskId: t.id, draft: t.title });
-                                }}
-                                onKeyDown={(e) => {
-                                  if (isDone) return;
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setTitleEditError(null);
-                                    setTitleEdit({ taskId: t.id, draft: t.title });
-                                  }
-                                }}
-                                role={isDone ? undefined : "button"}
-                                tabIndex={isDone ? undefined : 0}
-                              >
-                                {t.title}
-                              </p>
-                            )}
-                            {isDone ? (
-                              <p className="mt-1 text-xs line-through" style={{ color: "#7d8b99" }}>
-                                {formatDateDisplay(t.due_date)}
-                              </p>
-                            ) : (
-                              <TaskDueDateInline
-                                task={t}
-                                pending={dueDateSavingTaskId === t.id}
-                                onSubmit={(taskId, dueDateIso) => void commitDueDateEdit(taskId, dueDateIso)}
-                              />
-                            )}
-                          </div>
-
-                          <div className="flex shrink-0 flex-col items-end gap-2">
-                            <div className={`flex items-center ${isDone ? "gap-3" : "gap-0.5"}`}>
-                              <div className="flex shrink-0 items-center gap-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                                {!isDone ? (
-                                  <button
-                                    type="button"
-                                    className="btn-cta-dark inline-flex h-8 shrink-0 items-center gap-1.5 px-2.5 text-[11px] font-medium whitespace-nowrap"
-                                    title={
-                                      hasAnotherActiveTimer
-                                        ? "You already have an active timer on another task. Finish or discard it before starting here."
-                                        : "Work on task"
-                                    }
-                                    aria-label="Work on task"
-                                    disabled={shouldDisableStartWork}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (hasAnotherActiveTimer) return;
-                                      setWorkSessionActionError(null);
-                                      setStartWorkTaskId(t.id);
-                                      void (async () => {
-                                        try {
-                                          const res = await startOrReplaceActiveWorkSession(t.id);
-                                          if (res.error) {
-                                            setWorkSessionActionError(res.error);
-                                            return;
-                                          }
-                                          if (res.session) {
-                                            setActiveWorkSession(res.session);
-                                            setExpandedWorkTaskId(t.id);
-                                          }
-                                        } finally {
-                                          setStartWorkTaskId(null);
-                                        }
-                                      })();
-                                    }}
-                                  >
-                                    <WorkOnTaskIcon />
-                                    {startWorkTaskId === t.id ? "Starting…" : "Work on task"}
-                                  </button>
-                                ) : null}
-
-                                <button
-                                  type="button"
-                                  className="btn-cta inline-flex h-8 shrink-0 items-center gap-1.5 px-2.5 text-xs font-medium whitespace-nowrap"
-                                  title="View work history"
-                                  aria-label="View work history"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openHistoryDialog(t);
-                                  }}
-                                >
-                                  History
-                                </button>
-
-                                {isDone ? (
-                                  <TaskUndoButton taskId={t.id} onUndoSuccess={refreshTaskSnapshotAndRoute} />
-                                ) : null}
-
-                                <button
-                                  type="button"
-                                  className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-[var(--app-text-muted)] transition-colors hover:bg-[var(--app-surface-alt)]"
-                                  style={{ borderColor: "var(--app-border)" }}
-                                  title="Delete task"
-                                  aria-label="Delete task"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openDeleteDialog(t);
-                                  }}
-                                >
-                                  <TrashIcon />
-                                </button>
-                              </div>
-
-                              <div
-                                className={`flex shrink-0 items-center justify-end ${
-                                  !isDone ? "min-w-[5.5rem]" : "min-w-0"
-                                }`}
-                              >
-                                {!isDone ? (
-                                  priorityEditTaskId === t.id ? (
-                                    <div
-                                      ref={priorityEditRootRef}
-                                      className="w-[7rem]"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <CanvasSelect
-                                        name={`priority-${t.id}`}
-                                        options={taskPriorityOptions}
-                                        value={t.priority}
-                                        onValueChange={(value) => {
-                                          if (value === "low" || value === "medium" || value === "high") {
-                                            void commitPriorityEdit(t.id, value);
-                                          }
-                                        }}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className={
-                                        t.priority === "high"
-                                          ? "integration-state-pill integration-state-pill--on_hold cursor-pointer"
-                                          : `task-priority-pill task-priority-pill--${t.priority} cursor-pointer`
-                                      }
-                                      disabled={prioritySavingTaskId === t.id}
-                                      aria-label="Edit priority"
-                                      title="Click to edit priority"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setPriorityEditError(null);
-                                        setPriorityEditTaskId(t.id);
-                                      }}
-                                    >
-                                      {prioritySavingTaskId === t.id
-                                        ? "Saving…"
-                                        : t.priority === "low"
-                                          ? "Low"
-                                          : t.priority === "medium"
-                                            ? "Medium"
-                                            : "High"}
-                                    </button>
-                                  )
-                                ) : (
-                                  <div className="flex w-full min-w-0 flex-col items-end text-right leading-snug">
-                                    <span className="text-sm" style={{ color: "#7d8b99" }}>
-                                      Completed on
-                                    </span>
-                                    <span className="mt-0.5 text-sm" style={{ color: "#7d8b99" }}>
-                                      {formatCompletedOnDate(t.completed_at)}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        {priorityEditError ? (
-                          <p className="mt-2 text-xs" style={{ color: "var(--app-danger)" }} role="alert">
-                            {priorityEditError}
-                          </p>
-                        ) : null}
-                        {dueDateEditError ? (
-                          <p className="mt-2 text-xs" style={{ color: "var(--app-danger)" }} role="alert">
-                            {dueDateEditError}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </li>
-                );
+    if (expandedWorkTaskId === t.id && activeWorkSession?.integration_task_id === t.id) {
+      return (
+        <li key={t.id} className="min-w-0">
+          <TaskWorkRow
+            taskId={t.id}
+            taskTitle={t.title}
+            finishSessionIntegrationLabel={finishSessionIntegrationLabel}
+            finishSessionProjectLabel={finishSessionProjectLabel}
+            activeSession={activeWorkSession}
+            onActiveSessionChange={setActiveWorkSession}
+            onClose={closeWorkRow}
+          />
+        </li>
+      );
+    }
+    return (
+      <li key={t.id} className="min-w-0">
+        <TaskRow
+          task={t}
+          effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+          starting={startWorkTaskId === t.id}
+          onStartWork={startWorkOnTask}
+          onOpenHistory={openHistoryDialog}
+          onOpenDelete={openDeleteDialog}
+          onSaveTitle={saveTaskTitle}
+          onSavePriority={saveTaskPriority}
+          onSaveDueDate={saveTaskDueDate}
+          onAfterToggleComplete={refreshTaskSnapshotAndRoute}
+          onAfterUndo={refreshTaskSnapshotAndRoute}
+          onLongPressCompleteLog={(task) => setManualLogTask(task)}
+        />
+      </li>
+    );
   }
 
   const historySessions = historyDialogTask ? (workSessionsByTaskId[historyDialogTask.id] ?? []) : [];
@@ -2946,10 +2276,10 @@ export function IntegrationTasksPanel({
   const historyTotalLabel = formatRoundedHoursLabelFromRoundedMs(historyTotalMs);
 
   return (
-    <div className={`card-canvas flex h-full min-h-0 flex-col overflow-hidden p-3 ${className}`.trim()}>
+    <div className={`${surface === "card" ? "card-canvas p-3" : "p-0"} flex h-full min-h-0 flex-col overflow-hidden ${className}`.trim()}>
       {activeTimerIsOnAnotherTaskList && globalActiveWorkSessionProp ? (
         <div
-          className="mb-2 shrink-0 flex flex-col gap-2 rounded-md border px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+          className="active-work-session-banner--live mb-2 shrink-0 flex flex-col gap-2 rounded-md border px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
           style={{
             borderColor: "color-mix(in oklab, var(--app-info) 35%, var(--app-border))",
             background: "color-mix(in oklab, var(--app-info) 6%, var(--app-surface))",
@@ -2992,86 +2322,12 @@ export function IntegrationTasksPanel({
           {workSessionActionError}
         </p>
       ) : null}
-      <form
-        action={createAction}
-        className="flex min-w-0 flex-col gap-2"
-        onSubmit={() => {
-          submitDidRunRef.current = true;
-        }}
-      >
-        <div className="add-task-inline-row flex w-full min-w-0 flex-nowrap items-start gap-2 pb-0.5">
-          <label
-            className="canvas-select-field flex min-w-0 flex-1 flex-col gap-1 text-xs"
-            style={{ color: "var(--app-text-muted)" }}
-          >
-            Title
-            <textarea
-              ref={titleTextareaRef}
-              name="title"
-              value={title}
-              required
-              rows={1}
-              placeholder="What needs to be done"
-              onChange={(e) => {
-                setTitle(e.target.value);
-                syncAddTaskTitleHeight(e.target);
-              }}
-              className="input-canvas w-full min-w-0 resize-none text-[0.6875rem] leading-snug placeholder:text-muted-canvas"
-            />
-          </label>
-
-          <label
-            className="canvas-select-field flex w-[6.75rem] shrink-0 flex-col gap-1 text-xs sm:w-[7rem]"
-            style={{ color: "var(--app-text-muted)" }}
-          >
-            Priority
-            <CanvasSelect
-              name="priority"
-              options={taskPriorityOptions}
-              value={priority}
-              onValueChange={(v) => {
-                if (v === "low" || v === "medium" || v === "high") setPriority(v);
-              }}
-            />
-          </label>
-
-          <label
-            className="canvas-select-field flex w-fit min-w-0 max-w-full shrink-0 flex-col gap-1 text-xs"
-            style={{ color: "var(--app-text-muted)" }}
-          >
-            Due
-            <DueDatePickerControl
-              variant="inline"
-              name="due_date"
-              todayIso={todayIso}
-              dueDate={dueDate}
-              onDueDateChange={setDueDate}
-              quickSelectMode
-            />
-          </label>
-
-          <div className="flex min-h-0 shrink-0 flex-col items-end">
-            <div className="flex shrink-0 flex-col gap-1">
-              <span className="select-none text-xs leading-normal text-transparent" aria-hidden="true">
-                Title
-              </span>
-              <button
-                type="submit"
-                disabled={createPending}
-                className="btn-cta-dark h-9 min-h-9 shrink-0 px-3 text-xs whitespace-nowrap"
-              >
-                {createPending ? "Adding…" : "Add task"}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {createState?.error ? (
-          <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
-            {createState.error}
-          </p>
-        ) : null}
-      </form>
+      <TaskQuickAdd
+        mode="integration"
+        projectTrackId={projectTrackId}
+        todayIso={todayIso}
+        onCreated={refreshTaskSnapshotAndRoute}
+      />
 
       <div className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
@@ -3101,22 +2357,36 @@ export function IntegrationTasksPanel({
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-0">
             <ul className="mt-0 flex list-none flex-col gap-2.5">
-              {activeTasks.length > 0 ? (
-                <li key="open-tasks-heading" className="list-none">
+              {pastDueTasks.length > 0 ? (
+                <li key="past-due-tasks-heading" className="list-none">
+                  <h4
+                    className="flex flex-wrap items-baseline gap-x-2 text-xs font-normal"
+                    style={{ color: "var(--app-text-muted)" }}
+                  >
+                    <span>Past due</span>
+                    <span className="font-medium tabular-nums text-muted-canvas">
+                      ({pastDueTasks.length})
+                    </span>
+                  </h4>
+                </li>
+              ) : null}
+              {pastDueTasks.map(renderTaskRow)}
+              {openTasks.length > 0 ? (
+                <li key="open-tasks-heading" className={`list-none${pastDueTasks.length > 0 ? " pt-2" : ""}`}>
                   <h4
                     className="flex flex-wrap items-baseline gap-x-2 text-xs font-normal"
                     style={{ color: "var(--app-text-muted)" }}
                   >
                     <span>Open</span>
                     <span className="font-medium tabular-nums text-muted-canvas">
-                      ({activeTasks.length})
+                      ({openTasks.length})
                     </span>
                   </h4>
                 </li>
               ) : null}
-              {activeTasks.map(renderTaskRow)}
+              {openTasks.map(renderTaskRow)}
               {completedTasks.length > 0 ? (
-                <li key="completed-tasks-heading" className="list-none pt-2">
+                <li key="completed-tasks-heading" className={`list-none${pastDueTasks.length + openTasks.length > 0 ? " pt-2" : ""}`}>
                   <h4
                     className="flex flex-wrap items-baseline gap-x-2 text-xs font-normal"
                     style={{ color: "var(--app-text-muted)" }}
@@ -3357,6 +2627,17 @@ export function IntegrationTasksPanel({
           </div>
         </div>
       </dialog>
+
+      <TaskOnlyManualLogDialog
+        open={manualLogTask != null}
+        taskId={manualLogTask?.id ?? ""}
+        projectTrackId={projectTrackId}
+        subtitle={`${finishSessionProjectLabel} · ${finishSessionIntegrationLabel}`}
+        initialTitle={manualLogTask?.title ?? ""}
+        onClose={() => setManualLogTask(null)}
+        onCompleteTask={(taskId) => toggleIntegrationTaskCompletion(taskId)}
+        onSaved={refreshTaskSnapshotAndRoute}
+      />
     </div>
   );
 }

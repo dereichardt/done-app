@@ -32,9 +32,11 @@ function filterRows(mode: OpenMode, rows: SerializedProjectIntegrationRow[]): Se
 
 export function ProjectSummaryIntegrationCards({
   projectId,
+  customerName,
   integrationRows,
 }: {
   projectId: string;
+  customerName: string | null;
   integrationRows: SerializedProjectIntegrationRow[];
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -118,18 +120,25 @@ export function ProjectSummaryIntegrationCards({
             className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3"
             style={{ borderColor: "var(--app-border)" }}
           >
-            <h2
-              id="project-summary-integrations-dialog-title"
-              className="text-base font-semibold"
-              style={{ color: "var(--app-text)" }}
-            >
-              {dialogTitle}
-              {openMode ? (
-                <span className="ml-2 text-sm font-medium tabular-nums text-muted-canvas">
-                  ({filtered.length})
-                </span>
+            <div className="min-w-0 flex-1 pr-2">
+              <h2
+                id="project-summary-integrations-dialog-title"
+                className="text-base font-semibold"
+                style={{ color: "var(--app-text)" }}
+              >
+                {dialogTitle}
+                {openMode ? (
+                  <span className="ml-2 text-sm font-medium tabular-nums text-muted-canvas">
+                    ({filtered.length})
+                  </span>
+                ) : null}
+              </h2>
+              {customerName ? (
+                <p className="mt-0.5 truncate text-sm text-muted-canvas" title={customerName}>
+                  {customerName}
+                </p>
               ) : null}
-            </h2>
+            </div>
             <DialogCloseButton onClick={closeDialog} />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto" style={{ background: "var(--app-surface)" }}>
@@ -142,9 +151,7 @@ export function ProjectSummaryIntegrationCards({
                   <ProjectIntegrationListItem
                     key={row.id}
                     projectId={projectId}
-                    rowId={row.id}
-                    title={row.title}
-                    meta={row.meta}
+                    row={row}
                   />
                 ))}
               </ul>

@@ -115,13 +115,16 @@ export const PROJECT_DELIVERY_PROGRESS_VALUES = [
   "in_development",
   "in_unit_testing",
   "in_fit_and_format_testing",
+  "ready_for_e2e_testing",
   "in_e2e_testing",
+  "ready_for_production",
   "in_production_cutover",
   "in_hypercare",
+  "delivered",
 ] as const;
 export type ProjectDeliveryProgress = (typeof PROJECT_DELIVERY_PROGRESS_VALUES)[number];
 
-export const PROJECT_INTEGRATION_STATE_VALUES = ["active", "blocked", "on_hold"] as const;
+export const PROJECT_INTEGRATION_STATE_VALUES = ["active", "blocked", "on_hold", "completed"] as const;
 export type ProjectIntegrationState = (typeof PROJECT_INTEGRATION_STATE_VALUES)[number];
 
 const DELIVERY_PROGRESS_LABELS: Record<ProjectDeliveryProgress, string> = {
@@ -130,15 +133,19 @@ const DELIVERY_PROGRESS_LABELS: Record<ProjectDeliveryProgress, string> = {
   in_development: "In Development",
   in_unit_testing: "In Unit Testing",
   in_fit_and_format_testing: "In Fit and Format Testing",
+  ready_for_e2e_testing: "Ready for E2E Testing",
   in_e2e_testing: "In E2E Testing",
+  ready_for_production: "Ready for Production",
   in_production_cutover: "In Production Cutover",
   in_hypercare: "In Hypercare",
+  delivered: "Delivered",
 };
 
 const INTEGRATION_STATE_LABELS: Record<ProjectIntegrationState, string> = {
   active: "Active",
   blocked: "Blocked",
   on_hold: "On Hold",
+  completed: "Completed",
 };
 
 export function isDeliveryProgress(v: string): v is ProjectDeliveryProgress {
@@ -154,9 +161,11 @@ export function formatDeliveryProgressLabel(value: string): string {
   return value.replace(/_/g, " ");
 }
 
-export function formatIntegrationStateLabel(value: string): string {
-  if (isIntegrationState(value)) return INTEGRATION_STATE_LABELS[value];
-  return value.replace(/_/g, " ");
+export function formatIntegrationStateLabel(value: string | null | undefined): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (isIntegrationState(raw)) return INTEGRATION_STATE_LABELS[raw];
+  return raw.replace(/_/g, " ");
 }
 
 /** Options for CanvasSelect: delivery progress dropdown. */

@@ -2,7 +2,8 @@
 
 import { deleteProjectIntegration } from "@/lib/actions/projects";
 import Link from "next/link";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 
 type FormState = { error?: string } | undefined;
 
@@ -22,7 +23,7 @@ export function DeleteIntegrationConfirmForm({
   projectId: string;
   projectIntegrationId: string;
 }) {
-  const [state, formAction] = useFormState(deleteProjectIntegration, undefined as FormState);
+  const [state, formAction] = useActionState(deleteProjectIntegration, undefined as FormState);
 
   return (
     <form action={formAction} className="mt-auto flex flex-col pt-8">

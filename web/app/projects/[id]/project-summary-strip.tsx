@@ -15,21 +15,45 @@ const cardShell =
 const topLeft = "shrink-0 self-start text-left";
 const valueRegion = "flex min-h-[2.5rem] flex-1 flex-col items-center justify-center px-1 text-center";
 
+function formatProjectCompletedOn(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
 export function ProjectSummaryStrip({
   projectId,
+  customerName,
+  completedAt,
   phaseStatus,
   integrationRows,
 }: {
   projectId: string;
+  customerName: string | null;
+  completedAt: string | null;
   phaseStatus: PhaseStatusResult;
   integrationRows: SerializedProjectIntegrationRow[];
 }) {
+  const projectCompleted = completedAt != null && completedAt.length > 0;
+
   return (
     <section className="mt-10" aria-label="Project summary">
       <h2 className="section-heading">Summary</h2>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch xl:grid-cols-4">
         <div className={cardShell}>
-          {phaseStatus.kind === "empty" ? (
+          {projectCompleted ? (
+            <>
+              <div className={topLeft}>
+                <p className={labelSm}>Current phase</p>
+              </div>
+              <div className={valueRegion}>
+                <p className={valueCenter} style={{ color: "var(--app-text)" }}>
+                  Completed
+                </p>
+              </div>
+            </>
+          ) : null}
+          {!projectCompleted && phaseStatus.kind === "empty" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>Current phase</p>
@@ -42,7 +66,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "unset" ? (
+          {!projectCompleted && phaseStatus.kind === "unset" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>Current phase</p>
@@ -57,7 +81,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "active" ? (
+          {!projectCompleted && phaseStatus.kind === "active" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>Current phase</p>
@@ -69,7 +93,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "upcoming" ? (
+          {!projectCompleted && phaseStatus.kind === "upcoming" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>Next phase</p>
@@ -81,7 +105,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "complete" ? (
+          {!projectCompleted && phaseStatus.kind === "complete" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>Phase</p>
@@ -96,7 +120,19 @@ export function ProjectSummaryStrip({
         </div>
 
         <div className={cardShell}>
-          {phaseStatus.kind === "empty" ? (
+          {projectCompleted ? (
+            <>
+              <div className={topLeft}>
+                <p className={labelSm}>Completed on</p>
+              </div>
+              <div className={valueRegion}>
+                <p className={valueCenter} style={{ color: "var(--app-text)" }}>
+                  {formatProjectCompletedOn(completedAt ?? "")}
+                </p>
+              </div>
+            </>
+          ) : null}
+          {!projectCompleted && phaseStatus.kind === "empty" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>Phase dates</p>
@@ -109,7 +145,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "unset" ? (
+          {!projectCompleted && phaseStatus.kind === "unset" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>Phase dates</p>
@@ -122,7 +158,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "active" ? (
+          {!projectCompleted && phaseStatus.kind === "active" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>{`Ends ${formatPhaseDate(phaseStatus.endDate)}`}</p>
@@ -134,7 +170,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "upcoming" ? (
+          {!projectCompleted && phaseStatus.kind === "upcoming" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>{`Ends ${formatPhaseDate(phaseStatus.endDate)}`}</p>
@@ -146,7 +182,7 @@ export function ProjectSummaryStrip({
               </div>
             </>
           ) : null}
-          {phaseStatus.kind === "complete" ? (
+          {!projectCompleted && phaseStatus.kind === "complete" ? (
             <>
               <div className={topLeft}>
                 <p className={labelSm}>{`Ended ${formatPhaseDate(phaseStatus.endedDate)}`}</p>
@@ -160,7 +196,11 @@ export function ProjectSummaryStrip({
           ) : null}
         </div>
 
-        <ProjectSummaryIntegrationCards projectId={projectId} integrationRows={integrationRows} />
+        <ProjectSummaryIntegrationCards
+          projectId={projectId}
+          customerName={customerName}
+          integrationRows={integrationRows}
+        />
       </div>
     </section>
   );

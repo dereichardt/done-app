@@ -1,9 +1,7 @@
-export default function TasksPage() {
-  return (
-    <div>
-      <h1 className="heading-page">Tasks</h1>
-      <p className="subheading-page mt-2">Coming soon.</p>
-    </div>
-  );
-}
+import { redirect } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+
+export default function TasksPageRedirect() {
+  redirect("/work");
+}

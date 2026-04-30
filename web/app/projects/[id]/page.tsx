@@ -1,13 +1,26 @@
 import { ProjectIntegrationsSection } from "@/components/project-integrations-section";
 import { loadActiveWorkSessionIndicator } from "@/lib/actions/integration-tasks";
+import {
+  fetchProjectTrackTaskSnapshot,
+  type ActiveWorkSessionDTO,
+} from "@/lib/actions/integration-tasks";
+import {
+  IntegrationTasksPanel,
+  type IntegrationTaskRow,
+  type IntegrationTaskWorkSessionRow,
+} from "@/components/integration-tasks-panel";
 import { createClient } from "@/lib/supabase/server";
 import { serializeProjectIntegrationRow } from "@/lib/project-integration-row";
 import { resolvePhaseStatus, todayISO } from "@/lib/project-phase-status";
+import { loadProjectActivity } from "@/lib/project-activity";
 import { notFound } from "next/navigation";
 import { ProjectDetailHeader } from "./project-detail-header";
+import { ProjectQuickActionsBar } from "./project-quick-actions-bar";
 import { ProjectSummaryStrip } from "./project-summary-strip";
 import { ProjectTimeline } from "./project-timeline";
+import { ProjectActivityFeed } from "./project-activity-feed";
 import { normalizeProjectColorKey, type ProjectColorKey } from "@/lib/project-colors";
+import { loadUserPreferences } from "@/lib/actions/user-preferences";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -18,6 +31,8 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
+  const prefsRes = await loadUserPreferences();
+  const userTodayIso = todayISO(prefsRes.preferences.timezone);
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
@@ -25,6 +40,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       `
       id,
       customer_name,
+      completed_at,
       project_type_id,
       primary_role_id,
       project_color_key,
@@ -83,9 +99,16 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     .eq("project_id", id)
     .order("created_at", { ascending: true });
 
+  const { data: pmTrack } = await supabase
+    .from("project_tracks")
+    .select("id, name")
+    .eq("project_id", id)
+    .eq("kind", "project_management")
+    .maybeSingle();
+
   const piIds = (projectIntegrationRows ?? []).map((r) => r.id);
 
-  const [{ data: latestUpdates }, { data: openTasks }] = await Promise.all([
+  const [{ data: latestUpdates }, { data: integrationTracks }] = await Promise.all([
     piIds.length === 0
       ? Promise.resolve({
           data: null as { project_integration_id: string; body: string; created_at: string }[] | null,
@@ -95,13 +118,30 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           .select("project_integration_id, body, created_at")
           .in("project_integration_id", piIds),
     piIds.length === 0
-      ? Promise.resolve({ data: null as { project_integration_id: string }[] | null })
+      ? Promise.resolve({ data: null as { id: string; project_integration_id: string | null }[] | null })
       : supabase
-          .from("integration_tasks")
-          .select("project_integration_id")
-          .eq("status", "open")
+          .from("project_tracks")
+          .select("id, project_integration_id")
+          .eq("kind", "integration")
           .in("project_integration_id", piIds),
   ]);
+
+  const trackIds = (integrationTracks ?? []).map((row) => row.id);
+  const { data: openTasks } =
+    trackIds.length === 0
+      ? { data: null as { project_track_id: string }[] | null }
+      : await supabase
+          .from("integration_tasks")
+          .select("project_track_id")
+          .eq("status", "open")
+          .in("project_track_id", trackIds);
+
+  const projectIntegrationIdByTrackId = new Map<string, string>();
+  for (const track of integrationTracks ?? []) {
+    if (track.project_integration_id) {
+      projectIntegrationIdByTrackId.set(track.id, track.project_integration_id);
+    }
+  }
 
   const latestById = new Map<string, { body: string; created_at: string }>();
   for (const row of latestUpdates ?? []) {
@@ -115,7 +155,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const openTaskCountById = new Map<string, number>();
   for (const t of openTasks ?? []) {
-    const pid = t.project_integration_id;
+    const pid = projectIntegrationIdByTrackId.get(t.project_track_id);
     if (!pid) continue;
     openTaskCountById.set(pid, (openTaskCountById.get(pid) ?? 0) + 1);
   }
@@ -138,6 +178,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       start_date: p.start_date,
       end_date: p.end_date,
     })),
+    userTodayIso,
   );
 
   const integrationRowsSerialized = (projectIntegrationRows ?? []).map((row) => {
@@ -152,17 +193,24 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     };
   });
 
-  const activeIndicatorRes = await loadActiveWorkSessionIndicator();
+  const [activeIndicatorRes, initialActivity, pmSnapshotRes] = await Promise.all([
+    loadActiveWorkSessionIndicator(),
+    loadProjectActivity(id, { limitPerSource: 50 }),
+    pmTrack ? fetchProjectTrackTaskSnapshot(pmTrack.id) : Promise.resolve({ snapshot: undefined, error: undefined }),
+  ]);
   const initialActiveSessionIndicator =
     activeIndicatorRes.indicator != null && activeIndicatorRes.indicator.project_id === id
       ? activeIndicatorRes.indicator
       : null;
+  const pmSnapshot = pmSnapshotRes.snapshot;
+  const pmTrackLabel = (pmTrack?.name ?? "").trim() || "Project Management";
 
   return (
     <div>
       <ProjectDetailHeader
         projectId={id}
         customerName={project.customer_name}
+        completedAt={project.completed_at ?? null}
         typeLabel={typeName}
         roleLabel={roleName}
         initialProjectTypeId={project.project_type_id}
@@ -172,12 +220,24 @@ export default async function ProjectDetailPage({ params }: PageProps) {
         projectRoles={projectRoles ?? []}
       />
 
-      <ProjectSummaryStrip projectId={id} phaseStatus={phaseStatus} integrationRows={integrationRowsSerialized} />
+      <ProjectQuickActionsBar
+        projectId={id}
+        projectCustomerName={project.customer_name ?? ""}
+        integrationRows={integrationRowsSerialized}
+      />
+
+      <ProjectSummaryStrip
+        projectId={id}
+        customerName={project.customer_name ?? null}
+        completedAt={project.completed_at ?? null}
+        phaseStatus={phaseStatus}
+        integrationRows={integrationRowsSerialized}
+      />
 
       <section className="mt-10">
         <ProjectTimeline
           projectId={id}
-          todayIso={todayISO()}
+          todayIso={userTodayIso}
           initialPhases={(phases ?? []).map((p) => ({
             id: p.id,
             name: p.name,
@@ -195,9 +255,54 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           }
           projectId={id}
           rows={integrationRowsSerialized}
+          todayIso={userTodayIso}
           projectCustomerName={project.customer_name ?? ""}
           initialActiveSessionIndicator={initialActiveSessionIndicator}
         />
+      </section>
+
+      <section className="mt-10">
+        <div className="flex flex-col gap-2">
+          <h2 className="section-heading">Project Management</h2>
+          {pmTrack && pmSnapshot ? (
+            <div className="h-[min(40rem,65vh)] max-h-[85vh] min-h-0 shrink-0">
+              <IntegrationTasksPanel
+                className="h-full min-h-0"
+                projectTrackId={pmTrack.id}
+                tasks={pmSnapshot.tasks as IntegrationTaskRow[]}
+                workSessionsByTaskId={pmSnapshot.workSessionsByTaskId as Record<
+                  string,
+                  IntegrationTaskWorkSessionRow[]
+                >}
+                activeWorkSession={pmSnapshot.activeWorkSession as ActiveWorkSessionDTO | null}
+                globalActiveWorkSession={pmSnapshot.globalActiveWorkSession as ActiveWorkSessionDTO | null}
+                globalActiveWorkSessionTaskTitle={pmSnapshot.globalActiveWorkSessionTaskTitle ?? null}
+                globalActiveWorkSessionIntegrationLabel={
+                  pmSnapshot.globalActiveWorkSessionIntegrationLabel ?? null
+                }
+                globalActiveWorkSessionProjectName={pmSnapshot.globalActiveWorkSessionProjectName ?? null}
+                finishSessionIntegrationLabel={pmTrackLabel}
+                finishSessionProjectLabel={project.customer_name ?? ""}
+                todayIso={userTodayIso}
+              />
+            </div>
+          ) : (
+            <div className="card-canvas p-4">
+              <p
+                className="text-sm"
+                style={{
+                  color: pmSnapshotRes.error ? "var(--app-danger)" : "var(--app-text-muted)",
+                }}
+              >
+                {pmSnapshotRes.error ?? "Project Management track is not available yet."}
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-10">
+        <ProjectActivityFeed projectId={id} initialEvents={initialActivity} />
       </section>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { loadProjectHeader, signOut } from "@/lib/actions/projects";
 import { projectColorCssVar, type ProjectColorKey } from "@/lib/project-colors";
 
@@ -64,7 +64,7 @@ function CatalogIcon() {
 const navItems: NavEntry[] = [
   { key: "home", label: "Home", href: "/home", icon: <HomeIcon /> },
   { key: "projects", label: "Projects", href: "/projects", icon: <FolderIcon /> },
-  { key: "tasks", label: "Tasks", href: "/tasks", icon: <TasksIcon /> },
+  { key: "work", label: "Work", href: "/work", icon: <TasksIcon /> },
   {
     key: "integration-catalog",
     label: "Catalog",
@@ -97,6 +97,8 @@ export function ProjectsShell({
   const [projectTitle, setProjectTitle] = useState<string | null>(null);
   const [projectColorKey, setProjectColorKey] = useState<ProjectColorKey | null>(null);
   const [showProjectTitleInHeader, setShowProjectTitleInHeader] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDetailsElement>(null);
 
   const projectIdFromPath = useMemo(() => {
     if (!pathname) return null;
@@ -108,7 +110,13 @@ export function ProjectsShell({
   }, [pathname]);
 
   const isProjectsRoute = pathname === "/projects" || pathname?.startsWith("/projects/");
+  const isTasksRoute =
+    pathname === "/work" ||
+    (pathname?.startsWith("/work/") ?? false) ||
+    pathname === "/tasks" ||
+    (pathname?.startsWith("/tasks/") ?? false);
   const isIntegrationCatalogRoute = pathname?.startsWith("/integrations/catalog") ?? false;
+  const isSettingsRoute = pathname === "/settings" || (pathname?.startsWith("/settings/") ?? false);
   const isProjectDetailRoute = projectIdFromPath != null;
 
   useEffect(() => {
@@ -178,13 +186,37 @@ export function ProjectsShell({
     return () => observer.disconnect();
   }, [isProjectDetailRoute, projectIdFromPath]);
 
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const menu = userMenuRef.current;
+      if (!menu?.open) return;
+      const target = e.target;
+      if (target instanceof Node && menu.contains(target)) return;
+      menu.removeAttribute("open");
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [userMenuOpen]);
+
   const headerLeftLabel = useMemo(() => {
     if (!pathname) return "Done";
     if (isProjectDetailRoute) return showProjectTitleInHeader ? projectTitle ?? "Project" : "Project";
+    if (isSettingsRoute) return "Settings";
     if (isIntegrationCatalogRoute) return "Catalog";
+    if (isTasksRoute) return "Work";
     if (isProjectsRoute) return "Projects";
     return "Done";
-  }, [pathname, isProjectDetailRoute, isIntegrationCatalogRoute, isProjectsRoute, showProjectTitleInHeader, projectTitle]);
+  }, [
+    pathname,
+    isProjectDetailRoute,
+    isSettingsRoute,
+    isIntegrationCatalogRoute,
+    isTasksRoute,
+    isProjectsRoute,
+    showProjectTitleInHeader,
+    projectTitle,
+  ]);
 
   const headerSurfaceStyle = useMemo(
     () =>
@@ -316,14 +348,21 @@ export function ProjectsShell({
                 headerLeftLabel
               )}
             </Link>
-            <details className="user-menu">
+            <details
+              ref={userMenuRef}
+              className="user-menu"
+              onToggle={(e) => setUserMenuOpen((e.target as HTMLDetailsElement).open)}
+            >
               <summary className="user-menu-summary" aria-label="Account menu">
                 <span className="user-avatar" aria-hidden="true">
                   {userInitial.slice(0, 1).toUpperCase()}
                 </span>
               </summary>
               <div className="user-menu-panel">
-                <form action={signOut}>
+                <Link href="/settings" className="user-menu-link">
+                  Settings
+                </Link>
+                <form action={signOut} className="user-menu-signout-form">
                   <button type="submit" className="user-menu-signout">
                     Sign out
                   </button>

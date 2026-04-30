@@ -57,6 +57,10 @@ Do not set `AUTH_PASSWORD_LOGIN=true` in production unless you intentionally wan
 - `npm run build` — production build
 - `npm run lint` — ESLint
 
+## AI features
+
+AI-powered features (e.g. **Summarize activity** on the project detail page) use the [Vercel AI SDK](https://ai-sdk.dev/) with OpenAI. Set `OPENAI_API_KEY` in `.env.local` (server-only; never prefix with `NEXT_PUBLIC_`). The shared client lives at [`lib/ai/client.ts`](./lib/ai/client.ts); change the model there to swap providers for all features at once.
+
 ## Notes
 
 - If your account existed before the migration ran, open **Projects** once; `ensureDefaultLookups` backfills missing type/role rows.

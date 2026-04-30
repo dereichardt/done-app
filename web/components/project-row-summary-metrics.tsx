@@ -82,11 +82,42 @@ function phaseDatesColumn(phaseStatus: PhaseStatusResult) {
   );
 }
 
+function formatDurationDaysLabel(n: number | null): string {
+  if (n == null) return "—";
+  if (n === 0) return "0 days";
+  if (n === 1) return "1 day";
+  return `${n} days`;
+}
+
 export function ProjectRowSummaryMetrics({
   phaseStatus,
   activeIntegrationCount,
   blockedOnHoldCount,
-}: ProjectListRowSummary) {
+  totalIntegrationCount,
+  engagementPhaseSpan,
+  metricsVariant = "default",
+}: ProjectListRowSummary & { metricsVariant?: "default" | "completed" }) {
+  if (metricsVariant === "completed") {
+    const { firstPhaseStartDate, lastPhaseEndDate, durationDays } = engagementPhaseSpan;
+    return (
+      <div
+        className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 sm:gap-x-4"
+        aria-label="Completed engagement metrics"
+      >
+        <MetricCol
+          label="Start date"
+          value={firstPhaseStartDate ? formatPhaseDate(firstPhaseStartDate) : "—"}
+        />
+        <MetricCol
+          label="End date"
+          value={lastPhaseEndDate ? formatPhaseDate(lastPhaseEndDate) : "—"}
+        />
+        <MetricCol label="Duration" value={formatDurationDaysLabel(durationDays)} />
+        <MetricCol label="Integrations" value={totalIntegrationCount} />
+      </div>
+    );
+  }
+
   return (
     <div
       className="flex shrink-0 items-center justify-end gap-x-3 sm:gap-x-4"

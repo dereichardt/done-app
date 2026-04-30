@@ -13,6 +13,7 @@ import {
   isImplementationNotesHtmlEmpty,
   sanitizeImplementationNotesHtml,
 } from "@/lib/sanitize-implementation-notes";
+import { defaultProjectManagementTrackName } from "@/lib/project-tracks";
 import type { CatalogIntegrationDetailDTO } from "@/lib/load-catalog-integration-detail";
 import { loadCatalogIntegrationDetail } from "@/lib/load-catalog-integration-detail";
 import { revalidatePath } from "next/cache";
@@ -79,6 +80,17 @@ export async function createProject(
     return { error: "Invalid project color" };
   }
 
+  // Reserve a sort position at the end of the active list.
+  const { data: orderRow } = await supabase
+    .from("projects")
+    .select("active_dashboard_order")
+    .eq("owner_id", user.id)
+    .is("completed_at", null)
+    .order("active_dashboard_order", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder = orderRow?.active_dashboard_order != null ? orderRow.active_dashboard_order + 1 : 0;
+
   const { data: project, error } = await supabase
     .from("projects")
     .insert({
@@ -87,6 +99,7 @@ export async function createProject(
       project_type_id: project_type_id || null,
       primary_role_id: primary_role_id || null,
       project_color_key,
+      active_dashboard_order: nextOrder,
     })
     .select("id")
     .single();
@@ -102,6 +115,16 @@ export async function createProject(
 
   const { error: phaseError } = await supabase.from("project_phases").insert(phases);
   if (phaseError) return { error: phaseError.message };
+
+  const { error: pmTrackError } = await supabase.from("project_tracks").insert({
+    project_id: project.id,
+    kind: "project_management",
+    name: defaultProjectManagementTrackName(),
+    sort_order: 0,
+    integration_id: null,
+    project_integration_id: null,
+  });
+  if (pmTrackError) return { error: pmTrackError.message };
 
   revalidatePath("/projects");
   redirect(`/projects/${project.id}`);
@@ -513,6 +536,28 @@ export async function createIntegrationAndLink(
     return { error: linkError?.message ?? "Could not link integration" };
   }
 
+  const { data: maxTrackRow } = await supabase
+    .from("project_tracks")
+    .select("sort_order")
+    .eq("project_id", projectId)
+    .eq("kind", "integration")
+    .order("sort_order", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  const nextTrackSortOrder =
+    maxTrackRow?.sort_order != null ? Number(maxTrackRow.sort_order) + 1 : 1;
+
+  const { error: trackError } = await supabase.from("project_tracks").insert({
+    project_id: projectId,
+    kind: "integration",
+    name: parsed.row.name,
+    sort_order: nextTrackSortOrder,
+    integration_id: created.id,
+    project_integration_id: linkRow.id,
+  });
+
+  if (trackError) return { error: trackError.message };
+
   revalidatePath(`/projects/${projectId}`);
   revalidatePath(`/projects/${projectId}/integrations/new`);
   revalidatePath("/projects");
@@ -827,7 +872,7 @@ export async function patchProjectIntegrationStatus(
 
   const { data: row } = await supabase
     .from("project_integrations")
-    .select("id, project_id")
+    .select("id, project_id, delivery_progress")
     .eq("id", projectIntegrationId)
     .maybeSingle();
 
@@ -846,6 +891,66 @@ export async function patchProjectIntegrationStatus(
     .from("project_integrations")
     .update({
       delivery_progress: dp,
+      integration_state: st,
+      integration_state_reason: st === "active" ? null : reason || null,
+    })
+    .eq("id", projectIntegrationId);
+
+  if (error) return { error: error.message };
+
+  if (row.delivery_progress !== dp) {
+    const { error: transitionError } = await supabase.from("delivery_progress_transitions").insert({
+      project_integration_id: projectIntegrationId,
+      from_delivery_progress: row.delivery_progress,
+      to_delivery_progress: dp,
+    });
+    if (transitionError) return { error: transitionError.message };
+  }
+
+  revalidatePath(`/projects/${row.project_id}`);
+  revalidatePath(`/projects/${row.project_id}/integrations/${projectIntegrationId}`);
+  return {};
+}
+
+export async function patchProjectIntegrationStateOnly(
+  projectIntegrationId: string,
+  input: {
+    integration_state: string;
+    integration_state_reason: string | null;
+  },
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const st = String(input.integration_state ?? "").trim();
+  const reasonRaw = input.integration_state_reason;
+  const reason = reasonRaw == null ? "" : String(reasonRaw).trim();
+
+  if (!isIntegrationState(st)) return { error: "Invalid integration state" };
+
+  const { data: row } = await supabase
+    .from("project_integrations")
+    .select("id, project_id")
+    .eq("id", projectIntegrationId)
+    .maybeSingle();
+
+  if (!row) return { error: "Not found" };
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", row.project_id)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (!project) return { error: "Not found" };
+
+  const { error } = await supabase
+    .from("project_integrations")
+    .update({
       integration_state: st,
       integration_state_reason: st === "active" ? null : reason || null,
     })
@@ -1066,6 +1171,191 @@ export async function fetchCatalogIntegrationDetail(
   const data = await loadCatalogIntegrationDetail(supabase, user.id, id);
   if (!data) return { ok: false, error: "Not found" };
   return { ok: true, data };
+}
+
+export async function completeProject(
+  projectId: string,
+  options: { completeTasks: boolean; completeIntegrations: boolean },
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+  if (!project) return { error: "Project not found" };
+
+  const { error: updateErr } = await supabase
+    .from("projects")
+    .update({ completed_at: new Date().toISOString(), active_dashboard_order: null })
+    .eq("id", projectId)
+    .eq("owner_id", user.id)
+    .is("completed_at", null);
+  if (updateErr) return { error: updateErr.message };
+
+  if (options.completeIntegrations) {
+    const { error: intErr } = await supabase
+      .from("project_integrations")
+      .update({
+        integration_state: "completed",
+        delivery_progress: "delivered",
+        integration_state_reason: null,
+      })
+      .eq("project_id", projectId)
+      .or("integration_state.neq.completed,delivery_progress.neq.delivered");
+    if (intErr) return { error: intErr.message };
+  }
+
+  if (options.completeTasks) {
+    const { data: trackRows } = await supabase
+      .from("project_tracks")
+      .select("id")
+      .eq("project_id", projectId);
+    const trackIds = (trackRows ?? []).map((r) => r.id);
+    if (trackIds.length > 0) {
+      const { error: taskErr } = await supabase
+        .from("integration_tasks")
+        .update({ status: "done", completed_at: new Date().toISOString() })
+        .in("project_track_id", trackIds)
+        .eq("status", "open");
+      if (taskErr) return { error: taskErr.message };
+    }
+  }
+
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}/integrations`);
+  return {};
+}
+
+export async function reopenProject(projectId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const { data: maxRow } = await supabase
+    .from("projects")
+    .select("active_dashboard_order")
+    .eq("owner_id", user.id)
+    .is("completed_at", null)
+    .order("active_dashboard_order", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder = maxRow?.active_dashboard_order != null ? maxRow.active_dashboard_order + 1 : 0;
+
+  const { error } = await supabase
+    .from("projects")
+    .update({ completed_at: null, active_dashboard_order: nextOrder })
+    .eq("id", projectId)
+    .eq("owner_id", user.id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function deleteProject(projectId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+  if (!project) return { error: "Project not found" };
+
+  // Capture project_only integration IDs before cascade removes them
+  const { data: piRows } = await supabase
+    .from("project_integrations")
+    .select("integration_id")
+    .eq("project_id", projectId);
+
+  const integrationIds = [...new Set((piRows ?? []).map((r) => r.integration_id).filter(Boolean))];
+
+  let projectOnlyIntegrationIds: string[] = [];
+  if (integrationIds.length > 0) {
+    const { data: integRows } = await supabase
+      .from("integrations")
+      .select("id, catalog_visibility")
+      .in("id", integrationIds)
+      .eq("owner_id", user.id);
+    projectOnlyIntegrationIds = (integRows ?? [])
+      .filter((r) => r.catalog_visibility === "project_only")
+      .map((r) => r.id);
+  }
+
+  const { error: deleteErr } = await supabase
+    .from("projects")
+    .delete()
+    .eq("id", projectId)
+    .eq("owner_id", user.id);
+  if (deleteErr) return { error: deleteErr.message };
+
+  // Clean up orphaned project_only integration definitions
+  for (const integId of projectOnlyIntegrationIds) {
+    const { count } = await supabase
+      .from("project_integrations")
+      .select("*", { count: "exact", head: true })
+      .eq("integration_id", integId);
+    if ((count ?? 0) === 0) {
+      await supabase.from("integrations").delete().eq("id", integId).eq("owner_id", user.id);
+    }
+  }
+
+  revalidatePath("/projects");
+  redirect("/projects");
+}
+
+export async function reorderActiveProjects(orderedIds: string[]): Promise<{ error?: string }> {
+  if (orderedIds.length === 0) return {};
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  // Verify all IDs are active projects owned by this user.
+  const { data: ownedRows } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("owner_id", user.id)
+    .is("completed_at", null)
+    .in("id", orderedIds);
+  const ownedIds = new Set((ownedRows ?? []).map((r) => r.id));
+  if (orderedIds.some((id) => !ownedIds.has(id))) {
+    return { error: "One or more projects are invalid or not active" };
+  }
+
+  // Batch update: set active_dashboard_order = index for each id.
+  const updates = orderedIds.map((id, index) =>
+    supabase
+      .from("projects")
+      .update({ active_dashboard_order: index })
+      .eq("id", id)
+      .eq("owner_id", user.id),
+  );
+  const results = await Promise.all(updates);
+  for (const { error } of results) {
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/projects");
+  return {};
 }
 
 export async function signOut() {

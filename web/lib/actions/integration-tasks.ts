@@ -18,33 +18,62 @@ function isTaskPriority(v: string): v is TaskPriority {
   return (TASK_PRIORITIES as readonly string[]).includes(v);
 }
 
-async function loadOwnedProjectIntegration(
+type OwnedProjectTrack = {
+  id: string;
+  project_id: string;
+  project_integration_id: string | null;
+};
+
+async function loadOwnedProjectTrack(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  projectIntegrationId: string,
-): Promise<{ id: string; project_id: string } | null> {
-  const { data: pi } = await supabase
-    .from("project_integrations")
-    .select("id, project_id")
-    .eq("id", projectIntegrationId)
+  projectTrackId: string,
+): Promise<OwnedProjectTrack | null> {
+  const { data: track } = await supabase
+    .from("project_tracks")
+    .select("id, project_id, project_integration_id")
+    .eq("id", projectTrackId)
     .maybeSingle();
 
-  if (!pi) return null;
+  if (!track) return null;
 
   const { data: project } = await supabase
     .from("projects")
     .select("id")
-    .eq("id", pi.project_id)
+    .eq("id", track.project_id)
     .eq("owner_id", userId)
     .maybeSingle();
 
   if (!project) return null;
-  return pi;
+  return {
+    id: track.id,
+    project_id: track.project_id,
+    project_integration_id: track.project_integration_id ?? null,
+  };
 }
 
-async function revalidateIntegrationPaths(projectId: string, projectIntegrationId: string) {
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath(`/projects/${projectId}/integrations/${projectIntegrationId}`);
+async function loadOwnedIntegrationTrackByProjectIntegration(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  projectIntegrationId: string,
+): Promise<OwnedProjectTrack | null> {
+  const { data: track } = await supabase
+    .from("project_tracks")
+    .select("id, project_id, project_integration_id")
+    .eq("project_integration_id", projectIntegrationId)
+    .eq("kind", "integration")
+    .maybeSingle();
+  if (!track) return null;
+  return loadOwnedProjectTrack(supabase, userId, track.id);
+}
+
+async function revalidateTrackPaths(track: OwnedProjectTrack) {
+  revalidatePath("/work");
+  revalidatePath("/tasks");
+  revalidatePath(`/projects/${track.project_id}`);
+  if (track.project_integration_id) {
+    revalidatePath(`/projects/${track.project_id}/integrations/${track.project_integration_id}`);
+  }
 }
 
 export type ActiveWorkSessionDTO = {
@@ -75,32 +104,45 @@ async function loadIntegrationTaskFinishContext(
 ): Promise<{ title: string; integrationLabel: string; projectName: string } | null> {
   const { data: task, error: taskErr } = await supabase
     .from("integration_tasks")
-    .select("title, project_integration_id")
+    .select("title, project_track_id")
     .eq("id", integrationTaskId)
     .maybeSingle();
   if (taskErr || !task) return null;
 
-  const { data: pi, error: piErr } = await supabase
-    .from("project_integrations")
-    .select("project_id, integration_id")
-    .eq("id", task.project_integration_id)
+  const { data: track, error: trackErr } = await supabase
+    .from("project_tracks")
+    .select("project_id, project_integration_id")
+    .eq("id", task.project_track_id)
     .maybeSingle();
-  if (piErr || !pi) return null;
+  if (trackErr || !track) return null;
 
   const { data: project } = await supabase
     .from("projects")
     .select("customer_name")
-    .eq("id", pi.project_id)
+    .eq("id", track.project_id)
     .eq("owner_id", userId)
     .maybeSingle();
   if (!project) return null;
 
-  const { data: integ } = await supabase
-    .from("integrations")
-    .select("name, integration_code, integrating_with, direction")
-    .eq("id", pi.integration_id)
-    .eq("owner_id", userId)
-    .maybeSingle();
+  let integ:
+    | { name: string | null; integration_code: string | null; integrating_with: string | null; direction: string | null }
+    | null = null;
+  if (track.project_integration_id) {
+    const { data: pi } = await supabase
+      .from("project_integrations")
+      .select("integration_id")
+      .eq("id", track.project_integration_id)
+      .maybeSingle();
+    if (pi?.integration_id) {
+      const { data } = await supabase
+        .from("integrations")
+        .select("name, integration_code, integrating_with, direction")
+        .eq("id", pi.integration_id)
+        .eq("owner_id", userId)
+        .maybeSingle();
+      integ = data ?? null;
+    }
+  }
 
   const integrationLabel =
     integ != null
@@ -109,8 +151,8 @@ async function loadIntegrationTaskFinishContext(
           integrating_with: integ.integrating_with,
           name: integ.name,
           direction: integ.direction,
-        }) || integ.name
-      : "";
+        }) || integ.name || "Integration"
+      : "Project Management";
 
   return {
     title: task.title ?? "",
@@ -135,7 +177,8 @@ export async function loadGlobalActiveIntegrationTaskFinishContext(
 export type MyActiveWorkSessionListItem = {
   integration_task_id: string;
   task_title: string;
-  project_integration_id: string;
+  project_track_id: string;
+  project_integration_id: string | null;
   project_id: string;
   customer_name: string | null;
   started_at: string;
@@ -164,24 +207,24 @@ export async function listMyActiveWorkSessions(): Promise<{
 
   const { data: task, error: taskErr } = await supabase
     .from("integration_tasks")
-    .select("id, title, project_integration_id")
+    .select("id, title, project_track_id")
     .eq("id", activeRow.integration_task_id)
     .maybeSingle();
 
   if (taskErr || !task) return { sessions: [] };
 
-  const { data: pi, error: piErr } = await supabase
-    .from("project_integrations")
-    .select("project_id")
-    .eq("id", task.project_integration_id)
+  const { data: track, error: trackErr } = await supabase
+    .from("project_tracks")
+    .select("project_id, project_integration_id")
+    .eq("id", task.project_track_id)
     .maybeSingle();
 
-  if (piErr || !pi) return { sessions: [] };
+  if (trackErr || !track) return { sessions: [] };
 
   const { data: project, error: projErr } = await supabase
     .from("projects")
     .select("customer_name")
-    .eq("id", pi.project_id)
+    .eq("id", track.project_id)
     .eq("owner_id", user.id)
     .maybeSingle();
 
@@ -193,8 +236,9 @@ export async function listMyActiveWorkSessions(): Promise<{
       {
         integration_task_id: activeRow.integration_task_id,
         task_title: task.title,
-        project_integration_id: task.project_integration_id,
-        project_id: pi.project_id,
+        project_track_id: task.project_track_id,
+        project_integration_id: track.project_integration_id ?? null,
+        project_id: track.project_id,
         customer_name: project.customer_name ?? null,
         started_at: activeRow.started_at,
         paused_ms_accumulated: Number(activeRow.paused_ms_accumulated ?? 0),
@@ -207,7 +251,8 @@ export async function listMyActiveWorkSessions(): Promise<{
 /** Active timer + labels for integration/project row indicators (at most one per signed-in user). */
 export type ActiveWorkSessionIndicatorDTO = {
   integration_task_id: string;
-  project_integration_id: string;
+  project_track_id: string;
+  project_integration_id: string | null;
   project_id: string;
   started_at: string;
   paused_ms_accumulated: number;
@@ -233,6 +278,7 @@ export async function loadActiveWorkSessionIndicator(): Promise<{
   return {
     indicator: {
       integration_task_id: s.integration_task_id,
+      project_track_id: s.project_track_id,
       project_integration_id: s.project_integration_id,
       project_id: s.project_id,
       started_at: s.started_at,
@@ -264,6 +310,7 @@ export type IntegrationTaskSnapshotWorkSession = {
 };
 
 export type IntegrationTaskSnapshot = {
+  projectTrackId: string;
   tasks: IntegrationTaskSnapshotTask[];
   workSessionsByTaskId: Record<string, IntegrationTaskSnapshotWorkSession[]>;
   /** Present only when the active timer’s task is in this integration’s task list (for expand + TaskWorkRow). */
@@ -278,8 +325,8 @@ export type IntegrationTaskSnapshot = {
   globalActiveWorkSessionProjectName: string | null;
 };
 
-export async function fetchIntegrationTaskSnapshot(
-  projectIntegrationId: string,
+export async function fetchProjectTrackTaskSnapshot(
+  projectTrackId: string,
 ): Promise<{ snapshot?: IntegrationTaskSnapshot; error?: string }> {
   const supabase = await createClient();
   const {
@@ -287,13 +334,13 @@ export async function fetchIntegrationTaskSnapshot(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, projectIntegrationId);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, projectTrackId);
+  if (!track) return { error: "Not found" };
 
   const { data: taskRows, error: taskError } = await supabase
     .from("integration_tasks")
     .select("id, title, due_date, status, priority, completed_at")
-    .eq("project_integration_id", projectIntegrationId)
+    .eq("project_track_id", track.id)
     .order("sort_order")
     .order("due_date", { ascending: true, nullsFirst: false });
   if (taskError) return { error: taskError.message };
@@ -360,6 +407,7 @@ export async function fetchIntegrationTaskSnapshot(
 
   return {
     snapshot: {
+      projectTrackId: track.id,
       tasks,
       workSessionsByTaskId,
       activeWorkSession,
@@ -369,6 +417,24 @@ export async function fetchIntegrationTaskSnapshot(
       globalActiveWorkSessionProjectName,
     },
   };
+}
+
+export async function fetchIntegrationTaskSnapshot(
+  projectIntegrationId: string,
+): Promise<{ snapshot?: IntegrationTaskSnapshot; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const track = await loadOwnedIntegrationTrackByProjectIntegration(
+    supabase,
+    user.id,
+    projectIntegrationId,
+  );
+  if (!track) return { error: "Not found" };
+  return fetchProjectTrackTaskSnapshot(track.id);
 }
 
 export async function startOrReplaceActiveWorkSession(
@@ -382,14 +448,14 @@ export async function startOrReplaceActiveWorkSession(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const { error: delErr } = await supabase.from("integration_task_active_work_sessions").delete().eq("user_id", user.id);
 
@@ -411,7 +477,7 @@ export async function startOrReplaceActiveWorkSession(
 
   if (insErr || !inserted) return { error: insErr?.message ?? "Could not start session" };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return { session: rowToActiveDto(inserted) };
 }
 
@@ -429,14 +495,14 @@ export async function updateActiveWorkSessionStartedAt(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const { data: row, error: fetchErr } = await supabase
     .from("integration_task_active_work_sessions")
@@ -467,7 +533,7 @@ export async function updateActiveWorkSessionStartedAt(
 
   if (upErr || !updated) return { error: upErr?.message ?? "Could not update start time" };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return { session: rowToActiveDto(updated) };
 }
 
@@ -483,14 +549,14 @@ export async function syncActiveWorkSessionPause(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const { data: row, error: fetchErr } = await supabase
     .from("integration_task_active_work_sessions")
@@ -507,7 +573,7 @@ export async function syncActiveWorkSessionPause(
 
   if (direction === "pause") {
     if (row.pause_started_at != null) {
-      await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+      await revalidateTrackPaths(track);
       return { session: rowToActiveDto(row) };
     }
     const { data: updated, error: upErr } = await supabase
@@ -518,12 +584,12 @@ export async function syncActiveWorkSessionPause(
       .select("integration_task_id, started_at, paused_ms_accumulated, pause_started_at")
       .single();
     if (upErr || !updated) return { error: upErr?.message ?? "Could not pause" };
-    await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+    await revalidateTrackPaths(track);
     return { session: rowToActiveDto(updated) };
   }
 
   if (row.pause_started_at == null) {
-    await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+    await revalidateTrackPaths(track);
     return { session: rowToActiveDto(row) };
   }
 
@@ -545,7 +611,7 @@ export async function syncActiveWorkSessionPause(
     .single();
 
   if (upErr || !updated) return { error: upErr?.message ?? "Could not resume" };
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return { session: rowToActiveDto(updated) };
 }
 
@@ -558,14 +624,14 @@ export async function discardActiveWorkSession(taskId: string): Promise<{ error?
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const { error } = await supabase
     .from("integration_task_active_work_sessions")
@@ -575,12 +641,12 @@ export async function discardActiveWorkSession(taskId: string): Promise<{ error?
 
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
 export async function createIntegrationTask(
-  projectIntegrationId: string,
+  projectTrackId: string,
   formData: FormData,
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -589,8 +655,8 @@ export async function createIntegrationTask(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, projectIntegrationId);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, projectTrackId);
+  if (!track) return { error: "Not found" };
 
   const title = String(formData.get("title") ?? "").trim();
   const priorityRaw = String(formData.get("priority") ?? "medium").trim();
@@ -600,17 +666,33 @@ export async function createIntegrationTask(
 
   const due_date = dueRaw === "" ? null : dueRaw;
 
+  let nextSortOrder = 0;
+  let sortOrderQuery = supabase
+    .from("integration_tasks")
+    .select("sort_order")
+    .eq("project_track_id", projectTrackId)
+    .neq("status", "done");
+  sortOrderQuery = due_date === null ? sortOrderQuery.is("due_date", null) : sortOrderQuery.eq("due_date", due_date);
+
+  const { data: sameGroupTasks, error: sameGroupErr } = await sortOrderQuery;
+  if (sameGroupErr) return { error: sameGroupErr.message };
+  if (sameGroupTasks && sameGroupTasks.length > 0) {
+    nextSortOrder =
+      sameGroupTasks.reduce((max, row) => Math.max(max, Number(row.sort_order ?? 0)), 0) + 1;
+  }
+
   const { error } = await supabase.from("integration_tasks").insert({
-    project_integration_id: projectIntegrationId,
+    project_track_id: projectTrackId,
     title,
     due_date,
     priority: priorityRaw,
     status: "open",
+    sort_order: nextSortOrder,
   });
 
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, projectIntegrationId);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -623,14 +705,14 @@ export async function toggleIntegrationTaskCompletion(taskId: string): Promise<{
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id, status")
+    .select("id, project_track_id, status")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   // Spec: open <-> done. If the task was cancelled, treat it as open.
   const nextStatus: TaskStatus = task.status === "open" ? "done" : "open";
@@ -653,7 +735,7 @@ export async function toggleIntegrationTaskCompletion(taskId: string): Promise<{
       .eq("integration_task_id", taskId);
   }
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -669,14 +751,14 @@ export async function updateIntegrationTaskDueDate(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const dueRaw = String(formData.get("due_date") ?? "").trim();
   const due_date = dueRaw === "" ? null : dueRaw;
@@ -685,7 +767,7 @@ export async function updateIntegrationTaskDueDate(
 
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -701,14 +783,14 @@ export async function updateIntegrationTask(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const title = String(formData.get("title") ?? "").trim();
   const dueRaw = String(formData.get("due_date") ?? "").trim();
@@ -730,7 +812,7 @@ export async function updateIntegrationTask(
 
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -746,20 +828,20 @@ export async function updateIntegrationTaskTitle(taskId: string, title: string):
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const { error } = await supabase.from("integration_tasks").update({ title: trimmed }).eq("id", taskId);
 
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -777,19 +859,19 @@ export async function updateIntegrationTaskPriority(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const { error } = await supabase.from("integration_tasks").update({ priority }).eq("id", taskId);
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -802,20 +884,20 @@ export async function deleteIntegrationTask(taskId: string): Promise<{ error?: s
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const { error } = await supabase.from("integration_tasks").delete().eq("id", taskId);
 
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -838,14 +920,14 @@ export async function createIntegrationTaskWorkSession(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id, status")
+    .select("id, project_track_id, status")
     .eq("id", taskId)
     .maybeSingle();
 
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const started = new Date(payload.started_at);
   if (Number.isNaN(started.getTime())) return { error: "Invalid start time" };
@@ -887,7 +969,7 @@ export async function createIntegrationTaskWorkSession(
     if (completeErr) return { error: completeErr.message };
   }
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }
 
@@ -910,13 +992,13 @@ export async function updateIntegrationTaskWorkSessionWorkAccomplished(
 
   const { data: task } = await supabase
     .from("integration_tasks")
-    .select("id, project_integration_id")
+    .select("id, project_track_id")
     .eq("id", workSession.integration_task_id)
     .maybeSingle();
   if (!task) return { error: "Not found" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, task.project_integration_id);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+  if (!track) return { error: "Not found" };
 
   const normalized = (workAccomplished ?? "").trim();
   const { error } = await supabase
@@ -925,6 +1007,6 @@ export async function updateIntegrationTaskWorkSessionWorkAccomplished(
     .eq("id", workSessionId);
   if (error) return { error: error.message };
 
-  await revalidateIntegrationPaths(pi.project_id, task.project_integration_id);
+  await revalidateTrackPaths(track);
   return {};
 }

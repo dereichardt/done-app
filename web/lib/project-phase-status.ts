@@ -1,3 +1,5 @@
+import { getUserTodayIso } from "@/lib/user-preferences";
+
 export type PhaseForStatus = {
   name: string;
   sort_order: number;
@@ -5,9 +7,9 @@ export type PhaseForStatus = {
   end_date: string | null;
 };
 
-/** Calendar day in UTC (matches typical server rendering). */
-export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+/** Calendar day as YYYY-MM-DD in the preferred timezone (falls back to UTC). */
+export function todayISO(timezone?: string | null): string {
+  return getUserTodayIso(timezone ?? null);
 }
 
 export function calendarDaysFromTo(fromISO: string, toISO: string): number {
@@ -39,12 +41,16 @@ export type PhaseStatusResult =
 
 /**
  * Phases must be ordered by `sort_order` ascending (same as DB query).
+ * @param asOfCalendarDay `YYYY-MM-DD` used for comparisons; defaults to today (UTC calendar day).
  */
-export function resolvePhaseStatus(phases: PhaseForStatus[]): PhaseStatusResult {
+export function resolvePhaseStatus(
+  phases: PhaseForStatus[],
+  asOfCalendarDay: string = todayISO(),
+): PhaseStatusResult {
   const sorted = [...phases].sort((a, b) => a.sort_order - b.sort_order);
   if (sorted.length === 0) return { kind: "empty" };
 
-  const today = todayISO();
+  const today = asOfCalendarDay;
 
   for (const p of sorted) {
     const { start_date: s, end_date: e, name } = p;

@@ -16,11 +16,22 @@ function isOnQuarterHour(d: Date): boolean {
   return ms % (15 * 60_000) === 0;
 }
 
-async function loadOwnedProjectIntegration(
+function isMissingProjectTrackColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const message = (error.message ?? "").toLowerCase();
+  const mentionsColumn = message.includes("project_track_id");
+  const missingColumn =
+    message.includes("does not exist") ||
+    message.includes("could not find") ||
+    error.code === "42703";
+  return mentionsColumn && missingColumn;
+}
+
+async function loadOwnedIntegrationTrack(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   projectIntegrationId: string,
-): Promise<{ id: string; project_id: string } | null> {
+): Promise<{ project_id: string; project_track_id: string } | null> {
   const { data: pi } = await supabase
     .from("project_integrations")
     .select("id, project_id")
@@ -37,7 +48,14 @@ async function loadOwnedProjectIntegration(
     .maybeSingle();
 
   if (!project) return null;
-  return pi;
+  const { data: track } = await supabase
+    .from("project_tracks")
+    .select("id")
+    .eq("project_integration_id", projectIntegrationId)
+    .eq("kind", "integration")
+    .maybeSingle();
+  if (!track) return null;
+  return { project_id: pi.project_id, project_track_id: track.id };
 }
 
 function revalidateIntegrationPaths(projectId: string, projectIntegrationId: string) {
@@ -61,8 +79,8 @@ export async function createIntegrationManualEffortEntry(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, projectIntegrationId);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedIntegrationTrack(supabase, user.id, projectIntegrationId);
+  if (!track) return { error: "Not found" };
 
   if (!isEntryType(String(payload.entry_type))) return { error: "Invalid entry type" };
 
@@ -86,7 +104,8 @@ export async function createIntegrationManualEffortEntry(
 
   const work_accomplished = payload.work_accomplished?.trim() ? payload.work_accomplished.trim() : null;
 
-  const { error } = await supabase.from("integration_manual_effort_entries").insert({
+  const createRes = await supabase.from("integration_manual_effort_entries").insert({
+    project_track_id: track.project_track_id,
     project_integration_id: projectIntegrationId,
     entry_type: payload.entry_type,
     title,
@@ -96,9 +115,22 @@ export async function createIntegrationManualEffortEntry(
     work_accomplished,
   });
 
-  if (error) return { error: error.message };
+  if (isMissingProjectTrackColumn(createRes.error)) {
+    const legacyRes = await supabase.from("integration_manual_effort_entries").insert({
+      project_integration_id: projectIntegrationId,
+      entry_type: payload.entry_type,
+      title,
+      started_at: started.toISOString(),
+      finished_at: finished.toISOString(),
+      duration_hours: q,
+      work_accomplished,
+    });
+    if (legacyRes.error) return { error: legacyRes.error.message };
+  } else if (createRes.error) {
+    return { error: createRes.error.message };
+  }
 
-  revalidateIntegrationPaths(pi.project_id, projectIntegrationId);
+  revalidateIntegrationPaths(track.project_id, projectIntegrationId);
   return {};
 }
 
@@ -119,8 +151,8 @@ export async function updateIntegrationManualEffortEntry(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
 
-  const pi = await loadOwnedProjectIntegration(supabase, user.id, projectIntegrationId);
-  if (!pi) return { error: "Not found" };
+  const track = await loadOwnedIntegrationTrack(supabase, user.id, projectIntegrationId);
+  if (!track) return { error: "Not found" };
 
   if (!manualEntryId || typeof manualEntryId !== "string") return { error: "Not found" };
   if (!isEntryType(String(payload.entry_type))) return { error: "Invalid entry type" };
@@ -145,9 +177,11 @@ export async function updateIntegrationManualEffortEntry(
 
   const work_accomplished = payload.work_accomplished?.trim() ? payload.work_accomplished.trim() : null;
 
-  const { data: updated, error } = await supabase
+  const updateRes = await supabase
     .from("integration_manual_effort_entries")
     .update({
+      project_track_id: track.project_track_id,
+      project_integration_id: projectIntegrationId,
       entry_type: payload.entry_type,
       title,
       started_at: started.toISOString(),
@@ -160,10 +194,29 @@ export async function updateIntegrationManualEffortEntry(
     .select("id")
     .maybeSingle();
 
-  if (error) return { error: error.message };
-  if (!updated) return { error: "Not found" };
+  if (isMissingProjectTrackColumn(updateRes.error)) {
+    const legacyUpdate = await supabase
+      .from("integration_manual_effort_entries")
+      .update({
+        entry_type: payload.entry_type,
+        title,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        duration_hours: q,
+        work_accomplished,
+      })
+      .eq("id", manualEntryId)
+      .eq("project_integration_id", projectIntegrationId)
+      .select("id")
+      .maybeSingle();
+    if (legacyUpdate.error) return { error: legacyUpdate.error.message };
+    if (!legacyUpdate.data) return { error: "Not found" };
+  } else {
+    if (updateRes.error) return { error: updateRes.error.message };
+    if (!updateRes.data) return { error: "Not found" };
+  }
 
-  revalidateIntegrationPaths(pi.project_id, projectIntegrationId);
+  revalidateIntegrationPaths(track.project_id, projectIntegrationId);
   return {};
 }
 

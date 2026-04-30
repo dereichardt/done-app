@@ -2,6 +2,7 @@ import { ensureDefaultLookups } from "@/lib/actions/ensure-lookups";
 import { createClient } from "@/lib/supabase/server";
 import { buildFunctionalAreaLookupData } from "@/lib/functional-area-grouping";
 import { todayISO } from "@/lib/project-phase-status";
+import { loadUserPreferences } from "@/lib/actions/user-preferences";
 import {
   buildIntegrationTypeSelectOptions,
   formatIntegrationDefinitionDisplayName,
@@ -18,13 +19,13 @@ import {
   type ActiveWorkSessionDTO,
 } from "@/lib/actions/integration-tasks";
 import {
-  IntegrationUpdatesPanel,
   type IntegrationUpdateRow,
 } from "./integration-updates-panel";
 import { IntegrationEffortSection } from "@/components/integration-effort-section";
 import type { EffortSessionInput } from "@/lib/integration-effort-buckets";
-import { IntegrationStatusCard } from "./integration-status-card";
 import { ProjectIntegrationDetailHeader } from "./project-integration-detail-header";
+import { IntegrationStatusAndProgressSection } from "./integration-status-and-progress-section";
+import type { DeliveryProgressTransitionRow } from "./integration-status-and-progress-section";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,8 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
+  const prefsRes = await loadUserPreferences();
+  const userTodayIso = todayISO(prefsRes.preferences.timezone);
 
   const { data: project } = await supabase
     .from("projects")
@@ -63,6 +66,14 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
     .maybeSingle();
 
   if (rowError || !row) notFound();
+
+  const { data: integrationTrack } = await supabase
+    .from("project_tracks")
+    .select("id")
+    .eq("project_integration_id", projectIntegrationId)
+    .eq("kind", "integration")
+    .maybeSingle();
+  if (!integrationTrack) notFound();
 
   const { data: integObj, error: integError } = await supabase
     .from("integrations")
@@ -95,6 +106,7 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
     { data: integrationDomains },
     { data: taskRows },
     { data: updateRows },
+    { data: deliveryProgressTransitionRows },
   ] = await Promise.all([
     supabase
       .from("integration_types")
@@ -115,7 +127,7 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
     supabase
       .from("integration_tasks")
       .select("id, title, due_date, status, priority, completed_at")
-      .eq("project_integration_id", projectIntegrationId)
+      .eq("project_track_id", integrationTrack.id)
       .order("sort_order")
       .order("due_date", { ascending: true, nullsFirst: false }),
     supabase
@@ -123,6 +135,11 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
       .select("id, body, created_at, updated_at")
       .eq("project_integration_id", projectIntegrationId)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("delivery_progress_transitions")
+      .select("id, from_delivery_progress, to_delivery_progress, created_at")
+      .eq("project_integration_id", projectIntegrationId)
+      .order("created_at", { ascending: true }),
   ]);
 
   const faLookup = buildFunctionalAreaLookupData(functionalAreas ?? [], integrationDomains ?? []);
@@ -163,11 +180,24 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
     }));
   }
 
-  const { data: manualRows } = await supabase
+  const manualRowsRes = await supabase
     .from("integration_manual_effort_entries")
     .select("id, entry_type, title, started_at, finished_at, duration_hours, work_accomplished")
-    .eq("project_integration_id", projectIntegrationId)
+    .eq("project_track_id", integrationTrack.id)
     .order("started_at", { ascending: false });
+  const manualRows =
+    ((manualRowsRes.error?.message ?? "").toLowerCase().includes("project_track_id") &&
+      (((manualRowsRes.error?.message ?? "").toLowerCase().includes("could not find") ||
+        (manualRowsRes.error?.message ?? "").toLowerCase().includes("does not exist") ||
+        manualRowsRes.error?.code === "42703")))
+      ? (
+          await supabase
+            .from("integration_manual_effort_entries")
+            .select("id, entry_type, title, started_at, finished_at, duration_hours, work_accomplished")
+            .eq("project_integration_id", projectIntegrationId)
+            .order("started_at", { ascending: false })
+        ).data
+      : manualRowsRes.data;
 
   const workSessionsByTaskId: Record<string, IntegrationTaskWorkSessionRow[]> = {};
   for (const row of workSessionRows) {
@@ -251,6 +281,12 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
     created_at: u.created_at,
     updated_at: u.updated_at,
   }));
+  const deliveryProgressTransitions: DeliveryProgressTransitionRow[] = (deliveryProgressTransitionRows ?? []).map((row) => ({
+    id: row.id,
+    from_delivery_progress: row.from_delivery_progress,
+    to_delivery_progress: row.to_delivery_progress,
+    created_at: row.created_at,
+  }));
 
   const integrationDisplayTitle =
     formatIntegrationDefinitionDisplayName({
@@ -290,38 +326,20 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
           domain_id: integObj.domain_id,
         }}
         catalogVisibility={integObj.catalog_visibility}
+        initialIntegrationState={row.integration_state}
+        initialIntegrationStateReason={row.integration_state_reason}
       />
 
-      <section className="mt-10">
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,35fr)_minmax(0,65fr)] lg:gap-6">
-          <div className="flex flex-col gap-2">
-            <h2 className="section-heading">Status</h2>
-            <div className="h-[21rem] max-h-[85vh] min-h-0 shrink-0">
-              <IntegrationStatusCard
-                className="h-full min-h-0"
-                projectIntegrationId={projectIntegrationId}
-                initial={{
-                  delivery_progress: row.delivery_progress,
-                  integration_state: row.integration_state,
-                  integration_state_reason: row.integration_state_reason,
-                }}
-              />
-            </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <h2 className="section-heading">Updates</h2>
-            <div className="h-[21rem] max-h-[85vh] min-h-0 shrink-0">
-              <IntegrationUpdatesPanel
-                className="h-full min-h-0"
-                projectIntegrationId={projectIntegrationId}
-                projectLabel={project.customer_name ?? ""}
-                integrationDisplayTitle={integrationDisplayTitle}
-                updates={updates}
-              />
-            </div>
-          </div>
-        </div>
-      </section>
+      <IntegrationStatusAndProgressSection
+        projectIntegrationId={projectIntegrationId}
+        deliveryProgress={row.delivery_progress}
+        integrationState={row.integration_state}
+        integrationStateReason={row.integration_state_reason}
+        deliveryProgressTransitions={deliveryProgressTransitions}
+        projectLabel={project.customer_name ?? ""}
+        integrationDisplayTitle={integrationDisplayTitle}
+        updates={updates}
+      />
 
       <section className="mt-8">
         <div className="flex flex-col gap-2">
@@ -330,6 +348,7 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
             <IntegrationTasksPanel
               className="h-full min-h-0"
               projectIntegrationId={projectIntegrationId}
+              projectTrackId={integrationTrack.id}
               tasks={tasks}
               workSessionsByTaskId={workSessionsByTaskId}
               activeWorkSession={activeWorkSession}
@@ -339,7 +358,7 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
               globalActiveWorkSessionProjectName={globalActiveWorkSessionProjectName}
               finishSessionIntegrationLabel={integrationDisplayTitle}
               finishSessionProjectLabel={project.customer_name ?? ""}
-              todayIso={todayISO()}
+              todayIso={userTodayIso}
             />
           </div>
         </div>

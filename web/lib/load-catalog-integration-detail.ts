@@ -122,47 +122,64 @@ export async function loadCatalogIntegrationDetail(
     const piList = piRows ?? [];
     const piIds = piList.map((p) => p.id);
 
-    let taskRows: { id: string; project_integration_id: string }[] = [];
+    let taskRows: { id: string; project_track_id: string }[] = [];
     if (piIds.length > 0) {
-      const { data: tr } = await supabase
-        .from("integration_tasks")
+      const { data: tracks } = await supabase
+        .from("project_tracks")
         .select("id, project_integration_id")
+        .eq("kind", "integration")
         .in("project_integration_id", piIds);
-      taskRows = tr ?? [];
-    }
-    const piIdByTaskId = new Map<string, string>();
-    for (const t of taskRows) piIdByTaskId.set(t.id, t.project_integration_id);
-
-    const actualByPi = new Map<string, number>();
-    const taskIds = taskRows.map((t) => t.id);
-    if (taskIds.length > 0) {
-      const { data: ws } = await supabase
-        .from("integration_task_work_sessions")
-        .select("integration_task_id, duration_hours")
-        .in("integration_task_id", taskIds);
-      for (const row of ws ?? []) {
-        const piId = piIdByTaskId.get(row.integration_task_id);
-        if (!piId) continue;
-        const hours = Number(row.duration_hours);
-        if (!Number.isFinite(hours)) continue;
-        actualByPi.set(piId, (actualByPi.get(piId) ?? 0) + hours);
+      const trackIds = (tracks ?? []).map((t) => t.id);
+      if (trackIds.length > 0) {
+        const { data: tr } = await supabase
+          .from("integration_tasks")
+          .select("id, project_track_id")
+          .in("project_track_id", trackIds);
+        taskRows = tr ?? [];
       }
-    }
+      const projectIntegrationIdByTrackId = new Map<string, string>();
+      for (const t of tracks ?? []) {
+        if (t.project_integration_id) {
+          projectIntegrationIdByTrackId.set(t.id, t.project_integration_id);
+        }
+      }
+      const piIdByTaskId = new Map<string, string>();
+      for (const t of taskRows) {
+        const piId = projectIntegrationIdByTrackId.get(t.project_track_id);
+        if (piId) piIdByTaskId.set(t.id, piId);
+      }
 
-    usageRows = piList.map((pi) => {
-      const proj = pi.projects as { customer_name?: string | null } | null;
-      const deliveryProgress = typeof pi.delivery_progress === "string" ? pi.delivery_progress : "";
-      return {
-        project_integration_id: pi.id,
-        project_id: pi.project_id,
-        customer_name: proj?.customer_name ?? null,
-        integration_display_name: childDisplayNameById.get(pi.integration_id as string) ?? "",
-        delivery_progress: deliveryProgress,
-        delivery_progress_label: deliveryProgress ? formatDeliveryProgressLabel(deliveryProgress) : "—",
-        actual_effort_hours: actualByPi.get(pi.id) ?? 0,
-      };
-    });
-    usageRows.sort((a, b) => (a.customer_name ?? "").localeCompare(b.customer_name ?? ""));
+      const actualByPi = new Map<string, number>();
+      const taskIds = taskRows.map((t) => t.id);
+      if (taskIds.length > 0) {
+        const { data: ws } = await supabase
+          .from("integration_task_work_sessions")
+          .select("integration_task_id, duration_hours")
+          .in("integration_task_id", taskIds);
+        for (const row of ws ?? []) {
+          const piId = piIdByTaskId.get(row.integration_task_id);
+          if (!piId) continue;
+          const hours = Number(row.duration_hours);
+          if (!Number.isFinite(hours)) continue;
+          actualByPi.set(piId, (actualByPi.get(piId) ?? 0) + hours);
+        }
+      }
+
+      usageRows = piList.map((pi) => {
+        const proj = pi.projects as { customer_name?: string | null } | null;
+        const deliveryProgress = typeof pi.delivery_progress === "string" ? pi.delivery_progress : "";
+        return {
+          project_integration_id: pi.id,
+          project_id: pi.project_id,
+          customer_name: proj?.customer_name ?? null,
+          integration_display_name: childDisplayNameById.get(pi.integration_id as string) ?? "",
+          delivery_progress: deliveryProgress,
+          delivery_progress_label: deliveryProgress ? formatDeliveryProgressLabel(deliveryProgress) : "—",
+          actual_effort_hours: actualByPi.get(pi.id) ?? 0,
+        };
+      });
+      usageRows.sort((a, b) => (a.customer_name ?? "").localeCompare(b.customer_name ?? ""));
+    }
   }
 
   let promotedFromLabel: string | null = null;

@@ -14,7 +14,6 @@ import {
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { ProjectIntegrationListRow } from "@/components/project-integration-list-row";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
-import { todayISO } from "@/lib/project-phase-status";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -74,11 +73,13 @@ function indicatorToActiveSessionDto(i: ActiveWorkSessionIndicatorDTO) {
 export function ProjectIntegrationsSection({
   projectId,
   rows,
+  todayIso,
   projectCustomerName = "",
   initialActiveSessionIndicator = null,
 }: {
   projectId: string;
   rows: SerializedProjectIntegrationRow[];
+  todayIso: string;
   /** Shown in finish-session modal when working from this project’s “All Tasks” list. */
   projectCustomerName?: string;
   /** Present when this user has an active timer on an integration belonging to this project. */
@@ -95,8 +96,6 @@ export function ProjectIntegrationsSection({
   const [loadErrorByIntegrationId, setLoadErrorByIntegrationId] = useState<Record<string, string>>({});
   /** Discards stale snapshot responses when multiple fetches overlap (open vs. invalidate after work session). */
   const snapshotFetchEpochRef = useRef<Record<string, number>>({});
-  const todayIso = useMemo(() => todayISO(), []);
-
   const [activeSessionIndicator, setActiveSessionIndicator] = useState<ActiveWorkSessionIndicatorDTO | null>(
     initialActiveSessionIndicator ?? null,
   );
@@ -273,7 +272,9 @@ export function ProjectIntegrationsSection({
             {modalRowId == null ? null : modalSnapshot ? (
               <IntegrationTasksPanel
                 className="h-full min-h-0"
+                surface="plain"
                 projectIntegrationId={modalRowId}
+                projectTrackId={modalSnapshot.projectTrackId}
                 tasks={modalSnapshot.tasks as IntegrationTaskRow[]}
                 workSessionsByTaskId={modalSnapshot.workSessionsByTaskId as Record<
                   string,
@@ -292,7 +293,7 @@ export function ProjectIntegrationsSection({
                 onClientTaskSnapshotInvalidate={() => loadTaskSnapshot(modalRowId)}
               />
             ) : modalLoadError ? (
-              <div className="card-canvas flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6 text-center">
+              <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm" style={{ color: "var(--app-danger)" }}>
                   {modalLoadError}
                 </p>
@@ -308,7 +309,7 @@ export function ProjectIntegrationsSection({
                 </button>
               </div>
             ) : (
-              <div className="card-canvas flex h-full min-h-0 items-center justify-center p-6">
+              <div className="flex h-full min-h-0 items-center justify-center p-6">
                 <p className="text-sm text-muted-canvas">{modalIsLoading ? "Loading tasks..." : "Preparing tasks..."}</p>
               </div>
             )}

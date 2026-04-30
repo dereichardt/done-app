@@ -24,19 +24,15 @@ const timelineMetaColumn =
 
 /** Round control: strong hover so it reads as clickable (matches session affordance on project list). */
 const activeSessionIndicatorButtonClass =
-  "inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--app-border)] bg-[color-mix(in_oklab,var(--app-info)_8%,var(--app-surface)_92%)] text-[var(--app-info)] transition-[background-color,transform] duration-150 hover:bg-[color-mix(in_oklab,var(--app-info)_22%,var(--app-surface-alt)_78%)] active:scale-[0.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-info)]";
+  "active-work-session-indicator--live inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--app-border)] bg-[color-mix(in_oklab,var(--app-info)_8%,var(--app-surface)_92%)] text-[var(--app-info)] transition-colors duration-150 hover:bg-[color-mix(in_oklab,var(--app-info)_22%,var(--app-surface-alt)_78%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-info)]";
 
 /** Same pulse icon as work-on-task row (`integration-tasks-panel.tsx`). */
 function WorkOnTaskIcon() {
   return (
     <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden className="shrink-0">
       <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M22 12h-4l-3 9L9 3l-3 9H2"
+        fill="currentColor"
+        d="M13 2L4 14h6l-1 8 11-14h-6l1-6z"
       />
     </svg>
   );
@@ -164,7 +160,7 @@ export function ProjectIntegrationListRow({
             </div>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
               <div className="min-w-0">
-                <p className={detailLabel}>Tasks coming due</p>
+                <p className={detailLabel}>Tasks</p>
                 <button
                   type="button"
                   className="btn-cta-tertiary mt-0.5 inline-flex min-h-9 justify-start px-3 py-2 text-left tabular-nums"

@@ -19,6 +19,9 @@
   --app-info: var(--cnvs-sys-color-accent-info, #0a66c2);
   --app-info-surface: var(--cnvs-sys-color-surface-info-default, #eaf3ff);
   --app-danger: var(--cnvs-sys-color-accent-danger, #b42318);
+  /* Primary dark CTA fill (.btn-cta-dark); reuse for matching form controls (e.g. checkboxes) */
+  --app-cta-dark-fill: #1f2937;
+  --app-cta-dark-fg: #f3f5f8;
   --app-radius: 12px;
   --app-shadow-card: var(--cnvs-sys-depth-1, 0 1px 3px rgba(31, 41, 55, 0.06));
   /* Toolbar row (inner padding + controls); must match .shell-header-inner vertical sizing. */
@@ -48,6 +51,8 @@
   --app-state-on-hold-fg: #713f12;
   --app-state-blocked-surface: #ffedd5;
   --app-state-blocked-fg: #9a3412;
+  --app-state-completed-surface: #e0e7ff;
+  --app-state-completed-fg: #312e81;
 
   /* Project color palette (15 choices): hue × shade. Used for project header gradient + pickers. */
   /* Shade tuning: middle = “base”, top = not-too-dark, bottom = pale */
@@ -585,23 +590,56 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   border: 1px solid var(--app-border);
   background: var(--app-surface);
   box-shadow: var(--app-shadow-card);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
 }
 
+.user-menu-link,
 .user-menu-signout {
+  display: block;
   width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  padding: 0.375rem 0.5rem;
+  margin: 0;
   border-radius: var(--app-radius);
-  border: 1px solid var(--app-border);
-  background: var(--app-surface-alt);
+  border: none;
+  background: transparent;
   color: var(--app-text);
-  font-weight: 500;
-  font-size: 0.75rem;
-  padding: 0.375rem 0.75rem;
+  font-family: inherit;
+  font-weight: 400;
+  font-size: 0.875rem;
+  line-height: 1.25;
   cursor: pointer;
   transition: background-color 150ms ease;
 }
 
+.user-menu-link {
+  text-decoration: none;
+}
+
+.user-menu-signout {
+  appearance: none;
+  font-weight: 700;
+}
+
+.user-menu-link:hover,
 .user-menu-signout:hover {
-  background: color-mix(in oklab, var(--app-surface-alt) 90%, var(--app-border));
+  background: var(--app-surface-alt);
+}
+
+.user-menu-link:focus-visible,
+.user-menu-signout:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--app-surface), 0 0 0 4px
+    color-mix(in oklab, var(--app-text) 35%, transparent);
+}
+
+.user-menu-signout-form {
+  margin: 0;
+  width: 100%;
 }
 
 .dashboard-inner {
@@ -658,9 +696,55 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   }
 }
 
+/* Active work session — ring expands outward with ease-out (0–35%), then snap to rest; no eased return. */
+@keyframes active-work-session-indicator-live {
+  0% {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--app-info) 48%, transparent);
+    animation-timing-function: ease-out;
+  }
+  35% {
+    box-shadow: 0 0 0 10px transparent;
+    animation-timing-function: linear;
+  }
+  35.1%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.active-work-session-indicator--live {
+  animation: active-work-session-indicator-live 2s infinite;
+}
+
+@keyframes active-work-session-banner-live {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--app-info) 38%, transparent);
+  }
+}
+
+.active-work-session-banner--live {
+  animation: active-work-session-banner-live 2.4s var(--easing-standard) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .nav-item,
   .nav-icon-slot {
+    transition-duration: 0.01ms !important;
+  }
+
+  .active-work-session-indicator--live {
+    animation: none;
+  }
+
+  .active-work-session-banner--live {
+    animation: none;
+  }
+
+  .task-due-date-pill {
     transition-duration: 0.01ms !important;
   }
 }
@@ -774,6 +858,44 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--app-danger) 35%, transparent);
 }
 
+/* Quick-action button: pill shape, white bg + strong border, inverts on hover.
+   Used in the project detail quick-action bar and any similar high-level action zones. */
+.btn-quick-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 9999px;
+  border: 1.5px solid var(--app-text);
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-weight: 500;
+  font-size: 0.9375rem;
+  line-height: 1.25;
+  padding: 0.625rem 1.5rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 150ms cubic-bezier(0.2, 0, 0.2, 1),
+    color 150ms cubic-bezier(0.2, 0, 0.2, 1),
+    border-color 150ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+.btn-quick-action:hover:not(:disabled) {
+  background: var(--app-text);
+  color: var(--app-surface);
+}
+
+.btn-quick-action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--app-text) 30%, transparent);
+}
+
+.btn-quick-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Same structure as .btn-cta; dark fill for primary form actions */
 .btn-cta-dark {
   display: inline-flex;
@@ -781,9 +903,9 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   justify-content: center;
   gap: 0.375rem;
   border-radius: var(--app-radius);
-  border: 1px solid color-mix(in oklab, #1f2937 78%, #4b5563 22%);
-  background: #1f2937;
-  color: #f3f5f8;
+  border: 1px solid color-mix(in oklab, var(--app-cta-dark-fill) 78%, #4b5563 22%);
+  background: var(--app-cta-dark-fill);
+  color: var(--app-cta-dark-fg);
   font-weight: 500;
   font-size: 0.875rem;
   line-height: 1.25;
@@ -798,7 +920,7 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
 }
 
 .btn-cta-dark:hover:not(:disabled) {
-  background: color-mix(in oklab, #1f2937 90%, #f3f5f8 10%);
+  background: color-mix(in oklab, var(--app-cta-dark-fill) 90%, #f3f5f8 10%);
   border-color: color-mix(in oklab, #4b5563 55%, #f3f5f8 12%);
 }
 
@@ -903,7 +1025,7 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
 .input-canvas.input-canvas--shell:focus-within {
   outline: none;
   border-color: var(--app-input-focus-border);
-  box-shadow: inset 0 0 0 2px var(--app-input-focus-border);
+  box-shadow: inset 0 0 0 1px var(--app-input-focus-border);
 }
 
 /* Rich notes: flush toolbar + editor to the rounded border (no inner padding gap). */
@@ -1237,6 +1359,11 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   color: var(--app-state-blocked-fg);
 }
 
+.integration-state-pill--completed {
+  background: var(--app-state-completed-surface);
+  color: var(--app-state-completed-fg);
+}
+
 /* Task priority pills: base metrics match .integration-state-pill (see above). */
 
 .task-priority-pill--low {
@@ -1251,6 +1378,48 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
 
 /* High priority uses .integration-state-pill--on_hold in markup (same tokens as on-hold state). */
 
+/* Due date chip under task title (matches pill footprint, smaller type). */
+.task-due-date-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-alt);
+  color: var(--app-text);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+button.task-due-date-pill:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--app-surface-alt) 55%, var(--app-surface) 45%);
+  border-color: color-mix(in oklab, var(--app-border) 85%, var(--app-text-muted));
+}
+
+button.task-due-date-pill:focus-visible {
+  outline: 2px solid var(--app-info);
+  outline-offset: 2px;
+}
+
+button.task-due-date-pill:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.task-due-date-pill--completed {
+  background: color-mix(in oklab, var(--app-border) 12%, var(--app-surface));
+  color: var(--app-text-muted);
+  text-decoration: line-through;
+}
+
 /* Circular task completion toggle */
 .task-complete-btn {
   width: 2rem;
@@ -1262,11 +1431,16 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   border: 1px solid var(--app-border);
   background: var(--app-surface);
   color: var(--app-text-muted);
+  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition:
     background-color 150ms cubic-bezier(0.2, 0, 0.2, 1),
     color 150ms cubic-bezier(0.2, 0, 0.2, 1),
     border-color 150ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+.task-complete-btn:disabled {
+  cursor: default;
 }
 
 .task-complete-btn:not(.task-complete-btn--done):hover:not(:disabled),

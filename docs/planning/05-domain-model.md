@@ -114,9 +114,25 @@ Integrations are **first-class catalog rows**. Projects **link** via `project_in
 
 Unique (`project_id`, `integration_id`).
 
+### `project_tracks`
+
+First-class project work buckets. Every project has one `project_management` track, and each integration link has one `integration` track.
+
+| Column                 | Type        | Notes |
+| ---------------------- | ----------- | ----- |
+| id                     | uuid        | PK |
+| project_id             | uuid        | FK `projects` |
+| kind                   | text        | `integration` \| `project_management` |
+| name                   | text        | User-facing label (e.g. integration display title or `Project Management`) |
+| sort_order             | int         | Display ordering within project |
+| integration_id         | uuid        | Nullable FK `integrations`; set for `integration` tracks |
+| project_integration_id | uuid        | Nullable FK `project_integrations`; set for `integration` tracks |
+| created_at             | timestamptz | |
+| updated_at             | timestamptz | |
+
 ### `integration_tasks`
 
-Tasks **belong to** a `project_integrations` row (work scoped to that integration on that project). Optional `due_date`; status `open` \| `done` \| `cancelled`.
+Tasks **belong to** a `project_tracks` row. This supports both integration delivery tasks and project-management tasks in a single task model. Optional `due_date`; status `open` \| `done` \| `cancelled`.
 
 ### `integration_type_task_templates` (future)
 
@@ -142,6 +158,7 @@ flowchart LR
   PP[project_phases]
   I[integrations]
   PI[project_integrations]
+  PTk[project_tracks]
   ITasks[integration_tasks]
   Tpl[integration_type_task_templates]
 
@@ -154,11 +171,14 @@ flowchart LR
   User --> I
   P --> PP
   P --> PI
+  P --> PTk
   I --> PI
+  I --> PTk
   IT --> I
   FA --> I
   IDom --> I
-  PI --> ITasks
+  PI --> PTk
+  PTk --> ITasks
   IT --> Tpl
   PT --> P
   PR --> P
