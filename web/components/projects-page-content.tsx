@@ -8,41 +8,15 @@ import {
   COMPLETED_SORT_OPTIONS,
   type CompletedSortKey,
 } from "@/lib/project-list-sort-keys";
+import {
+  MetricsVisibilityToggle,
+  ROW_METRICS_PROJECTS_STORAGE_KEY,
+  readRowMetricsAlwaysFromStorage,
+  subscribeRowMetricsAlways,
+  toggleRowMetricsAlways,
+} from "@/components/metrics-visibility-toggle";
 import Link from "next/link";
 import { useCallback, useMemo, useReducer, useSyncExternalStore } from "react";
-
-const STORAGE_KEY = "done-app-projects-summary-always";
-
-const summaryAlwaysListeners = new Set<() => void>();
-
-function readSummaryAlwaysFromStorage(): boolean {
-  try {
-    const v = localStorage.getItem(STORAGE_KEY);
-    return v === "1" || v === "true";
-  } catch {
-    return false;
-  }
-}
-
-function subscribeSummaryAlways(onStoreChange: () => void) {
-  summaryAlwaysListeners.add(onStoreChange);
-  const onStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY || e.key === null) onStoreChange();
-  };
-  if (typeof window !== "undefined") {
-    window.addEventListener("storage", onStorage);
-  }
-  return () => {
-    summaryAlwaysListeners.delete(onStoreChange);
-    if (typeof window !== "undefined") {
-      window.removeEventListener("storage", onStorage);
-    }
-  };
-}
-
-function notifySummaryAlwaysListeners() {
-  for (const cb of summaryAlwaysListeners) cb();
-}
 
 export type ProjectsPageContentProjectRow = {
   id: string;
@@ -66,77 +40,6 @@ function sortCompletedProjects(
   });
 }
 
-/**
- * Sliding-pill toggle — visual language matches the Meeting/Task and Day/Week/Month
- * toggles in `integration-effort-section.tsx`. Two segments: "On Hover" / "Show".
- */
-function MetricsVisibilityToggle({
-  showAlways,
-  onToggle,
-}: {
-  showAlways: boolean;
-  onToggle: () => void;
-}) {
-  const segWidth = 88; // px per segment — fits "On Hover" on a single line
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-canvas">Metrics</span>
-      <div
-        role="tablist"
-        aria-label="Row metrics visibility"
-        className="relative inline-flex overflow-visible rounded-[10px] border"
-        style={{ borderColor: "var(--app-border)", background: "var(--app-surface-alt)" }}
-      >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -inset-y-px left-0 z-[1] rounded-[10px]"
-          style={{
-            width: segWidth,
-            transform: `translateX(${showAlways ? segWidth : 0}px)`,
-            transition: "transform 180ms cubic-bezier(0.2, 0, 0.2, 1)",
-            background: "#1f2937",
-            boxShadow: "0 0 0 2px color-mix(in oklab, var(--app-border) 70%, white)",
-          }}
-        />
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!showAlways}
-          className={[
-            "relative z-[2] inline-flex h-8 items-center justify-center whitespace-nowrap px-3 text-center text-xs transition-colors cursor-pointer rounded-l-[10px]",
-            !showAlways
-              ? "font-semibold text-[#f3f5f8]"
-              : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
-          ].join(" ")}
-          style={{ width: segWidth }}
-          onClick={() => {
-            if (showAlways) onToggle();
-          }}
-        >
-          On Hover
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={showAlways}
-          className={[
-            "relative z-[2] inline-flex h-8 items-center justify-center whitespace-nowrap px-3 text-center text-xs transition-colors cursor-pointer rounded-r-[10px]",
-            showAlways
-              ? "font-semibold text-[#f3f5f8]"
-              : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
-          ].join(" ")}
-          style={{ width: segWidth }}
-          onClick={() => {
-            if (!showAlways) onToggle();
-          }}
-        >
-          Show
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function ProjectsPageContent({
   activeProjects,
   completedProjects,
@@ -149,19 +52,13 @@ export function ProjectsPageContent({
   initialActiveSessionIndicator: ActiveWorkSessionIndicatorDTO | null;
 }) {
   const showSummaryAlways = useSyncExternalStore(
-    subscribeSummaryAlways,
-    readSummaryAlwaysFromStorage,
+    (cb) => subscribeRowMetricsAlways(ROW_METRICS_PROJECTS_STORAGE_KEY, cb),
+    () => readRowMetricsAlwaysFromStorage(ROW_METRICS_PROJECTS_STORAGE_KEY),
     () => false,
   );
 
   const toggle = useCallback(() => {
-    const next = !readSummaryAlwaysFromStorage();
-    try {
-      localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-    notifySummaryAlwaysListeners();
+    toggleRowMetricsAlways(ROW_METRICS_PROJECTS_STORAGE_KEY);
   }, []);
 
   const [completedSort, setCompletedSort] = useReducer(
@@ -197,7 +94,7 @@ export function ProjectsPageContent({
         </div>
         <div className="mt-4">
           <ProjectsActiveSessionList
-            key={initialActiveSessionIndicator?.integration_task_id ?? "projects-no-active-session"}
+            key={initialActiveSessionIndicator?.task_id ?? "projects-no-active-session"}
             projects={activeProjects}
             initialActiveSessionIndicator={initialActiveSessionIndicator}
             emptyLabel="active"

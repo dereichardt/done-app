@@ -6,6 +6,7 @@ import {
   projectColorCssVar,
   type ProjectShade,
 } from "@/lib/project-colors";
+import { TASKS_PAGE_INTERNAL_PROJECT_ID } from "@/lib/tasks-page-shared";
 import { createClient } from "@/lib/supabase/server";
 import type { GridSessionInput } from "@/components/effort-calendar-grids";
 import { revalidatePath } from "next/cache";
@@ -20,7 +21,7 @@ export type TasksCalendarSession = GridSessionInput & {
   project_name: string;
   /** Links back to the integration Effort view so the user can open it from the detail popover. */
   integration_href: string;
-  integration_href_label: "Open on integration" | "Open on project";
+  integration_href_label: "Open on integration" | "Open on project" | "Open internal";
 };
 
 export type LoadTasksCalendarResult = {
@@ -86,6 +87,20 @@ async function loadOwnedProjectTrack(
   return track;
 }
 
+async function loadOwnedInternalInitiative(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  initiativeId: string,
+): Promise<{ id: string } | null> {
+  const { data } = await supabase
+    .from("internal_initiatives")
+    .select("id")
+    .eq("id", initiativeId)
+    .eq("owner_id", userId)
+    .maybeSingle();
+  return data ?? null;
+}
+
 async function loadOwnedProjectIntegration(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
@@ -119,6 +134,183 @@ function revalidateTasksCalendarPaths(projectId: string, projectIntegrationId: s
   }
 }
 
+function revalidateInternalCalendarPaths(initiativeId: string | null) {
+  revalidatePath("/work");
+  revalidatePath("/tasks");
+  revalidatePath("/internal");
+  if (initiativeId) revalidatePath(`/internal/initiatives/${initiativeId}`);
+}
+
+type InternalTaskJoin = {
+  id: string;
+  title: string | null;
+  priority: string | null;
+  internal_track_id: string | null;
+  internal_initiative_id: string | null;
+};
+
+async function appendInternalTaskCalendarSessions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  startIso: string,
+  endExclusiveIso: string,
+  out: TasksCalendarSession[],
+): Promise<{ error?: string }> {
+  const { data: wsRows, error: wsErr } = await supabase
+    .from("internal_task_work_sessions")
+    .select(
+      `id, internal_task_id, started_at, finished_at, duration_hours, work_accomplished,
+       internal_tasks ( id, title, priority, internal_track_id, internal_initiative_id )`,
+    )
+    .not("finished_at", "is", null)
+    .gte("finished_at", startIso)
+    .lt("started_at", endExclusiveIso);
+  if (wsErr) return { error: wsErr.message };
+
+  const rows = wsRows ?? [];
+  if (rows.length === 0) return {};
+
+  const trackIds = new Set<string>();
+  const iniIds = new Set<string>();
+  for (const row of rows) {
+    const task = (Array.isArray(row.internal_tasks) ? row.internal_tasks[0] : row.internal_tasks) as
+      | InternalTaskJoin
+      | null
+      | undefined;
+    if (!task) continue;
+    if (task.internal_track_id) trackIds.add(task.internal_track_id);
+    if (task.internal_initiative_id) iniIds.add(task.internal_initiative_id);
+  }
+
+  const kindByTrackId = new Map<string, "admin" | "development">();
+  if (trackIds.size > 0) {
+    const { data: trk, error: trkErr } = await supabase
+      .from("internal_tracks")
+      .select("id, kind")
+      .eq("owner_id", userId)
+      .in("id", [...trackIds]);
+    if (trkErr) return { error: trkErr.message };
+    for (const t of trk ?? []) {
+      if (t.kind === "admin" || t.kind === "development") kindByTrackId.set(t.id, t.kind);
+    }
+  }
+
+  const titleByIniId = new Map<string, string>();
+  if (iniIds.size > 0) {
+    const { data: inv, error: invErr } = await supabase
+      .from("internal_initiatives")
+      .select("id, title")
+      .eq("owner_id", userId)
+      .in("id", [...iniIds]);
+    if (invErr) return { error: invErr.message };
+    for (const i of inv ?? []) {
+      titleByIniId.set(i.id, (i.title ?? "").trim() || "Initiative");
+    }
+  }
+
+  for (const row of rows) {
+    if (!row.finished_at) continue;
+    const task = (Array.isArray(row.internal_tasks) ? row.internal_tasks[0] : row.internal_tasks) as
+      | InternalTaskJoin
+      | null
+      | undefined;
+    if (!task) continue;
+
+    let destTrackId: string;
+    let integrationLabel: string;
+    let integrationHref: string;
+    if (task.internal_track_id) {
+      destTrackId = task.internal_track_id;
+      const k = kindByTrackId.get(task.internal_track_id) ?? "admin";
+      integrationLabel = k === "admin" ? "Admin" : "Development";
+      integrationHref = "/internal";
+    } else if (task.internal_initiative_id) {
+      destTrackId = task.internal_initiative_id;
+      integrationLabel = titleByIniId.get(task.internal_initiative_id) ?? "Initiative";
+      integrationHref = `/internal/initiatives/${task.internal_initiative_id}`;
+    } else {
+      continue;
+    }
+
+    out.push({
+      source: "task_work_session",
+      source_id: row.id as string,
+      started_at: row.started_at as string,
+      finished_at: row.finished_at as string,
+      duration_hours: Number(row.duration_hours),
+      integration_task_id: task.id,
+      title: (task.title ?? "").trim() || "Task",
+      work_accomplished: (row.work_accomplished as string | null) ?? null,
+      project_id: TASKS_PAGE_INTERNAL_PROJECT_ID,
+      project_track_id: destTrackId,
+      project_integration_id: null,
+      task_priority: (task.priority as "low" | "medium" | "high" | null) ?? null,
+      integration_label: integrationLabel,
+      project_name: "Internal",
+      integration_href: integrationHref,
+      integration_href_label: "Open internal",
+    });
+  }
+
+  return {};
+}
+
+async function appendInternalInitiativeManualCalendarSessions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  startIso: string,
+  endExclusiveIso: string,
+  out: TasksCalendarSession[],
+): Promise<{ error?: string }> {
+  const { data: ownedIni, error: iniErr } = await supabase
+    .from("internal_initiatives")
+    .select("id, title")
+    .eq("owner_id", userId);
+  if (iniErr) return { error: iniErr.message };
+  const iniRows = ownedIni ?? [];
+  if (iniRows.length === 0) return {};
+
+  const iniIds = iniRows.map((r) => r.id);
+  const titleByIniId = new Map(
+    iniRows.map((i) => [i.id, ((i.title ?? "").trim() || "Initiative") as string]),
+  );
+
+  const { data: manualRows, error: manErr } = await supabase
+    .from("internal_initiative_manual_effort_entries")
+    .select(
+      "id, internal_initiative_id, entry_type, title, started_at, finished_at, duration_hours, work_accomplished",
+    )
+    .in("internal_initiative_id", iniIds)
+    .gte("finished_at", startIso)
+    .lt("started_at", endExclusiveIso);
+
+  if (manErr) return { error: manErr.message };
+
+  for (const row of manualRows ?? []) {
+    const iniId = row.internal_initiative_id as string;
+    out.push({
+      source: "manual",
+      source_id: row.id as string,
+      started_at: row.started_at as string,
+      finished_at: row.finished_at as string,
+      duration_hours: Number(row.duration_hours),
+      integration_task_id: null,
+      entry_type: row.entry_type === "meeting" ? "meeting" : "task",
+      title: String(row.title ?? "").trim() || (row.entry_type === "meeting" ? "Meeting" : "Task"),
+      work_accomplished: (row.work_accomplished as string | null) ?? null,
+      project_id: TASKS_PAGE_INTERNAL_PROJECT_ID,
+      project_track_id: iniId,
+      project_integration_id: null,
+      task_priority: null,
+      integration_label: titleByIniId.get(iniId) ?? "Initiative",
+      project_name: "Internal",
+      integration_href: `/internal/initiatives/${iniId}`,
+      integration_href_label: "Open internal",
+    });
+  }
+  return {};
+}
+
 /**
  * Load all work sessions and manual effort entries across the user's active projects
  * for a given wall-clock window [startIso, endExclusiveIso).
@@ -142,8 +334,10 @@ export async function loadTasksCalendarSessions(
     .eq("owner_id", user.id)
     .is("completed_at", null);
   if (projectErr) return { error: projectErr.message };
-  if (!projectRows || projectRows.length === 0) return { sessions: [] };
 
+  const sessions: TasksCalendarSession[] = [];
+
+  if (projectRows && projectRows.length > 0) {
   const projectById = new Map(
     projectRows.map((p) => {
       const colorKey = normalizeProjectColorKey(p.project_color_key);
@@ -324,8 +518,6 @@ export async function loadTasksCalendarSessions(
     return { error: manualEntriesRes.error.message };
   }
 
-  const sessions: TasksCalendarSession[] = [];
-
   // Work sessions
   for (const row of workSessionsRes.data ?? []) {
     if (!row.finished_at) continue;
@@ -401,6 +593,26 @@ export async function loadTasksCalendarSessions(
     });
   }
 
+  }
+
+  const internalErr = await appendInternalTaskCalendarSessions(
+    supabase,
+    user.id,
+    startIso,
+    endExclusiveIso,
+    sessions,
+  );
+  if (internalErr.error) return { error: internalErr.error };
+
+  const internalManualErr = await appendInternalInitiativeManualCalendarSessions(
+    supabase,
+    user.id,
+    startIso,
+    endExclusiveIso,
+    sessions,
+  );
+  if (internalManualErr.error) return { error: internalManualErr.error };
+
   return { sessions };
 }
 
@@ -435,9 +647,30 @@ export async function createTasksCalendarManualEntry(payload: {
   if (durationHours == null) return { error: "Duration must be in 15-minute increments" };
 
   const track = await loadOwnedProjectTrack(supabase, user.id, payload.project_track_id);
-  if (!track) return { error: "Not found" };
+  const internalInitiative = track
+    ? null
+    : await loadOwnedInternalInitiative(supabase, user.id, payload.project_track_id);
+  if (!track && !internalInitiative) return { error: "Not found" };
 
   const workAccomplished = payload.work_accomplished?.trim() ? payload.work_accomplished.trim() : null;
+
+  if (internalInitiative) {
+    const { error: intErr } = await supabase.from("internal_initiative_manual_effort_entries").insert({
+      internal_initiative_id: internalInitiative.id,
+      entry_type: payload.entry_type,
+      title,
+      started_at: started.toISOString(),
+      finished_at: finished.toISOString(),
+      duration_hours: durationHours,
+      work_accomplished: workAccomplished,
+    });
+    if (intErr) return { error: intErr.message };
+    revalidateInternalCalendarPaths(internalInitiative.id);
+    return {};
+  }
+
+  if (!track) return { error: "Not found" };
+
   const createRes = await supabase.from("integration_manual_effort_entries").insert({
     project_track_id: payload.project_track_id,
     project_integration_id: track.project_integration_id,
@@ -506,6 +739,41 @@ export async function updateTasksCalendarManualEntry(payload: {
 
   const durationHours = normalizeQuarterDurationHours(finished.getTime() - started.getTime());
   if (durationHours == null) return { error: "Duration must be in 15-minute increments" };
+
+  const { data: internalExisting } = await supabase
+    .from("internal_initiative_manual_effort_entries")
+    .select("id, internal_initiative_id")
+    .eq("id", payload.manual_entry_id)
+    .maybeSingle();
+
+  if (internalExisting?.id) {
+    const nextInit = await loadOwnedInternalInitiative(supabase, user.id, payload.project_track_id);
+    if (!nextInit) return { error: "Not found" };
+    const workAccomplishedInternal = payload.work_accomplished?.trim()
+      ? payload.work_accomplished.trim()
+      : null;
+    const { data: intUpd, error: intUpdErr } = await supabase
+      .from("internal_initiative_manual_effort_entries")
+      .update({
+        internal_initiative_id: nextInit.id,
+        entry_type: payload.entry_type,
+        title,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        duration_hours: durationHours,
+        work_accomplished: workAccomplishedInternal,
+      })
+      .eq("id", payload.manual_entry_id)
+      .select("id")
+      .maybeSingle();
+    if (intUpdErr) return { error: intUpdErr.message };
+    if (!intUpd) return { error: "Not found" };
+    revalidateInternalCalendarPaths(internalExisting.internal_initiative_id);
+    if (internalExisting.internal_initiative_id !== nextInit.id) {
+      revalidateInternalCalendarPaths(nextInit.id);
+    }
+    return {};
+  }
 
   const nextTrack = await loadOwnedProjectTrack(supabase, user.id, payload.project_track_id);
   if (!nextTrack) return { error: "Not found" };
@@ -615,6 +883,43 @@ export async function rescheduleTasksCalendarSession(payload: {
   if (!isOnQuarterHour(nextStart)) return { error: "Times must be in 15-minute increments" };
 
   if (payload.source === "manual") {
+    const intManualRes = await supabase
+      .from("internal_initiative_manual_effort_entries")
+      .select("id, internal_initiative_id, started_at, finished_at, duration_hours")
+      .eq("id", payload.source_id)
+      .maybeSingle();
+    if (intManualRes.error) return { error: intManualRes.error.message };
+    if (intManualRes.data) {
+      const { data: inv } = await supabase
+        .from("internal_initiatives")
+        .select("id")
+        .eq("id", intManualRes.data.internal_initiative_id)
+        .eq("owner_id", user.id)
+        .maybeSingle();
+      if (!inv) return { error: "Not found" };
+
+      const intDurationHours = normalizeQuarterDurationHours(
+        Number(intManualRes.data.duration_hours) * 3_600_000,
+      );
+      if (intDurationHours == null) return { error: "Invalid existing duration" };
+      const intDurationMs = Math.round(intDurationHours * 3_600_000);
+      const intNextFinish = new Date(nextStart.getTime() + intDurationMs);
+      if (!isOnQuarterHour(intNextFinish)) return { error: "Times must be in 15-minute increments" };
+
+      const { error: intManErr } = await supabase
+        .from("internal_initiative_manual_effort_entries")
+        .update({
+          started_at: nextStart.toISOString(),
+          finished_at: intNextFinish.toISOString(),
+          duration_hours: intDurationHours,
+        })
+        .eq("id", payload.source_id);
+      if (intManErr) return { error: intManErr.message };
+
+      revalidateInternalCalendarPaths(inv.id);
+      return {};
+    }
+
     const rowRes = await supabase
       .from("integration_manual_effort_entries")
       .select("id, project_track_id, started_at, finished_at, duration_hours")
@@ -695,35 +1000,92 @@ export async function rescheduleTasksCalendarSession(payload: {
     .eq("id", payload.source_id)
     .maybeSingle();
   if (workSessionErr) return { error: workSessionErr.message };
-  if (!workSession) return { error: "Not found" };
-  if (!workSession.finished_at) return { error: "Cannot reschedule an active session" };
 
-  const { data: task } = await supabase
-    .from("integration_tasks")
-    .select("id, project_track_id")
-    .eq("id", workSession.integration_task_id)
+  if (workSession) {
+    if (!workSession.finished_at) return { error: "Cannot reschedule an active session" };
+
+    const { data: task } = await supabase
+      .from("integration_tasks")
+      .select("id, project_track_id")
+      .eq("id", workSession.integration_task_id)
+      .maybeSingle();
+    if (!task) return { error: "Not found" };
+
+    const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
+    if (!track) return { error: "Not found" };
+
+    const durationHours = normalizeQuarterDurationHours(Number(workSession.duration_hours) * 3_600_000);
+    if (durationHours == null) return { error: "Invalid existing duration" };
+    const durationMs = Math.round(durationHours * 3_600_000);
+    const nextFinish = new Date(nextStart.getTime() + durationMs);
+    if (!isOnQuarterHour(nextFinish)) return { error: "Times must be in 15-minute increments" };
+
+    const { error } = await supabase
+      .from("integration_task_work_sessions")
+      .update({
+        started_at: nextStart.toISOString(),
+        finished_at: nextFinish.toISOString(),
+        duration_hours: durationHours,
+      })
+      .eq("id", payload.source_id);
+    if (error) return { error: error.message };
+
+    revalidateTasksCalendarPaths(track.project_id, track.project_integration_id);
+    return {};
+  }
+
+  const { data: internalWs, error: internalWsErr } = await supabase
+    .from("internal_task_work_sessions")
+    .select("id, internal_task_id, started_at, finished_at, duration_hours")
+    .eq("id", payload.source_id)
     .maybeSingle();
-  if (!task) return { error: "Not found" };
+  if (internalWsErr) return { error: internalWsErr.message };
+  if (!internalWs) return { error: "Not found" };
+  if (!internalWs.finished_at) return { error: "Cannot reschedule an active session" };
 
-  const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
-  if (!track) return { error: "Not found" };
+  const { data: internalTask } = await supabase
+    .from("internal_tasks")
+    .select("id, internal_track_id, internal_initiative_id")
+    .eq("id", internalWs.internal_task_id)
+    .maybeSingle();
+  if (!internalTask) return { error: "Not found" };
 
-  const durationHours = normalizeQuarterDurationHours(Number(workSession.duration_hours) * 3_600_000);
-  if (durationHours == null) return { error: "Invalid existing duration" };
-  const durationMs = Math.round(durationHours * 3_600_000);
-  const nextFinish = new Date(nextStart.getTime() + durationMs);
-  if (!isOnQuarterHour(nextFinish)) return { error: "Times must be in 15-minute increments" };
+  if (internalTask.internal_initiative_id) {
+    const { data: inv } = await supabase
+      .from("internal_initiatives")
+      .select("id")
+      .eq("id", internalTask.internal_initiative_id)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!inv) return { error: "Not found" };
+  } else if (internalTask.internal_track_id) {
+    const { data: tr } = await supabase
+      .from("internal_tracks")
+      .select("id")
+      .eq("id", internalTask.internal_track_id)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!tr) return { error: "Not found" };
+  } else {
+    return { error: "Not found" };
+  }
 
-  const { error } = await supabase
-    .from("integration_task_work_sessions")
+  const intDurationHours = normalizeQuarterDurationHours(Number(internalWs.duration_hours) * 3_600_000);
+  if (intDurationHours == null) return { error: "Invalid existing duration" };
+  const intDurationMs = Math.round(intDurationHours * 3_600_000);
+  const intNextFinish = new Date(nextStart.getTime() + intDurationMs);
+  if (!isOnQuarterHour(intNextFinish)) return { error: "Times must be in 15-minute increments" };
+
+  const { error: intUpdErr } = await supabase
+    .from("internal_task_work_sessions")
     .update({
       started_at: nextStart.toISOString(),
-      finished_at: nextFinish.toISOString(),
-      duration_hours: durationHours,
+      finished_at: intNextFinish.toISOString(),
+      duration_hours: intDurationHours,
     })
     .eq("id", payload.source_id);
-  if (error) return { error: error.message };
+  if (intUpdErr) return { error: intUpdErr.message };
 
-  revalidateTasksCalendarPaths(track.project_id, track.project_integration_id);
+  revalidateInternalCalendarPaths(internalTask.internal_initiative_id);
   return {};
 }

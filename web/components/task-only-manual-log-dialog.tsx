@@ -8,6 +8,7 @@ import {
   slotToTimeLabel,
 } from "@/components/effort-calendar-grids";
 import { formatLocalYmd } from "@/lib/integration-effort-buckets";
+import { createInternalTaskWorkSession } from "@/lib/actions/internal-tasks";
 import { createTasksCalendarManualEntry } from "@/lib/actions/tasks-calendar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -27,8 +28,16 @@ export function defaultManualLogDayAndSlots(): { dayYmd: string; startSlot: numb
 
 export type TaskOnlyManualLogDialogProps = {
   open: boolean;
-  /** Target track for `integration_manual_effort_entries` (integration or PM track). */
-  projectTrackId: string;
+  /**
+   * Calendar manual-entry parent: `project_tracks.id`, or an internal initiative id
+   * (see `createTasksCalendarManualEntry`). Leave empty when `internalWorkSessionTaskId` is set.
+   */
+  projectTrackId?: string;
+  /**
+   * When set, records an `internal_task_work_sessions` row and completes the internal task
+   * (Admin / Development / single internal track). Skips calendar manual-entry tables.
+   */
+  internalWorkSessionTaskId?: string | null;
   /** Shown under the title (e.g. project · integration or project · track). */
   subtitle: string;
   /** Prefilled task title (user may edit before save). */
@@ -44,7 +53,8 @@ export type TaskOnlyManualLogDialogProps = {
 
 export function TaskOnlyManualLogDialog({
   open,
-  projectTrackId,
+  projectTrackId = "",
+  internalWorkSessionTaskId = null,
   subtitle,
   initialTitle,
   taskId,
@@ -76,7 +86,7 @@ export function TaskOnlyManualLogDialog({
   useEffect(() => {
     const el = dialogRef.current;
     if (!el) return;
-    if (open && projectTrackId) {
+    if (open && (projectTrackId || internalWorkSessionTaskId)) {
       const d = defaultManualLogDayAndSlots();
       setDayYmd(d.dayYmd);
       setStartSlot(d.startSlot);
@@ -91,10 +101,9 @@ export function TaskOnlyManualLogDialog({
     } else if (!open && el.open) {
       el.close();
     }
-  }, [open, projectTrackId, initialTitle]);
+  }, [open, projectTrackId, internalWorkSessionTaskId, initialTitle]);
 
   async function completeTask() {
-    if (!projectTrackId || !taskId) return;
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       setError("Title is required");
@@ -104,13 +113,49 @@ export function TaskOnlyManualLogDialog({
       setError("End time must be after start time");
       return;
     }
+    const wsId = internalWorkSessionTaskId?.trim() ?? "";
+    const trackOrInitiativeId = projectTrackId.trim();
+    if (!wsId && !trackOrInitiativeId) return;
+    if (!taskId) return;
+
     setSaving(true);
     setError(null);
     const started = slotToLocalDateTime(dayYmd, startSlot);
     const finished = slotToLocalDateTime(dayYmd, clamp(endSlot, 1, 95));
     try {
+      if (wsId) {
+        const durationMs = finished.getTime() - started.getTime();
+        const rawHours = durationMs / 3_600_000;
+        const duration_hours = Math.round(rawHours * 4) / 4;
+        if (!Number.isFinite(duration_hours) || duration_hours <= 0) {
+          setError("Invalid duration");
+          return;
+        }
+        if (Math.abs(rawHours - duration_hours) > 1e-6) {
+          setError("Duration must be in 15-minute increments");
+          return;
+        }
+        const res = await createInternalTaskWorkSession(wsId, {
+          started_at: started.toISOString(),
+          finished_at: finished.toISOString(),
+          duration_hours,
+          work_accomplished: workAccomplished.trim() ? workAccomplished.trim() : null,
+          complete_task: true,
+        });
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        try {
+          await onSaved?.();
+        } finally {
+          closeDialog();
+        }
+        return;
+      }
+
       const res = await createTasksCalendarManualEntry({
-        project_track_id: projectTrackId,
+        project_track_id: trackOrInitiativeId,
         entry_type: "task",
         title: trimmedTitle,
         started_at: started.toISOString(),
@@ -163,7 +208,7 @@ export function TaskOnlyManualLogDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {open && projectTrackId ? (
+          {open && (projectTrackId || internalWorkSessionTaskId) ? (
             <div className="grid grid-cols-1 gap-3">
               <label className="text-xs font-medium text-muted-canvas">
                 Title

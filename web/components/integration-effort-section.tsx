@@ -1,7 +1,12 @@
 "use client";
 
-import { patchProjectIntegrationEstimatedEffort } from "@/lib/actions/projects";
+import {
+  createInternalInitiativeManualEffortEntry,
+  updateInternalInitiativeManualEffortEntry,
+} from "@/lib/actions/internal-initiative-manual-effort";
+import { patchInternalInitiativeEstimatedEffort } from "@/lib/actions/internal-tasks";
 import { createIntegrationManualEffortEntry, updateIntegrationManualEffortEntry } from "@/lib/actions/integration-manual-effort";
+import { patchProjectIntegrationEstimatedEffort } from "@/lib/actions/projects";
 import { CanvasArrowLeftIcon, CanvasArrowRightIcon } from "@/components/canvas-arrow-icons";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
@@ -79,18 +84,27 @@ function formatEstimateFieldValue(hours: number | null): string {
   return Number.isInteger(hours) ? String(hours) : String(parseFloat(hours.toFixed(2)));
 }
 
+export type IntegrationEffortTarget =
+  | {
+      kind: "project_integration";
+      projectIntegrationId: string;
+      projectLabel: string;
+      integrationLabel: string;
+    }
+  | {
+      kind: "internal_initiative";
+      initiativeId: string;
+      projectLabel: string;
+      integrationLabel: string;
+    };
 
 export function IntegrationEffortSection({
-  projectIntegrationId,
-  projectLabel,
-  integrationLabel,
+  effortTarget,
   initialEstimatedEffortHours,
   sessions,
   className = "",
 }: {
-  projectIntegrationId: string;
-  projectLabel: string;
-  integrationLabel: string;
+  effortTarget: IntegrationEffortTarget;
   initialEstimatedEffortHours: number | null;
   sessions: EffortSessionInput[];
   className?: string;
@@ -137,7 +151,10 @@ export function IntegrationEffortSection({
       const gen = ++saveGen.current;
       setEstimateBanner("saving");
       setEstimateBannerText(null);
-      const res = await patchProjectIntegrationEstimatedEffort(projectIntegrationId, parsed.hours);
+      const res =
+        effortTarget.kind === "project_integration"
+          ? await patchProjectIntegrationEstimatedEffort(effortTarget.projectIntegrationId, parsed.hours)
+          : await patchInternalInitiativeEstimatedEffort(effortTarget.initiativeId, parsed.hours);
       if (gen !== saveGen.current) return;
       if (res.error) {
         setEstimateBanner("error");
@@ -151,7 +168,7 @@ export function IntegrationEffortSection({
         if (gen === saveGen.current) setEstimateBanner("idle");
       }, 2000);
     },
-    [projectIntegrationId, router],
+    [effortTarget, router],
   );
 
   const runEstimateSaveIfChanged = () => {
@@ -273,26 +290,32 @@ export function IntegrationEffortSection({
     const finishedSlot = clamp(createDraft.endSlot, 1, 95);
     const finished = slotToLocalDateTime(createDraft.dayYmd, finishedSlot);
 
+    const manualPayload = {
+      entry_type: createDraft.entry_type,
+      title,
+      started_at: started.toISOString(),
+      finished_at: finished.toISOString(),
+      work_accomplished: createDraft.work_accomplished.trim()
+        ? createDraft.work_accomplished.trim()
+        : null,
+    };
+
     const res =
-      createDraft.mode === "edit" && createDraft.manualEntryId
-        ? await updateIntegrationManualEffortEntry(projectIntegrationId, createDraft.manualEntryId, {
-            entry_type: createDraft.entry_type,
-            title,
-            started_at: started.toISOString(),
-            finished_at: finished.toISOString(),
-            work_accomplished: createDraft.work_accomplished.trim()
-              ? createDraft.work_accomplished.trim()
-              : null,
-          })
-        : await createIntegrationManualEffortEntry(projectIntegrationId, {
-            entry_type: createDraft.entry_type,
-            title,
-            started_at: started.toISOString(),
-            finished_at: finished.toISOString(),
-            work_accomplished: createDraft.work_accomplished.trim()
-              ? createDraft.work_accomplished.trim()
-              : null,
-          });
+      effortTarget.kind === "project_integration"
+        ? createDraft.mode === "edit" && createDraft.manualEntryId
+          ? await updateIntegrationManualEffortEntry(
+              effortTarget.projectIntegrationId,
+              createDraft.manualEntryId,
+              manualPayload,
+            )
+          : await createIntegrationManualEffortEntry(effortTarget.projectIntegrationId, manualPayload)
+        : createDraft.mode === "edit" && createDraft.manualEntryId
+          ? await updateInternalInitiativeManualEffortEntry(
+              effortTarget.initiativeId,
+              createDraft.manualEntryId,
+              manualPayload,
+            )
+          : await createInternalInitiativeManualEffortEntry(effortTarget.initiativeId, manualPayload);
 
     if (res.error) {
       setCreateDraft((prev) =>
@@ -302,7 +325,7 @@ export function IntegrationEffortSection({
     }
     closeCreateModal();
     router.refresh();
-  }, [createDraft, projectIntegrationId, closeCreateModal, router]);
+  }, [createDraft, effortTarget, closeCreateModal, router]);
 
   const viewSegIndex = view === "day" ? 0 : view === "week" ? 1 : 2;
   const viewSegWidthPx = 76; // 4.75rem @ 16px root
@@ -610,9 +633,9 @@ export function IntegrationEffortSection({
               </h2>
               <p
                 className="mt-0.5 truncate text-sm text-muted-canvas"
-                title={`${projectLabel} · ${integrationLabel}`}
+                title={`${effortTarget.projectLabel} · ${effortTarget.integrationLabel}`}
               >
-                {projectLabel} · {integrationLabel}
+                {effortTarget.projectLabel} · {effortTarget.integrationLabel}
               </p>
             </div>
             <DialogCloseButton onClick={closeCreateModal} />

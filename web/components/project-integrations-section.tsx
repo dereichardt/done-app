@@ -63,7 +63,8 @@ const dialogBaseClass =
 
 function indicatorToActiveSessionDto(i: ActiveWorkSessionIndicatorDTO) {
   return {
-    integration_task_id: i.integration_task_id,
+    scope: i.scope,
+    task_id: i.task_id,
     started_at: i.started_at,
     paused_ms_accumulated: i.paused_ms_accumulated,
     pause_started_at: i.pause_started_at,
@@ -319,16 +320,16 @@ export function ProjectIntegrationsSection({
 
       {activeSessionIndicator && activeSessionIndicator.project_id === projectId ? (
         <ActiveWorkSessionDialog
-          key={activeSessionIndicator.integration_task_id}
+          key={activeSessionIndicator.task_id}
           dialogRef={activeWorkSessionDialogRef}
-          taskId={activeSessionIndicator.integration_task_id}
+          taskId={activeSessionIndicator.task_id}
           taskTitle={activeSessionIndicator.task_title}
           integrationLabel={activeSessionIndicator.integration_label}
           projectLabel={activeSessionIndicator.project_name}
           activeSession={indicatorToActiveSessionDto(activeSessionIndicator)}
           onActiveSessionChange={(s) => {
             setActiveSessionIndicator((prev) =>
-              prev && prev.integration_task_id === s.integration_task_id
+              prev && prev.task_id === s.task_id
                 ? {
                     ...prev,
                     started_at: s.started_at,

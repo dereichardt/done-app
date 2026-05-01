@@ -43,6 +43,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/projects") ||
     pathname.startsWith("/work") ||
     pathname.startsWith("/tasks") ||
+    pathname.startsWith("/internal") ||
     pathname.startsWith("/integrations") ||
     pathname.startsWith("/settings");
 

@@ -1,10 +1,7 @@
 "use client";
 
 import { CanvasSelect } from "@/components/canvas-select";
-import type {
-  TasksPageTrack,
-  TasksPageProject,
-} from "@/lib/actions/tasks-page";
+import type { TasksPageProject, TasksPageTrack } from "@/lib/tasks-page-shared";
 import { useMemo, type ReactNode } from "react";
 
 export type TasksFiltersValue = {

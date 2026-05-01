@@ -10,7 +10,7 @@ import {
   taskPriorityOptions,
   type IntegrationTaskRow,
 } from "@/lib/integration-task-helpers";
-import { toggleIntegrationTaskCompletion } from "@/lib/actions/integration-tasks";
+import { toggleAnyTaskCompletion } from "@/lib/actions/tasks-page";
 import {
   useActionState,
   useEffect,
@@ -230,7 +230,7 @@ export function TaskCompleteButton({
   onLongPressLog?: () => void;
 }) {
   const [updState, updAction, updPending] = useActionState(
-    async (_prev: { error?: string } | void, _formData: FormData) => toggleIntegrationTaskCompletion(taskId),
+    async (_prev: { error?: string } | void, _formData: FormData) => toggleAnyTaskCompletion(taskId),
     {},
   );
 
@@ -341,7 +341,7 @@ export function TaskUndoButton({
   onUndoSuccess?: () => void | Promise<void>;
 }) {
   const [undoState, undoAction, undoPending] = useActionState(
-    async (_prev: { error?: string } | void, _formData: FormData) => toggleIntegrationTaskCompletion(taskId),
+    async (_prev: { error?: string } | void, _formData: FormData) => toggleAnyTaskCompletion(taskId),
     {},
   );
 

@@ -9,6 +9,8 @@ export type IntegrationTaskRow = {
   priority: "low" | "medium" | "high";
   /** ISO timestamp when marked done; null if open or never recorded. */
   completed_at: string | null;
+  /** Set for merged Admin + Development internal track lists. */
+  internal_track_kind?: "admin" | "development";
 };
 
 export type IntegrationTaskWorkSessionRow = {

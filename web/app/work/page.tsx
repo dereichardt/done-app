@@ -23,7 +23,11 @@ export default async function WorkPage() {
       <div>
         <h1 className="heading-page">Work</h1>
         <p className="subheading-page mt-2">
-          You don't have any active projects yet. Create a project to start tracking tasks here.
+          You don&apos;t have any active projects yet. Create a project to start tracking tasks here, or use{" "}
+          <a href="/internal" className="font-medium hover:underline" style={{ color: "var(--app-action)" }}>
+            Internal
+          </a>{" "}
+          for Admin, Development, and initiative work.
         </p>
       </div>
     );

@@ -3,6 +3,7 @@ export {
   IntegrationTasksPanel,
   TaskWorkRow,
   type IntegrationTaskRow,
+  type IntegrationTasksPanelInternalCreate,
   type IntegrationTaskWorkSessionRow,
 } from "@/app/projects/[id]/integrations/[projectIntegrationId]/integration-tasks-panel";
 export type { ActiveWorkSessionDTO } from "@/lib/actions/integration-tasks";

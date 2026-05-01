@@ -252,7 +252,8 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
   let activeWorkSession: ActiveWorkSessionDTO | null = null;
   const globalActiveWorkSession: ActiveWorkSessionDTO | null = globalActiveRow
     ? {
-        integration_task_id: globalActiveRow.integration_task_id,
+        scope: "integration",
+        task_id: globalActiveRow.integration_task_id,
         started_at: globalActiveRow.started_at,
         paused_ms_accumulated: Number(globalActiveRow.paused_ms_accumulated ?? 0),
         pause_started_at: globalActiveRow.pause_started_at,
@@ -271,7 +272,7 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
     }
   }
 
-  if (globalActiveWorkSession && taskIdSet.has(globalActiveWorkSession.integration_task_id)) {
+  if (globalActiveWorkSession && taskIdSet.has(globalActiveWorkSession.task_id)) {
     activeWorkSession = globalActiveWorkSession;
   }
 
@@ -370,9 +371,12 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
           <div className="max-h-[85vh] min-h-[min(28rem,55vh)] shrink-0">
             <IntegrationEffortSection
               className="h-full min-h-0 overflow-y-auto"
-              projectIntegrationId={projectIntegrationId}
-              projectLabel={project.customer_name ?? ""}
-              integrationLabel={integrationDisplayTitle}
+              effortTarget={{
+                kind: "project_integration",
+                projectIntegrationId,
+                projectLabel: project.customer_name ?? "",
+                integrationLabel: integrationDisplayTitle,
+              }}
               initialEstimatedEffortHours={estimatedEffortHoursNorm}
               sessions={effortSessions}
             />

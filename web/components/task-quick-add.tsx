@@ -7,6 +7,11 @@ import {
   syncAddTaskTitleHeight,
 } from "@/components/task-row";
 import { createIntegrationTask } from "@/lib/actions/integration-tasks";
+import { createInternalTask } from "@/lib/actions/internal-tasks";
+import {
+  TASKS_PAGE_INTERNAL_PROJECT_ID,
+  type TasksPageInternalDestination,
+} from "@/lib/tasks-page-shared";
 import {
   taskPriorityOptions,
   type IntegrationTaskRow,
@@ -54,15 +59,24 @@ type TaskQuickAddCommonProps = {
   onCancel?: () => void;
 };
 
+/** When set on `mode: "integration"`, creates `internal_tasks` instead of `integration_tasks`. */
+export type TaskQuickAddInternalCreate =
+  | { variant: "initiative"; initiativeId: string }
+  | { variant: "track"; trackId: string }
+  | { variant: "pick_track"; adminId: string; developmentId: string };
+
 type TaskQuickAddIntegrationModeProps = TaskQuickAddCommonProps & {
   mode: "integration";
   projectTrackId: string;
+  internalCreate?: TaskQuickAddInternalCreate;
 };
 
 type TaskQuickAddGlobalModeProps = TaskQuickAddCommonProps & {
   mode: "global";
   projects: TaskQuickAddProjectOption[];
   integrations: TaskQuickAddIntegrationOption[];
+  /** When the user picks the Internal project, destinations map to internal tracks/initiatives. */
+  internalDestinations?: TasksPageInternalDestination[];
   /** Optional initial selection (sticky from URL on the Tasks page). */
   initialProjectId?: string | null;
   initialProjectTrackId?: string | null;
@@ -79,6 +93,9 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
 
   const projects = isGlobal ? props.projects : [];
   const integrations = isGlobal ? props.integrations : [];
+  const internalDestinations: TasksPageInternalDestination[] = isGlobal
+    ? (props.internalDestinations ?? [])
+    : [];
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     if (!isGlobal) return "";
@@ -116,8 +133,78 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     ? selectedProjectIntegrationId
     : props.projectTrackId;
 
+  const integrationInternalCreate = !isGlobal && props.mode === "integration" ? props.internalCreate : undefined;
+
+  const [internalPickTrackId, setInternalPickTrackId] = useState<string>(() =>
+    integrationInternalCreate?.variant === "pick_track" ? integrationInternalCreate.adminId : "",
+  );
+
   const [createState, createAction, createPending] = useActionState(
     async (_prev: { error?: string } | void, formData: FormData) => {
+      if (isGlobal && selectedProjectId === TASKS_PAGE_INTERNAL_PROJECT_ID) {
+        if (!effectiveProjectIntegrationId) {
+          return { error: "Select a project track before adding a task." };
+        }
+        const dest = internalDestinations.find((d) => d.id === effectiveProjectIntegrationId);
+        if (!dest) return { error: "Select an internal destination." };
+        const title = String(formData.get("title") ?? "").trim();
+        const priorityRaw = String(formData.get("priority") ?? "medium").trim();
+        const dueRaw = String(formData.get("due_date") ?? "").trim();
+        if (!title) return { error: "Title is required" };
+        if (priorityRaw !== "low" && priorityRaw !== "medium" && priorityRaw !== "high") {
+          return { error: "Invalid priority" };
+        }
+        const due_date = dueRaw === "" ? null : dueRaw;
+        return createInternalTask({
+          internal_track_id: dest.kind === "initiative" ? null : dest.id,
+          internal_initiative_id: dest.kind === "initiative" ? dest.id : null,
+          title,
+          priority: priorityRaw,
+          due_date,
+        });
+      }
+
+      if (!isGlobal && props.mode === "integration" && props.internalCreate) {
+        const ic = props.internalCreate;
+        const title = String(formData.get("title") ?? "").trim();
+        const priorityRaw = String(formData.get("priority") ?? "medium").trim();
+        const dueRaw = String(formData.get("due_date") ?? "").trim();
+        if (!title) return { error: "Title is required" };
+        if (priorityRaw !== "low" && priorityRaw !== "medium" && priorityRaw !== "high") {
+          return { error: "Invalid priority" };
+        }
+        const due_date = dueRaw === "" ? null : dueRaw;
+        if (ic.variant === "initiative") {
+          return createInternalTask({
+            internal_track_id: null,
+            internal_initiative_id: ic.initiativeId,
+            title,
+            priority: priorityRaw,
+            due_date,
+          });
+        }
+        if (ic.variant === "track") {
+          return createInternalTask({
+            internal_track_id: ic.trackId,
+            internal_initiative_id: null,
+            title,
+            priority: priorityRaw,
+            due_date,
+          });
+        }
+        const tid = String(formData.get("internal_type_pick") ?? "").trim();
+        if (tid !== ic.adminId && tid !== ic.developmentId) {
+          return { error: "Invalid type" };
+        }
+        return createInternalTask({
+          internal_track_id: tid,
+          internal_initiative_id: null,
+          title,
+          priority: priorityRaw,
+          due_date,
+        });
+      }
+
       if (!effectiveProjectIntegrationId) {
         return { error: "Select a project track before adding a task." };
       }
@@ -161,7 +248,11 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     [integrationsForSelectedProject],
   );
 
-  const noIntegrationsForProject = isGlobal && integrationsForSelectedProject.length === 0;
+  const noIntegrationsForProject =
+    isGlobal &&
+    (selectedProjectId === TASKS_PAGE_INTERNAL_PROJECT_ID
+      ? internalDestinations.length === 0
+      : integrationsForSelectedProject.length === 0);
 
   const titleField = (
     <label
@@ -226,6 +317,27 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     </label>
   ) : null;
 
+  const internalPickField =
+    !isGlobal && integrationInternalCreate?.variant === "pick_track" ? (
+      <label
+        className={`canvas-select-field flex min-w-0 flex-col gap-1 text-xs ${
+          isDialogLayout ? "w-full sm:max-w-[14rem]" : "w-[6.75rem] shrink-0 sm:w-[7.5rem]"
+        }`}
+        style={{ color: "var(--app-text-muted)" }}
+      >
+        Type
+        <CanvasSelect
+          name="internal_type_pick"
+          options={[
+            { value: integrationInternalCreate.adminId, label: "Admin" },
+            { value: integrationInternalCreate.developmentId, label: "Development" },
+          ]}
+          value={internalPickTrackId}
+          onValueChange={(v) => setInternalPickTrackId(v)}
+        />
+      </label>
+    ) : null;
+
   const priorityField = (
     <label
       className={`canvas-select-field flex min-w-0 flex-col gap-1 text-xs ${
@@ -264,10 +376,16 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     </label>
   );
 
+  const integrationAddBlocked =
+    !isGlobal &&
+    props.mode === "integration" &&
+    !props.internalCreate &&
+    String(effectiveProjectIntegrationId ?? "").trim() === "";
+
   const submitButton = (
     <button
       type="submit"
-      disabled={createPending || noIntegrationsForProject}
+      disabled={createPending || noIntegrationsForProject || integrationAddBlocked}
       className="btn-cta-dark h-9 min-h-9 shrink-0 px-3 text-xs whitespace-nowrap"
     >
       {createPending ? "Adding…" : "Add task"}
@@ -291,6 +409,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
               {integrationField}
             </div>
           ) : null}
+          {!isGlobal ? internalPickField : null}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-2">
             {priorityField}
             {dueField}
@@ -314,6 +433,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
           {titleField}
           {projectField}
           {integrationField}
+          {internalPickField}
           {priorityField}
           {dueField}
           <div className="flex min-h-0 shrink-0 flex-col items-end">
@@ -337,7 +457,9 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
       ) : null}
       {noIntegrationsForProject ? (
         <p className="text-xs text-muted-canvas">
-          This project has no tracks yet. Add one before creating a task.
+          {selectedProjectId === TASKS_PAGE_INTERNAL_PROJECT_ID
+            ? "Internal destinations are not available yet."
+            : "This project has no tracks yet. Add one before creating a task."}
         </p>
       ) : null}
     </form>

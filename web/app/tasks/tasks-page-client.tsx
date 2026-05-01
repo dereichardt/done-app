@@ -16,23 +16,28 @@ import {
 } from "@/components/task-quick-add";
 import type { TaskRowCrumb } from "@/components/task-row";
 import {
-  deleteIntegrationTask,
   startOrReplaceActiveWorkSession,
-  toggleIntegrationTaskCompletion,
-  updateIntegrationTaskDueDate,
-  updateIntegrationTaskPriority,
-  updateIntegrationTaskTitle,
   type ActiveWorkSessionDTO,
   type ActiveWorkSessionIndicatorDTO,
 } from "@/lib/actions/integration-tasks";
+import { startOrReplaceInternalActiveWorkSession } from "@/lib/actions/internal-tasks";
 import {
+  deleteAnyTask,
   loadTaskWorkSessionHistory,
   reorderTaskWithinGroup,
   rescheduleTaskByDrag,
+  toggleAnyTaskCompletion,
+  updateAnyTaskDueDate,
+  updateAnyTaskPriority,
+  updateAnyTaskTitle,
+} from "@/lib/actions/tasks-page";
+import {
+  tasksPageTaskProjectId,
+  tasksPageTaskTrackOrDestId,
   type TaskWorkSessionHistoryRow,
   type TasksPageSnapshot,
   type TasksPageTask,
-} from "@/lib/actions/tasks-page";
+} from "@/lib/tasks-page-shared";
 import { formatDateDisplay } from "@/lib/integration-task-helpers";
 import { formatRoundedHoursLabelFromRoundedMs } from "@/lib/work-session-duration";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -59,7 +64,8 @@ function indicatorToActiveSessionDto(
 ): ActiveWorkSessionDTO | null {
   if (!i) return null;
   return {
-    integration_task_id: i.integration_task_id,
+    scope: i.scope,
+    task_id: i.task_id,
     started_at: i.started_at,
     paused_ms_accumulated: i.paused_ms_accumulated,
     pause_started_at: i.pause_started_at,
@@ -167,6 +173,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
 
   const projects = initialSnapshot.projects;
   const tracks = initialSnapshot.tracks;
+  const internalDestinations = initialSnapshot.internalDestinations;
 
   const projectById = useMemo(
     () => new Map(projects.map((p) => [p.id, p] as const)),
@@ -187,8 +194,8 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
 
   const filterTask = useCallback(
     (t: TasksPageTask): boolean => {
-      if (filters.projectId && t.project_id !== filters.projectId) return false;
-      if (filters.projectTrackId && t.project_track_id !== filters.projectTrackId)
+      if (filters.projectId && tasksPageTaskProjectId(t) !== filters.projectId) return false;
+      if (filters.projectTrackId && tasksPageTaskTrackOrDestId(t) !== filters.projectTrackId)
         return false;
       if (filters.priority && t.priority !== filters.priority) return false;
       const q = filters.search.trim().toLowerCase();
@@ -216,11 +223,18 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
 
   const crumbForTask = useCallback(
     (task: TasksPageTask): TaskRowCrumb => {
+      if (task.scope === "internal") {
+        return {
+          projectName: "Internal",
+          integrationLabel: task.internal_context_label,
+          href: task.internal_detail_href,
+          projectColorVar: null,
+          projectColorTintPct: 10,
+        };
+      }
       const project = projectById.get(task.project_id);
       const track = trackById.get(task.project_track_id);
       const colorKey = project?.colorKey ?? null;
-      // Per-shade tint: dark (top row) is most saturated → smallest mix;
-      // light (bottom row) is washed out → bigger mix to register visibly.
       let tintPct = 7;
       if (colorKey?.endsWith("_medium")) tintPct = 11;
       else if (colorKey?.endsWith("_light")) tintPct = 15;
@@ -243,8 +257,12 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
   }, [router]);
 
   const updateTaskInState = useCallback((taskId: string, patch: Partial<TasksPageTask>) => {
-    setOpenTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t)));
-    setRecentlyCompleted((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t)));
+    setOpenTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? ({ ...t, ...patch } as TasksPageTask) : t)),
+    );
+    setRecentlyCompleted((prev) =>
+      prev.map((t) => (t.id === taskId ? ({ ...t, ...patch } as TasksPageTask) : t)),
+    );
   }, []);
 
   const removeTaskFromState = useCallback((taskId: string) => {
@@ -259,7 +277,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       if (nextTitle === prevTitle) return {};
       updateTaskInState(taskId, { title: nextTitle });
       try {
-        const res = await updateIntegrationTaskTitle(taskId, nextTitle);
+        const res = await updateAnyTaskTitle(taskId, nextTitle);
         if (res?.error) {
           updateTaskInState(taskId, { title: prevTitle });
           return { error: res.error };
@@ -283,7 +301,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       if (prev === nextPriority) return {};
       updateTaskInState(taskId, { priority: nextPriority });
       try {
-        const res = await updateIntegrationTaskPriority(taskId, nextPriority);
+        const res = await updateAnyTaskPriority(taskId, nextPriority);
         if (res?.error) {
           updateTaskInState(taskId, { priority: prev });
           return { error: res.error };
@@ -306,7 +324,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       const fd = new FormData();
       fd.set("due_date", dueDateIso);
       try {
-        const res = await updateIntegrationTaskDueDate(taskId, fd);
+        const res = await updateAnyTaskDueDate(taskId, fd);
         if (res?.error) {
           updateTaskInState(taskId, { due_date: prev });
           return { error: res.error };
@@ -331,14 +349,12 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
   }, [initialSnapshot.activeWorkSessionIndicator]);
 
   const effectiveGlobalActiveTaskId =
-    activeWorkSession?.integration_task_id ??
-    initialSnapshot.activeWorkSessionIndicator?.integration_task_id ??
-    null;
+    activeWorkSession?.task_id ?? initialSnapshot.activeWorkSessionIndicator?.task_id ?? null;
 
   const [expandedWorkTaskId, setExpandedWorkTaskId] = useState<string | null>(null);
 
   useEffect(() => {
-    const aid = activeWorkSession?.integration_task_id ?? null;
+    const aid = activeWorkSession?.task_id ?? null;
     if (!aid) {
       setExpandedWorkTaskId(null);
       return;
@@ -349,7 +365,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       return;
     }
     setExpandedWorkTaskId(aid);
-  }, [activeWorkSession?.integration_task_id, openTasks]);
+  }, [activeWorkSession?.task_id, openTasks]);
 
   const closeWorkRow = useCallback(async () => {
     setActiveWorkSession(null);
@@ -365,7 +381,10 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       setWorkSessionActionError(null);
       setStartWorkTaskId(task.id);
       try {
-        const res = await startOrReplaceActiveWorkSession(task.id);
+        const res =
+          task.scope === "internal"
+            ? await startOrReplaceInternalActiveWorkSession(task.id)
+            : await startOrReplaceActiveWorkSession(task.id);
         if (res.error) {
           setWorkSessionActionError(res.error);
           return;
@@ -394,7 +413,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
     async (_prev: { error?: string } | void, formData: FormData) => {
       const id = String(formData.get("task_id") ?? "").trim();
       if (!id) return { error: "No task selected" };
-      const res = await deleteIntegrationTask(id);
+      const res = await deleteAnyTask(id);
       if (!res.error) {
         removeTaskFromState(id);
       }
@@ -490,6 +509,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
     [projects],
   );
 
+  /** Tracks already include internal filter rows (same ids as `internalDestinations`); do not merge twice or CanvasSelect keys collide. */
   const quickAddIntegrations: TaskQuickAddIntegrationOption[] = useMemo(
     () =>
       tracks.map((i) => ({
@@ -641,7 +661,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
           <DialogHeader
             titleId="tasks-page-add-title"
             title="Add Task"
-            subtitle="Pick a project and track, then describe the task."
+            subtitle="Pick a project and track (or Internal and a destination), then describe the task."
             onClose={() => addTaskDialogRef.current?.close()}
           />
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -651,6 +671,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
               todayIso={todayIso}
               projects={quickAddProjects}
               integrations={quickAddIntegrations}
+              internalDestinations={internalDestinations}
               initialProjectId={filters.projectId || null}
               initialProjectTrackId={filters.projectTrackId || null}
               onCancel={() => addTaskDialogRef.current?.close()}
@@ -694,9 +715,9 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
                 <div>
                   <p className={labelClass}>Project · Track</p>
                   <p className={valueClass} style={{ color: "var(--app-text)" }}>
-                    {projectById.get(deleteTask.project_id)?.name ?? "Project"}
+                    {projectById.get(tasksPageTaskProjectId(deleteTask))?.name ?? "Project"}
                     <span className="mx-1.5 font-normal text-muted-canvas">·</span>
-                    {trackById.get(deleteTask.project_track_id)?.label ?? "Track"}
+                    {trackById.get(tasksPageTaskTrackOrDestId(deleteTask))?.label ?? "Track"}
                   </p>
                 </div>
               </div>
@@ -774,7 +795,9 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
             title="Work history"
             subtitle={
               historyTask
-                ? `${projectById.get(historyTask.project_id)?.name ?? "Project"} · ${trackById.get(historyTask.project_track_id)?.label ?? "Track"}`
+                ? historyTask.scope === "internal"
+                  ? `Internal · ${historyTask.internal_context_label}`
+                  : `${projectById.get(historyTask.project_id)?.name ?? "Project"} · ${trackById.get(historyTask.project_track_id)?.label ?? "Track"}`
                 : undefined
             }
             onClose={() => historyDialogRef.current?.close()}
@@ -898,9 +921,11 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
                     To edit work accomplished, open this task on{" "}
                     <a
                       href={
-                        historyTask.project_integration_id
-                          ? `/projects/${historyTask.project_id}/integrations/${historyTask.project_integration_id}`
-                          : `/projects/${historyTask.project_id}`
+                        historyTask.scope === "internal"
+                          ? historyTask.internal_detail_href
+                          : historyTask.project_integration_id
+                            ? `/projects/${historyTask.project_id}/integrations/${historyTask.project_integration_id}`
+                            : `/projects/${historyTask.project_id}`
                       }
                       className="underline underline-offset-2 hover:text-[var(--app-text)]"
                     >
@@ -918,15 +943,28 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       <TaskOnlyManualLogDialog
         open={manualLogTask != null}
         taskId={manualLogTask?.id ?? ""}
-        projectTrackId={manualLogTask?.project_track_id ?? ""}
+        projectTrackId={
+          manualLogTask?.scope === "project"
+            ? manualLogTask.project_track_id
+            : manualLogTask?.scope === "internal" && manualLogTask.internal_initiative_id
+              ? manualLogTask.internal_initiative_id
+              : ""
+        }
+        internalWorkSessionTaskId={
+          manualLogTask?.scope === "internal" && manualLogTask.internal_track_id != null
+            ? manualLogTask.id
+            : null
+        }
         subtitle={
-          manualLogTask
+          manualLogTask?.scope === "project"
             ? `${projectById.get(manualLogTask.project_id)?.name ?? "Project"} · ${trackById.get(manualLogTask.project_track_id)?.label ?? "Track"}`
-            : ""
+            : manualLogTask?.scope === "internal"
+              ? `Internal · ${manualLogTask.internal_context_label}`
+              : ""
         }
         initialTitle={manualLogTask?.title ?? ""}
         onClose={() => setManualLogTask(null)}
-        onCompleteTask={(taskId) => toggleIntegrationTaskCompletion(taskId)}
+        onCompleteTask={(taskId) => toggleAnyTaskCompletion(taskId)}
         onSaved={refresh}
       />
     </div>

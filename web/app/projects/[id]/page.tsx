@@ -199,7 +199,9 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     pmTrack ? fetchProjectTrackTaskSnapshot(pmTrack.id) : Promise.resolve({ snapshot: undefined, error: undefined }),
   ]);
   const initialActiveSessionIndicator =
-    activeIndicatorRes.indicator != null && activeIndicatorRes.indicator.project_id === id
+    activeIndicatorRes.indicator != null &&
+    activeIndicatorRes.indicator.scope === "integration" &&
+    activeIndicatorRes.indicator.project_id === id
       ? activeIndicatorRes.indicator
       : null;
   const pmSnapshot = pmSnapshotRes.snapshot;
@@ -250,8 +252,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       <section className="mt-10">
         <ProjectIntegrationsSection
           key={
-            initialActiveSessionIndicator?.integration_task_id ??
-            `project-${id}-no-active-session`
+            initialActiveSessionIndicator?.task_id ?? `project-${id}-no-active-session`
           }
           projectId={id}
           rows={integrationRowsSerialized}

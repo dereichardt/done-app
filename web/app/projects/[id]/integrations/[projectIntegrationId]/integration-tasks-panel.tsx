@@ -2,18 +2,19 @@
 
 import {
   createIntegrationTaskWorkSession,
-  deleteIntegrationTask,
   discardActiveWorkSession,
-  startOrReplaceActiveWorkSession,
   syncActiveWorkSessionPause,
-  toggleIntegrationTaskCompletion,
   updateActiveWorkSessionStartedAt,
-  updateIntegrationTaskDueDate,
-  updateIntegrationTaskPriority,
-  updateIntegrationTaskTitle,
   updateIntegrationTaskWorkSessionWorkAccomplished,
   type ActiveWorkSessionDTO,
 } from "@/lib/actions/integration-tasks";
+import {
+  createInternalTaskWorkSession,
+  discardInternalActiveWorkSession,
+  startOrReplaceInternalActiveWorkSession,
+  syncInternalActiveWorkSessionPause,
+  updateInternalActiveWorkSessionStartedAt,
+} from "@/lib/actions/internal-tasks";
 import {
   activeSessionElapsedMs,
   formatElapsedTimerMs,
@@ -25,7 +26,7 @@ import {
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
-import { TaskQuickAdd } from "@/components/task-quick-add";
+import { TaskQuickAdd, type TaskQuickAddInternalCreate } from "@/components/task-quick-add";
 import { TaskRow, type TaskRowCrumb } from "@/components/task-row";
 import {
   formatDateDisplay,
@@ -37,6 +38,14 @@ import {
   type IntegrationTaskRow as IntegrationTaskRowType,
   type IntegrationTaskWorkSessionRow as IntegrationTaskWorkSessionRowType,
 } from "@/lib/integration-task-helpers";
+import {
+  deleteAnyTask,
+  startOrReplaceAnyActiveWorkSession,
+  toggleAnyTaskCompletion,
+  updateAnyTaskDueDate,
+  updateAnyTaskPriority,
+  updateAnyTaskTitle,
+} from "@/lib/actions/tasks-page";
 import { useActionState } from "react";
 import {
   useCallback,
@@ -869,13 +878,17 @@ function OffListWorkSessionFinishDialog({
     const finishedAtIso = new Date(effectiveEndMs).toISOString();
     const notes = workAccomplished.trim();
     try {
-      const res = await createIntegrationTaskWorkSession(taskId, {
+      const payload = {
         started_at: startedAtIso,
         finished_at: finishedAtIso,
         duration_hours: hours,
         work_accomplished: notes === "" ? null : notes,
         complete_task: completeTask,
-      });
+      };
+      const res =
+        activeSession.scope === "internal"
+          ? await createInternalTaskWorkSession(taskId, payload)
+          : await createIntegrationTaskWorkSession(taskId, payload);
       if (res?.error) {
         setFinishError(res.error);
         return;
@@ -1078,7 +1091,10 @@ export function TaskWorkRow({
       setStartTimeEditError("Start time cannot be in the future");
       return false;
     }
-    const res = await updateActiveWorkSessionStartedAt(taskId, new Date(ms).toISOString());
+    const res =
+      activeSession.scope === "internal"
+        ? await updateInternalActiveWorkSessionStartedAt(taskId, new Date(ms).toISOString())
+        : await updateActiveWorkSessionStartedAt(taskId, new Date(ms).toISOString());
     if (res?.error) {
       setStartTimeEditError(res.error);
       return false;
@@ -1101,7 +1117,10 @@ export function TaskWorkRow({
     }
     setNowMs(now);
     const direction = wasPaused ? "resume" : "pause";
-    const res = await syncActiveWorkSessionPause(taskId, direction);
+    const res =
+      activeSession.scope === "internal"
+        ? await syncInternalActiveWorkSessionPause(taskId, direction)
+        : await syncActiveWorkSessionPause(taskId, direction);
     if (res?.error) {
       setPausedMsAccumulated(prevAccum);
       setPauseStartedAtMs(prevPauseStart);
@@ -1159,13 +1178,17 @@ export function TaskWorkRow({
     const finishedAtIso = new Date(effectiveEndMs).toISOString();
     const notes = workAccomplished.trim();
     try {
-      const res = await createIntegrationTaskWorkSession(taskId, {
+      const payload = {
         started_at: startedAtIso,
         finished_at: finishedAtIso,
         duration_hours: hours,
         work_accomplished: notes === "" ? null : notes,
         complete_task: completeTask,
-      });
+      };
+      const res =
+        activeSession.scope === "internal"
+          ? await createInternalTaskWorkSession(taskId, payload)
+          : await createIntegrationTaskWorkSession(taskId, payload);
       if (res?.error) {
         setFinishError(res.error);
         return;
@@ -1349,7 +1372,10 @@ export function TaskWorkRow({
               onClick={() => {
                 setDiscardError(null);
                 void (async () => {
-                  const res = await discardActiveWorkSession(taskId);
+                  const res =
+                    activeSession.scope === "internal"
+                      ? await discardInternalActiveWorkSession(taskId)
+                      : await discardActiveWorkSession(taskId);
                   if (res?.error) {
                     setDiscardError(res.error);
                     return;
@@ -1538,7 +1564,10 @@ export function ActiveWorkSessionDialog({
       setStartTimeEditError("Start time cannot be in the future");
       return false;
     }
-    const res = await updateActiveWorkSessionStartedAt(taskId, new Date(ms).toISOString());
+    const res =
+      activeSession.scope === "internal"
+        ? await updateInternalActiveWorkSessionStartedAt(taskId, new Date(ms).toISOString())
+        : await updateActiveWorkSessionStartedAt(taskId, new Date(ms).toISOString());
     if (res?.error) {
       setStartTimeEditError(res.error);
       return false;
@@ -1577,7 +1606,10 @@ export function ActiveWorkSessionDialog({
     }
     setNowMs(now);
     const direction = wasPaused ? "resume" : "pause";
-    const res = await syncActiveWorkSessionPause(taskId, direction);
+    const res =
+      activeSession.scope === "internal"
+        ? await syncInternalActiveWorkSessionPause(taskId, direction)
+        : await syncActiveWorkSessionPause(taskId, direction);
     if (res?.error) {
       setPausedMsAccumulated(prevAccum);
       setPauseStartedAtMs(prevPauseStart);
@@ -1635,13 +1667,17 @@ export function ActiveWorkSessionDialog({
     const finishedAtIso = new Date(effectiveEndMs).toISOString();
     const notes = workAccomplished.trim();
     try {
-      const res = await createIntegrationTaskWorkSession(taskId, {
+      const payload = {
         started_at: startedAtIso,
         finished_at: finishedAtIso,
         duration_hours: hours,
         work_accomplished: notes === "" ? null : notes,
         complete_task: completeTask,
-      });
+      };
+      const res =
+        activeSession.scope === "internal"
+          ? await createInternalTaskWorkSession(taskId, payload)
+          : await createIntegrationTaskWorkSession(taskId, payload);
       if (res?.error) {
         setFinishError(res.error);
         return;
@@ -1803,7 +1839,10 @@ export function ActiveWorkSessionDialog({
               onClick={() => {
                 setDiscardError(null);
                 void (async () => {
-                  const res = await discardActiveWorkSession(taskId);
+                  const res =
+                    activeSession.scope === "internal"
+                      ? await discardInternalActiveWorkSession(taskId)
+                      : await discardActiveWorkSession(taskId);
                   if (res?.error) {
                     setDiscardError(res.error);
                     return;
@@ -1917,6 +1956,22 @@ export function ActiveWorkSessionDialog({
   );
 }
 
+/** When set, new tasks are created as `internal_tasks` instead of `integration_tasks`. */
+export type IntegrationTasksPanelInternalCreate =
+  | { kind: "combined"; adminId: string; developmentId: string }
+  | { kind: "track"; trackId: string }
+  | { kind: "initiative"; initiativeId: string };
+
+function panelInternalCreateToQuickAdd(ic: IntegrationTasksPanelInternalCreate): TaskQuickAddInternalCreate {
+  if (ic.kind === "combined") {
+    return { variant: "pick_track", adminId: ic.adminId, developmentId: ic.developmentId };
+  }
+  if (ic.kind === "track") {
+    return { variant: "track", trackId: ic.trackId };
+  }
+  return { variant: "initiative", initiativeId: ic.initiativeId };
+}
+
 export function IntegrationTasksPanel({
   projectIntegrationId: _projectIntegrationId = "",
   projectTrackId,
@@ -1933,6 +1988,7 @@ export function IntegrationTasksPanel({
   className = "",
   surface = "card",
   onClientTaskSnapshotInvalidate,
+  internalTaskCreate,
 }: {
   projectIntegrationId?: string;
   projectTrackId: string;
@@ -1958,6 +2014,7 @@ export function IntegrationTasksPanel({
    * the server before `router.refresh`. The integration detail page omits this and relies on RSC after refresh.
    */
   onClientTaskSnapshotInvalidate?: () => void | Promise<void>;
+  internalTaskCreate?: IntegrationTasksPanelInternalCreate;
 }) {
   const router = useRouter();
 
@@ -2007,15 +2064,15 @@ export function IntegrationTasksPanel({
   useEffect(() => {
     setActiveWorkSession(activeWorkSessionProp);
   }, [
-    activeWorkSessionProp?.integration_task_id,
+    activeWorkSessionProp?.task_id,
     activeWorkSessionProp?.started_at,
     activeWorkSessionProp?.paused_ms_accumulated,
     activeWorkSessionProp?.pause_started_at,
   ]);
 
   const effectiveGlobalActiveTaskId = useMemo(
-    () => activeWorkSession?.integration_task_id ?? globalActiveWorkSessionProp?.integration_task_id ?? null,
-    [activeWorkSession?.integration_task_id, globalActiveWorkSessionProp?.integration_task_id],
+    () => activeWorkSession?.task_id ?? globalActiveWorkSessionProp?.task_id ?? null,
+    [activeWorkSession?.task_id, globalActiveWorkSessionProp?.task_id],
   );
 
   const activeTimerIsOnAnotherTaskList = useMemo(
@@ -2030,7 +2087,7 @@ export function IntegrationTasksPanel({
   const [foreignFinishNonce, setForeignFinishNonce] = useState(0);
 
   useEffect(() => {
-    const aid = activeWorkSession?.integration_task_id;
+    const aid = activeWorkSession?.task_id;
     if (!aid) {
       setExpandedWorkTaskId(null);
       return;
@@ -2041,7 +2098,7 @@ export function IntegrationTasksPanel({
       return;
     }
     setExpandedWorkTaskId(aid);
-  }, [activeWorkSession?.integration_task_id, optimisticTasks]);
+  }, [activeWorkSession?.task_id, optimisticTasks]);
 
   async function closeWorkRow() {
     setActiveWorkSession(null);
@@ -2055,6 +2112,15 @@ export function IntegrationTasksPanel({
 
   const [manualLogTask, setManualLogTask] = useState<IntegrationTaskRow | null>(null);
 
+  const manualLogUsesInternalWorkSession = useMemo(
+    () =>
+      manualLogTask != null &&
+      internalTaskCreate != null &&
+      (internalTaskCreate.kind === "track" ||
+        (internalTaskCreate.kind === "combined" && manualLogTask.internal_track_kind != null)),
+    [manualLogTask, internalTaskCreate],
+  );
+
   const [deleteDialogTask, setDeleteDialogTask] = useState<IntegrationTaskRow | null>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -2062,7 +2128,7 @@ export function IntegrationTasksPanel({
     async (_prev: { error?: string } | void, formData: FormData) => {
       const id = String(formData.get("task_id") ?? "").trim();
       if (!id) return { error: "No task selected" };
-      return deleteIntegrationTask(id);
+      return deleteAnyTask(id);
     },
     {},
   );
@@ -2105,7 +2171,7 @@ export function IntegrationTasksPanel({
       prev.map((row) => (row.id === taskId ? { ...row, title: nextTitle } : row)),
     );
     try {
-      const res = await updateIntegrationTaskTitle(taskId, nextTitle);
+      const res = await updateAnyTaskTitle(taskId, nextTitle);
       if (res?.error) {
         setOptimisticTasks((prev) =>
           prev.map((row) => (row.id === taskId ? { ...row, title: orig } : row)),
@@ -2129,7 +2195,7 @@ export function IntegrationTasksPanel({
       prev.map((row) => (row.id === taskId ? { ...row, priority: nextPriority } : row)),
     );
     try {
-      const res = await updateIntegrationTaskPriority(taskId, nextPriority);
+      const res = await updateAnyTaskPriority(taskId, nextPriority);
       if (res?.error) {
         setOptimisticTasks((prev) =>
           prev.map((row) => (row.id === taskId ? { ...row, priority: task.priority } : row)),
@@ -2152,7 +2218,7 @@ export function IntegrationTasksPanel({
     const fd = new FormData();
     fd.set("due_date", dueDateIso);
     try {
-      const res = await updateIntegrationTaskDueDate(taskId, fd);
+      const res = await updateAnyTaskDueDate(taskId, fd);
       if (res?.error) {
         setOptimisticTasks((prev) =>
           prev.map((row) => (row.id === taskId ? { ...row, due_date: previousDueDate } : row)),
@@ -2170,7 +2236,7 @@ export function IntegrationTasksPanel({
     setWorkSessionActionError(null);
     setStartWorkTaskId(task.id);
     try {
-      const res = await startOrReplaceActiveWorkSession(task.id);
+      const res = await startOrReplaceAnyActiveWorkSession(task.id);
       if (res.error) {
         setWorkSessionActionError(res.error);
         return;
@@ -2236,7 +2302,7 @@ export function IntegrationTasksPanel({
   }
 
   function renderTaskRow(t: IntegrationTaskRow) {
-    if (expandedWorkTaskId === t.id && activeWorkSession?.integration_task_id === t.id) {
+    if (expandedWorkTaskId === t.id && activeWorkSession?.task_id === t.id) {
       return (
         <li key={t.id} className="min-w-0">
           <TaskWorkRow
@@ -2255,6 +2321,15 @@ export function IntegrationTasksPanel({
       <li key={t.id} className="min-w-0">
         <TaskRow
           task={t}
+          crumb={
+            t.internal_track_kind === "admin" || t.internal_track_kind === "development"
+              ? ({
+                  projectName: "Internal",
+                  integrationLabel: t.internal_track_kind === "admin" ? "Admin" : "Development",
+                  href: "/internal",
+                } satisfies TaskRowCrumb)
+              : undefined
+          }
           effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
           starting={startWorkTaskId === t.id}
           onStartWork={startWorkOnTask}
@@ -2307,8 +2382,8 @@ export function IntegrationTasksPanel({
       ) : null}
       {globalActiveWorkSessionProp && activeWorkSession == null ? (
         <OffListWorkSessionFinishDialog
-          key={`${globalActiveWorkSessionProp.integration_task_id}-${foreignFinishNonce}`}
-          taskId={globalActiveWorkSessionProp.integration_task_id}
+          key={`${globalActiveWorkSessionProp.task_id}-${foreignFinishNonce}`}
+          taskId={globalActiveWorkSessionProp.task_id}
           taskTitle={globalActiveWorkSessionTaskTitleProp ?? "Task"}
           integrationLabel={globalActiveWorkSessionIntegrationLabelProp ?? ""}
           projectLabel={globalActiveWorkSessionProjectNameProp ?? ""}
@@ -2325,6 +2400,7 @@ export function IntegrationTasksPanel({
       <TaskQuickAdd
         mode="integration"
         projectTrackId={projectTrackId}
+        internalCreate={internalTaskCreate ? panelInternalCreateToQuickAdd(internalTaskCreate) : undefined}
         todayIso={todayIso}
         onCreated={refreshTaskSnapshotAndRoute}
       />
@@ -2631,11 +2707,12 @@ export function IntegrationTasksPanel({
       <TaskOnlyManualLogDialog
         open={manualLogTask != null}
         taskId={manualLogTask?.id ?? ""}
-        projectTrackId={projectTrackId}
+        projectTrackId={manualLogUsesInternalWorkSession ? "" : projectTrackId}
+        internalWorkSessionTaskId={manualLogUsesInternalWorkSession ? (manualLogTask?.id ?? null) : null}
         subtitle={`${finishSessionProjectLabel} · ${finishSessionIntegrationLabel}`}
         initialTitle={manualLogTask?.title ?? ""}
         onClose={() => setManualLogTask(null)}
-        onCompleteTask={(taskId) => toggleIntegrationTaskCompletion(taskId)}
+        onCompleteTask={(taskId) => toggleAnyTaskCompletion(taskId)}
         onSaved={refreshTaskSnapshotAndRoute}
       />
     </div>

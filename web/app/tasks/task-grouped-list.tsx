@@ -22,7 +22,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useMemo, useState } from "react";
 import type { ActiveWorkSessionDTO } from "@/lib/actions/integration-tasks";
-import type { TasksPageTask } from "@/lib/actions/tasks-page";
+import type { TasksPageTask } from "@/lib/tasks-page-shared";
 import {
   addDaysIsoUtc,
   nextMondayIsoUtc,
@@ -384,8 +384,7 @@ export function TaskGroupedList({
             <ul className="mt-2 flex list-none flex-col gap-2.5">
               {bucket.tasks.map((task) => {
                 const isExpandedWorkRow =
-                  expandedWorkTaskId === task.id &&
-                  activeWorkSession?.integration_task_id === task.id;
+                  expandedWorkTaskId === task.id && activeWorkSession?.task_id === task.id;
                 if (isExpandedWorkRow) {
                   const crumb = crumbForTask(task);
                   return (

@@ -1,6 +1,7 @@
 "use server";
 
 import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
+import { loadInternalTaskFinishContextWithSupabase } from "@/lib/internal-task-context";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -77,7 +78,8 @@ async function revalidateTrackPaths(track: OwnedProjectTrack) {
 }
 
 export type ActiveWorkSessionDTO = {
-  integration_task_id: string;
+  scope: "integration" | "internal";
+  task_id: string;
   started_at: string;
   paused_ms_accumulated: number;
   pause_started_at: string | null;
@@ -90,7 +92,23 @@ function rowToActiveDto(row: {
   pause_started_at: string | null;
 }): ActiveWorkSessionDTO {
   return {
-    integration_task_id: row.integration_task_id,
+    scope: "integration",
+    task_id: row.integration_task_id,
+    started_at: row.started_at,
+    paused_ms_accumulated: Number(row.paused_ms_accumulated ?? 0),
+    pause_started_at: row.pause_started_at,
+  };
+}
+
+function rowToInternalActiveDtoFromRow(row: {
+  internal_task_id: string;
+  started_at: string;
+  paused_ms_accumulated: number | string | null;
+  pause_started_at: string | null;
+}): ActiveWorkSessionDTO {
+  return {
+    scope: "internal",
+    task_id: row.internal_task_id,
     started_at: row.started_at,
     paused_ms_accumulated: Number(row.paused_ms_accumulated ?? 0),
     pause_started_at: row.pause_started_at,
@@ -175,11 +193,12 @@ export async function loadGlobalActiveIntegrationTaskFinishContext(
 
 /** For a future inbox / activity screen: one row per user when a timer is running. */
 export type MyActiveWorkSessionListItem = {
-  integration_task_id: string;
+  scope: "integration" | "internal";
+  task_id: string;
   task_title: string;
-  project_track_id: string;
+  project_track_id: string | null;
   project_integration_id: string | null;
-  project_id: string;
+  project_id: string | null;
   customer_name: string | null;
   started_at: string;
   paused_ms_accumulated: number;
@@ -203,46 +222,81 @@ export async function listMyActiveWorkSessions(): Promise<{
     .maybeSingle();
 
   if (activeErr) return { error: activeErr.message };
-  if (!activeRow) return { sessions: [] };
 
-  const { data: task, error: taskErr } = await supabase
-    .from("integration_tasks")
-    .select("id, title, project_track_id")
-    .eq("id", activeRow.integration_task_id)
+  if (activeRow) {
+    const { data: task, error: taskErr } = await supabase
+      .from("integration_tasks")
+      .select("id, title, project_track_id")
+      .eq("id", activeRow.integration_task_id)
+      .maybeSingle();
+
+    if (taskErr || !task) return { sessions: [] };
+
+    const { data: track, error: trackErr } = await supabase
+      .from("project_tracks")
+      .select("project_id, project_integration_id")
+      .eq("id", task.project_track_id)
+      .maybeSingle();
+
+    if (trackErr || !track) return { sessions: [] };
+
+    const { data: project, error: projErr } = await supabase
+      .from("projects")
+      .select("customer_name")
+      .eq("id", track.project_id)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+
+    if (projErr) return { error: projErr.message };
+    if (!project) return { sessions: [] };
+
+    return {
+      sessions: [
+        {
+          scope: "integration",
+          task_id: activeRow.integration_task_id,
+          task_title: task.title,
+          project_track_id: task.project_track_id,
+          project_integration_id: track.project_integration_id ?? null,
+          project_id: track.project_id,
+          customer_name: project.customer_name ?? null,
+          started_at: activeRow.started_at,
+          paused_ms_accumulated: Number(activeRow.paused_ms_accumulated ?? 0),
+          pause_started_at: activeRow.pause_started_at,
+        },
+      ],
+    };
+  }
+
+  const { data: internalActive, error: intActiveErr } = await supabase
+    .from("internal_task_active_work_sessions")
+    .select("internal_task_id, started_at, paused_ms_accumulated, pause_started_at")
+    .eq("user_id", user.id)
     .maybeSingle();
 
-  if (taskErr || !task) return { sessions: [] };
+  if (intActiveErr) return { error: intActiveErr.message };
+  if (!internalActive) return { sessions: [] };
 
-  const { data: track, error: trackErr } = await supabase
-    .from("project_tracks")
-    .select("project_id, project_integration_id")
-    .eq("id", task.project_track_id)
-    .maybeSingle();
-
-  if (trackErr || !track) return { sessions: [] };
-
-  const { data: project, error: projErr } = await supabase
-    .from("projects")
-    .select("customer_name")
-    .eq("id", track.project_id)
-    .eq("owner_id", user.id)
-    .maybeSingle();
-
-  if (projErr) return { error: projErr.message };
-  if (!project) return { sessions: [] };
+  const ctx = await loadInternalTaskFinishContextWithSupabase(
+    supabase,
+    user.id,
+    internalActive.internal_task_id,
+  );
+  if (!ctx) return { sessions: [] };
 
   return {
     sessions: [
       {
-        integration_task_id: activeRow.integration_task_id,
-        task_title: task.title,
-        project_track_id: task.project_track_id,
-        project_integration_id: track.project_integration_id ?? null,
-        project_id: track.project_id,
-        customer_name: project.customer_name ?? null,
-        started_at: activeRow.started_at,
-        paused_ms_accumulated: Number(activeRow.paused_ms_accumulated ?? 0),
-        pause_started_at: activeRow.pause_started_at,
+        scope: "internal",
+        task_id: internalActive.internal_task_id,
+        task_title: ctx.title,
+        project_track_id: null,
+        project_integration_id: null,
+        project_id: null,
+        customer_name: null,
+        started_at: internalActive.started_at,
+        paused_ms_accumulated: Number(internalActive.paused_ms_accumulated ?? 0),
+        pause_started_at: internalActive.pause_started_at,
       },
     ],
   };
@@ -250,10 +304,11 @@ export async function listMyActiveWorkSessions(): Promise<{
 
 /** Active timer + labels for integration/project row indicators (at most one per signed-in user). */
 export type ActiveWorkSessionIndicatorDTO = {
-  integration_task_id: string;
-  project_track_id: string;
+  scope: "integration" | "internal";
+  task_id: string;
+  project_track_id: string | null;
   project_integration_id: string | null;
-  project_id: string;
+  project_id: string | null;
   started_at: string;
   paused_ms_accumulated: number;
   pause_started_at: string | null;
@@ -266,18 +321,29 @@ export async function loadActiveWorkSessionIndicator(): Promise<{
   indicator?: ActiveWorkSessionIndicatorDTO | null;
   error?: string;
 }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const listRes = await listMyActiveWorkSessions();
   if (listRes.error) return { error: listRes.error };
   const sessions = listRes.sessions ?? [];
   if (sessions.length === 0) return { indicator: null };
 
   const s = sessions[0];
-  const ctx = await loadGlobalActiveIntegrationTaskFinishContext(s.integration_task_id);
+  const ctx =
+    s.scope === "integration"
+      ? await loadGlobalActiveIntegrationTaskFinishContext(s.task_id)
+      : user
+        ? await loadInternalTaskFinishContextWithSupabase(supabase, user.id, s.task_id)
+        : null;
   if (!ctx) return { indicator: null };
 
   return {
     indicator: {
-      integration_task_id: s.integration_task_id,
+      scope: s.scope,
+      task_id: s.task_id,
       project_track_id: s.project_track_id,
       project_integration_id: s.project_integration_id,
       project_id: s.project_id,
@@ -385,9 +451,19 @@ export async function fetchProjectTrackTaskSnapshot(
     .eq("user_id", user.id)
     .maybeSingle();
 
+  const { data: internalGlobalRow } = await supabase
+    .from("internal_task_active_work_sessions")
+    .select("internal_task_id, started_at, paused_ms_accumulated, pause_started_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
   const taskIdSet = new Set(taskIds);
   let activeWorkSession: ActiveWorkSessionDTO | null = null;
-  const globalActiveWorkSession = globalActiveRow ? rowToActiveDto(globalActiveRow) : null;
+  const globalActiveWorkSession = globalActiveRow
+    ? rowToActiveDto(globalActiveRow)
+    : internalGlobalRow
+      ? rowToInternalActiveDtoFromRow(internalGlobalRow)
+      : null;
 
   let globalActiveWorkSessionTaskTitle: string | null = null;
   let globalActiveWorkSessionIntegrationLabel: string | null = null;
@@ -399,9 +475,20 @@ export async function fetchProjectTrackTaskSnapshot(
       globalActiveWorkSessionIntegrationLabel = ctx.integrationLabel || null;
       globalActiveWorkSessionProjectName = ctx.projectName || null;
     }
+  } else if (internalGlobalRow?.internal_task_id) {
+    const ctx = await loadInternalTaskFinishContextWithSupabase(
+      supabase,
+      user.id,
+      internalGlobalRow.internal_task_id,
+    );
+    if (ctx) {
+      globalActiveWorkSessionTaskTitle = ctx.title || null;
+      globalActiveWorkSessionIntegrationLabel = ctx.integrationLabel || null;
+      globalActiveWorkSessionProjectName = ctx.projectName || null;
+    }
   }
 
-  if (globalActiveWorkSession && taskIdSet.has(globalActiveWorkSession.integration_task_id)) {
+  if (globalActiveWorkSession && taskIdSet.has(globalActiveWorkSession.task_id)) {
     activeWorkSession = globalActiveWorkSession;
   }
 
@@ -457,6 +544,7 @@ export async function startOrReplaceActiveWorkSession(
   const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
   if (!track) return { error: "Not found" };
 
+  await supabase.from("internal_task_active_work_sessions").delete().eq("user_id", user.id);
   const { error: delErr } = await supabase.from("integration_task_active_work_sessions").delete().eq("user_id", user.id);
 
   if (delErr) return { error: delErr.message };

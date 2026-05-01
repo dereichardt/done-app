@@ -42,6 +42,8 @@ export default async function ProjectsPage() {
     });
 
   const activeIndicatorRes = await loadActiveWorkSessionIndicator();
+  const activeSessionIndicatorForProjectsList =
+    activeIndicatorRes.indicator?.scope === "integration" ? activeIndicatorRes.indicator : null;
 
   const mapProjectRow = (p: (typeof rows)[number]) => ({
     id: p.id,
@@ -62,7 +64,7 @@ export default async function ProjectsPage() {
         activeProjects={activeProjects.map(mapProjectRow)}
         completedProjects={completedProjects.map(mapProjectRow)}
         summaryByProjectId={summaryByProjectId}
-        initialActiveSessionIndicator={activeIndicatorRes.indicator ?? null}
+        initialActiveSessionIndicator={activeSessionIndicatorForProjectsList}
       />
     </div>
   );
