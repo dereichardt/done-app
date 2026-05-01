@@ -31,7 +31,6 @@ import {
 } from "@/lib/actions/tasks-calendar";
 import type { TasksFiltersValue } from "./tasks-filters";
 import {
-  TASKS_PAGE_INTERNAL_PROJECT_ID,
   type TasksPageProject,
   type TasksPageTrack,
 } from "@/lib/tasks-page-shared";
@@ -637,12 +636,6 @@ export function TasksEffortCalendar({
         return;
       }
       const defaults = resolveDefaultSelection();
-      if (defaults.selectedProjectId === TASKS_PAGE_INTERNAL_PROJECT_ID) {
-        setCalendarActionError(
-          "Manual calendar entries use customer project tracks. Internal time from task timers appears here automatically.",
-        );
-        return;
-      }
       setCalendarActionError(null);
       const start = clamp(startSlot, 0, 95);
       const end = clamp(start + 2, 1, 95);

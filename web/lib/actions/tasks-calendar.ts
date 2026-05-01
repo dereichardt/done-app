@@ -101,6 +101,22 @@ async function loadOwnedInternalInitiative(
   return data ?? null;
 }
 
+async function loadOwnedInternalTrack(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  trackId: string,
+): Promise<{ id: string; kind: "admin" | "development" } | null> {
+  const { data } = await supabase
+    .from("internal_tracks")
+    .select("id, kind")
+    .eq("id", trackId)
+    .eq("owner_id", userId)
+    .maybeSingle();
+  if (!data) return null;
+  if (data.kind !== "admin" && data.kind !== "development") return null;
+  return { id: data.id, kind: data.kind };
+}
+
 async function loadOwnedProjectIntegration(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
@@ -305,6 +321,60 @@ async function appendInternalInitiativeManualCalendarSessions(
       integration_label: titleByIniId.get(iniId) ?? "Initiative",
       project_name: "Internal",
       integration_href: `/internal/initiatives/${iniId}`,
+      integration_href_label: "Open internal",
+    });
+  }
+  return {};
+}
+
+async function appendInternalTrackManualCalendarSessions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  startIso: string,
+  endExclusiveIso: string,
+  out: TasksCalendarSession[],
+): Promise<{ error?: string }> {
+  const { data: ownedTracks, error: tracksErr } = await supabase
+    .from("internal_tracks")
+    .select("id, kind")
+    .eq("owner_id", userId);
+  if (tracksErr) return { error: tracksErr.message };
+  const trackRows = (ownedTracks ?? []).filter(
+    (row): row is { id: string; kind: "admin" | "development" } =>
+      row.kind === "admin" || row.kind === "development",
+  );
+  if (trackRows.length === 0) return {};
+
+  const trackIds = trackRows.map((row) => row.id);
+  const kindByTrackId = new Map(trackRows.map((row) => [row.id, row.kind]));
+  const { data: manualRows, error: manualErr } = await supabase
+    .from("internal_track_manual_effort_entries")
+    .select("id, internal_track_id, entry_type, title, started_at, finished_at, duration_hours, work_accomplished")
+    .in("internal_track_id", trackIds)
+    .gte("finished_at", startIso)
+    .lt("started_at", endExclusiveIso);
+  if (manualErr) return { error: manualErr.message };
+
+  for (const row of manualRows ?? []) {
+    const trackId = row.internal_track_id as string;
+    const kind = kindByTrackId.get(trackId) ?? "admin";
+    out.push({
+      source: "manual",
+      source_id: row.id as string,
+      started_at: row.started_at as string,
+      finished_at: row.finished_at as string,
+      duration_hours: Number(row.duration_hours),
+      integration_task_id: null,
+      entry_type: row.entry_type === "meeting" ? "meeting" : "task",
+      title: String(row.title ?? "").trim() || (row.entry_type === "meeting" ? "Meeting" : "Task"),
+      work_accomplished: (row.work_accomplished as string | null) ?? null,
+      project_id: TASKS_PAGE_INTERNAL_PROJECT_ID,
+      project_track_id: trackId,
+      project_integration_id: null,
+      task_priority: null,
+      integration_label: kind === "admin" ? "Admin" : "Development",
+      project_name: "Internal",
+      integration_href: "/internal",
       integration_href_label: "Open internal",
     });
   }
@@ -613,6 +683,15 @@ export async function loadTasksCalendarSessions(
   );
   if (internalManualErr.error) return { error: internalManualErr.error };
 
+  const internalTrackManualErr = await appendInternalTrackManualCalendarSessions(
+    supabase,
+    user.id,
+    startIso,
+    endExclusiveIso,
+    sessions,
+  );
+  if (internalTrackManualErr.error) return { error: internalTrackManualErr.error };
+
   return { sessions };
 }
 
@@ -650,7 +729,11 @@ export async function createTasksCalendarManualEntry(payload: {
   const internalInitiative = track
     ? null
     : await loadOwnedInternalInitiative(supabase, user.id, payload.project_track_id);
-  if (!track && !internalInitiative) return { error: "Not found" };
+  const internalTrack =
+    track || internalInitiative
+      ? null
+      : await loadOwnedInternalTrack(supabase, user.id, payload.project_track_id);
+  if (!track && !internalInitiative && !internalTrack) return { error: "Not found" };
 
   const workAccomplished = payload.work_accomplished?.trim() ? payload.work_accomplished.trim() : null;
 
@@ -666,6 +749,21 @@ export async function createTasksCalendarManualEntry(payload: {
     });
     if (intErr) return { error: intErr.message };
     revalidateInternalCalendarPaths(internalInitiative.id);
+    return {};
+  }
+
+  if (internalTrack) {
+    const { error: intTrackErr } = await supabase.from("internal_track_manual_effort_entries").insert({
+      internal_track_id: internalTrack.id,
+      entry_type: payload.entry_type,
+      title,
+      started_at: started.toISOString(),
+      finished_at: finished.toISOString(),
+      duration_hours: durationHours,
+      work_accomplished: workAccomplished,
+    });
+    if (intTrackErr) return { error: intTrackErr.message };
+    revalidateInternalCalendarPaths(null);
     return {};
   }
 
@@ -772,6 +870,38 @@ export async function updateTasksCalendarManualEntry(payload: {
     if (internalExisting.internal_initiative_id !== nextInit.id) {
       revalidateInternalCalendarPaths(nextInit.id);
     }
+    return {};
+  }
+
+  const { data: internalTrackExisting } = await supabase
+    .from("internal_track_manual_effort_entries")
+    .select("id, internal_track_id")
+    .eq("id", payload.manual_entry_id)
+    .maybeSingle();
+
+  if (internalTrackExisting?.id) {
+    const nextInternalTrack = await loadOwnedInternalTrack(supabase, user.id, payload.project_track_id);
+    if (!nextInternalTrack) return { error: "Not found" };
+    const workAccomplishedInternal = payload.work_accomplished?.trim()
+      ? payload.work_accomplished.trim()
+      : null;
+    const { data: intTrackUpd, error: intTrackUpdErr } = await supabase
+      .from("internal_track_manual_effort_entries")
+      .update({
+        internal_track_id: nextInternalTrack.id,
+        entry_type: payload.entry_type,
+        title,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        duration_hours: durationHours,
+        work_accomplished: workAccomplishedInternal,
+      })
+      .eq("id", payload.manual_entry_id)
+      .select("id")
+      .maybeSingle();
+    if (intTrackUpdErr) return { error: intTrackUpdErr.message };
+    if (!intTrackUpd) return { error: "Not found" };
+    revalidateInternalCalendarPaths(null);
     return {};
   }
 
@@ -917,6 +1047,38 @@ export async function rescheduleTasksCalendarSession(payload: {
       if (intManErr) return { error: intManErr.message };
 
       revalidateInternalCalendarPaths(inv.id);
+      return {};
+    }
+
+    const intTrackManualRes = await supabase
+      .from("internal_track_manual_effort_entries")
+      .select("id, internal_track_id, started_at, finished_at, duration_hours")
+      .eq("id", payload.source_id)
+      .maybeSingle();
+    if (intTrackManualRes.error) return { error: intTrackManualRes.error.message };
+    if (intTrackManualRes.data) {
+      const track = await loadOwnedInternalTrack(supabase, user.id, intTrackManualRes.data.internal_track_id);
+      if (!track) return { error: "Not found" };
+
+      const intTrackDurationHours = normalizeQuarterDurationHours(
+        Number(intTrackManualRes.data.duration_hours) * 3_600_000,
+      );
+      if (intTrackDurationHours == null) return { error: "Invalid existing duration" };
+      const intTrackDurationMs = Math.round(intTrackDurationHours * 3_600_000);
+      const intTrackNextFinish = new Date(nextStart.getTime() + intTrackDurationMs);
+      if (!isOnQuarterHour(intTrackNextFinish)) return { error: "Times must be in 15-minute increments" };
+
+      const { error: intTrackManErr } = await supabase
+        .from("internal_track_manual_effort_entries")
+        .update({
+          started_at: nextStart.toISOString(),
+          finished_at: intTrackNextFinish.toISOString(),
+          duration_hours: intTrackDurationHours,
+        })
+        .eq("id", payload.source_id);
+      if (intTrackManErr) return { error: intTrackManErr.message };
+
+      revalidateInternalCalendarPaths(null);
       return {};
     }
 
