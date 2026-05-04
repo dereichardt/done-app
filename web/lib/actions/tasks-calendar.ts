@@ -994,6 +994,114 @@ export async function updateTasksCalendarManualEntry(payload: {
   return {};
 }
 
+export async function deleteTasksCalendarManualEntry(payload: {
+  manual_entry_id: string;
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  if (!payload.manual_entry_id || typeof payload.manual_entry_id !== "string") {
+    return { error: "Not found" };
+  }
+
+  const { data: internalIniRow } = await supabase
+    .from("internal_initiative_manual_effort_entries")
+    .select("id, internal_initiative_id")
+    .eq("id", payload.manual_entry_id)
+    .maybeSingle();
+
+  if (internalIniRow?.id) {
+    const owned = await loadOwnedInternalInitiative(
+      supabase,
+      user.id,
+      internalIniRow.internal_initiative_id,
+    );
+    if (!owned) return { error: "Not found" };
+
+    const { data: deleted, error: delErr } = await supabase
+      .from("internal_initiative_manual_effort_entries")
+      .delete()
+      .eq("id", payload.manual_entry_id)
+      .select("id")
+      .maybeSingle();
+    if (delErr) return { error: delErr.message };
+    if (!deleted) return { error: "Not found" };
+
+    revalidateInternalCalendarPaths(internalIniRow.internal_initiative_id);
+    return {};
+  }
+
+  const { data: internalTrackRow } = await supabase
+    .from("internal_track_manual_effort_entries")
+    .select("id, internal_track_id")
+    .eq("id", payload.manual_entry_id)
+    .maybeSingle();
+
+  if (internalTrackRow?.id) {
+    const owned = await loadOwnedInternalTrack(supabase, user.id, internalTrackRow.internal_track_id);
+    if (!owned) return { error: "Not found" };
+
+    const { data: deleted, error: delErr } = await supabase
+      .from("internal_track_manual_effort_entries")
+      .delete()
+      .eq("id", payload.manual_entry_id)
+      .select("id")
+      .maybeSingle();
+    if (delErr) return { error: delErr.message };
+    if (!deleted) return { error: "Not found" };
+
+    revalidateInternalCalendarPaths(null);
+    return {};
+  }
+
+  const existingRes = await supabase
+    .from("integration_manual_effort_entries")
+    .select("id, project_track_id")
+    .eq("id", payload.manual_entry_id)
+    .maybeSingle();
+
+  let track:
+    | { id: string; project_id: string; project_integration_id: string | null }
+    | null = null;
+
+  if (isMissingProjectTrackColumn(existingRes.error)) {
+    const legacyExisting = await supabase
+      .from("integration_manual_effort_entries")
+      .select("id, project_integration_id")
+      .eq("id", payload.manual_entry_id)
+      .maybeSingle();
+    if (legacyExisting.error) return { error: legacyExisting.error.message };
+    if (!legacyExisting.data?.project_integration_id) return { error: "Not found" };
+    const pi = await loadOwnedProjectIntegration(
+      supabase,
+      user.id,
+      legacyExisting.data.project_integration_id,
+    );
+    if (!pi) return { error: "Not found" };
+    track = { id: "", project_id: pi.project_id, project_integration_id: pi.id };
+  } else {
+    if (existingRes.error) return { error: existingRes.error.message };
+    if (!existingRes.data) return { error: "Not found" };
+    track = await loadOwnedProjectTrack(supabase, user.id, existingRes.data.project_track_id);
+    if (!track) return { error: "Not found" };
+  }
+
+  const { data: deleted, error: delErr } = await supabase
+    .from("integration_manual_effort_entries")
+    .delete()
+    .eq("id", payload.manual_entry_id)
+    .select("id")
+    .maybeSingle();
+  if (delErr) return { error: delErr.message };
+  if (!deleted) return { error: "Not found" };
+
+  revalidateTasksCalendarPaths(track.project_id, track.project_integration_id);
+  return {};
+}
+
 export async function rescheduleTasksCalendarSession(payload: {
   source: "task_work_session" | "manual";
   source_id: string;

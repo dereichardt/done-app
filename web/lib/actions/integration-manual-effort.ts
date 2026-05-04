@@ -220,3 +220,32 @@ export async function updateIntegrationManualEffortEntry(
   return {};
 }
 
+export async function deleteIntegrationManualEffortEntry(
+  projectIntegrationId: string,
+  manualEntryId: string,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const track = await loadOwnedIntegrationTrack(supabase, user.id, projectIntegrationId);
+  if (!track) return { error: "Not found" };
+
+  if (!manualEntryId || typeof manualEntryId !== "string") return { error: "Not found" };
+
+  const { data: deleted, error } = await supabase
+    .from("integration_manual_effort_entries")
+    .delete()
+    .eq("id", manualEntryId)
+    .eq("project_integration_id", projectIntegrationId)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!deleted) return { error: "Not found" };
+
+  revalidateIntegrationPaths(track.project_id, projectIntegrationId);
+  return {};
+}
+

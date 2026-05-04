@@ -158,3 +158,32 @@ export async function updateInternalInitiativeManualEffortEntry(
   revalidateInitiativeEffortPaths(initiativeId);
   return {};
 }
+
+export async function deleteInternalInitiativeManualEffortEntry(
+  initiativeId: string,
+  manualEntryId: string,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const owned = await assertOwnedInitiative(supabase, user.id, initiativeId);
+  if (!owned) return { error: "Not found" };
+
+  if (!manualEntryId || typeof manualEntryId !== "string") return { error: "Not found" };
+
+  const { data: deleted, error } = await supabase
+    .from("internal_initiative_manual_effort_entries")
+    .delete()
+    .eq("id", manualEntryId)
+    .eq("internal_initiative_id", initiativeId)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!deleted) return { error: "Not found" };
+
+  revalidateInitiativeEffortPaths(initiativeId);
+  return {};
+}

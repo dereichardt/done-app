@@ -2,10 +2,15 @@
 
 import {
   createInternalInitiativeManualEffortEntry,
+  deleteInternalInitiativeManualEffortEntry,
   updateInternalInitiativeManualEffortEntry,
 } from "@/lib/actions/internal-initiative-manual-effort";
 import { patchInternalInitiativeEstimatedEffort } from "@/lib/actions/internal-tasks";
-import { createIntegrationManualEffortEntry, updateIntegrationManualEffortEntry } from "@/lib/actions/integration-manual-effort";
+import {
+  createIntegrationManualEffortEntry,
+  deleteIntegrationManualEffortEntry,
+  updateIntegrationManualEffortEntry,
+} from "@/lib/actions/integration-manual-effort";
 import { patchProjectIntegrationEstimatedEffort } from "@/lib/actions/projects";
 import { CanvasArrowLeftIcon, CanvasArrowRightIcon } from "@/components/canvas-arrow-icons";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
@@ -207,6 +212,14 @@ export function IntegrationEffortSection({
 
   // ── Create / edit dialog (lifted from ActualsCalendarGrid) ──────────────────
   const createDialogRef = useRef<HTMLDialogElement | null>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement | null>(null);
+  const [deleteContext, setDeleteContext] = useState<{
+    manualEntryId: string;
+    title: string;
+    durationLabel: string;
+  } | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const timeOptions = useMemo((): { start: CanvasSelectOption[]; end: CanvasSelectOption[] } => {
     const start: CanvasSelectOption[] = [];
@@ -326,6 +339,46 @@ export function IntegrationEffortSection({
     closeCreateModal();
     router.refresh();
   }, [createDraft, effortTarget, closeCreateModal, router]);
+
+  const openDeleteConfirm = useCallback(() => {
+    if (!createDraft || createDraft.mode !== "edit" || !createDraft.manualEntryId) return;
+    setDeleteContext({
+      manualEntryId: createDraft.manualEntryId,
+      title: createDraft.title.trim() || (createDraft.entry_type === "meeting" ? "Meeting" : "Task"),
+      durationLabel: formatDurationFromSlots(createDraft.startSlot, createDraft.endSlot),
+    });
+    setDeleteError(null);
+    requestAnimationFrame(() => deleteDialogRef.current?.showModal());
+  }, [createDraft]);
+
+  const closeDeleteConfirm = useCallback(() => {
+    deleteDialogRef.current?.close();
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteContext) return;
+    if (deletePending) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    const res =
+      effortTarget.kind === "project_integration"
+        ? await deleteIntegrationManualEffortEntry(
+            effortTarget.projectIntegrationId,
+            deleteContext.manualEntryId,
+          )
+        : await deleteInternalInitiativeManualEffortEntry(
+            effortTarget.initiativeId,
+            deleteContext.manualEntryId,
+          );
+    setDeletePending(false);
+    if (res.error) {
+      setDeleteError(res.error);
+      return;
+    }
+    deleteDialogRef.current?.close();
+    closeCreateModal();
+    router.refresh();
+  }, [deleteContext, deletePending, effortTarget, closeCreateModal, router]);
 
   const viewSegIndex = view === "day" ? 0 : view === "week" ? 1 : 2;
   const viewSegWidthPx = 76; // 4.75rem @ 16px root
@@ -622,7 +675,7 @@ export function IntegrationEffortSection({
           setCreateDraft(null);
         }}
       >
-        <div className="flex max-h-[min(92dvh,44rem)] flex-col">
+        <div className="flex max-h-[min(calc(100dvh-2rem),44rem)] min-h-0 flex-col">
           <div
             className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3"
             style={{ borderColor: "var(--app-border)" }}
@@ -641,7 +694,7 @@ export function IntegrationEffortSection({
             <DialogCloseButton onClick={closeCreateModal} />
           </div>
 
-          <div className="min-h-0 flex-1 overflow-visible p-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-5">
             {!createDraft ? null : (
               <div className="grid grid-cols-1 gap-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -767,7 +820,7 @@ export function IntegrationEffortSection({
                   </span>
                 </p>
 
-                <label className="mt-10 text-xs font-medium text-muted-canvas">
+                <label className="mt-7 text-xs font-medium text-muted-canvas">
                   Work Accomplished
                   <textarea
                     className="input-canvas mt-1 w-full resize-y p-2 text-sm"
@@ -788,26 +841,87 @@ export function IntegrationEffortSection({
                   </p>
                 ) : null}
 
-                <div className="flex items-center justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    className="btn-ghost h-9 text-sm"
-                    onClick={closeCreateModal}
-                    disabled={createDraft.saving}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-cta-dark h-9 text-sm"
-                    onClick={saveCreate}
-                    disabled={createDraft.saving}
-                  >
-                    {createDraft.saving ? "Saving…" : "Save"}
-                  </button>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <div>
+                    {createDraft.mode === "edit" ? (
+                      <button
+                        type="button"
+                        className="btn-ghost h-9 text-sm"
+                        onClick={openDeleteConfirm}
+                        disabled={createDraft.saving}
+                      >
+                        Delete
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn-ghost h-9 text-sm"
+                      onClick={closeCreateModal}
+                      disabled={createDraft.saving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-cta-dark h-9 text-sm"
+                      onClick={saveCreate}
+                      disabled={createDraft.saving}
+                    >
+                      {createDraft.saving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </dialog>
+
+      <dialog
+        ref={deleteDialogRef}
+        className="app-catalog-dialog fixed left-1/2 top-1/2 z-[230] w-[min(100vw-2rem,26rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden border-0 p-0 shadow-xl"
+        style={{ borderRadius: "12px", background: "var(--app-surface)", color: "var(--app-text)" }}
+        onClose={() => {
+          setDeleteContext(null);
+          setDeleteError(null);
+        }}
+      >
+        <div className="flex flex-col gap-4 p-5">
+          <h2 className="text-base font-semibold" style={{ color: "var(--app-text)" }}>
+            Delete this entry?
+          </h2>
+          {deleteContext ? (
+            <div className="flex flex-col gap-1 text-sm">
+              <p className="font-medium" style={{ color: "var(--app-text)" }}>
+                {deleteContext.title}
+              </p>
+              <p className="text-muted-canvas">{deleteContext.durationLabel}</p>
+            </div>
+          ) : null}
+          {deleteError ? (
+            <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
+              {deleteError}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="btn-ghost h-9 text-sm"
+              disabled={deletePending}
+              onClick={closeDeleteConfirm}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-[var(--app-radius)] px-3 py-2 text-sm font-medium cursor-pointer bg-[var(--app-danger)] text-[var(--app-surface)] transition-[background-color] duration-150 ease-out hover:bg-[color-mix(in_oklab,var(--app-danger)_78%,var(--app-text)_22%)] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={deletePending || !deleteContext}
+              onClick={() => void confirmDelete()}
+            >
+              {deletePending ? "Deleting…" : "Delete"}
+            </button>
           </div>
         </div>
       </dialog>
