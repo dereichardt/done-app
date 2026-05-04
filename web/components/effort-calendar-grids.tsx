@@ -29,6 +29,8 @@ export type CalendarBlock = {
   entry_type?: "task" | "meeting";
   /** Optional per-block color metadata; used by callers that want custom tinting. */
   colorMeta?: { colorVar: string; shade: "dark" | "medium" | "light" };
+  /** Horizontal lanes when multiple blocks overlap in the same day column. */
+  laneLayout?: { laneIndex: number; laneCount: number };
 };
 
 export type CalendarBlockStyle = {
@@ -106,6 +108,89 @@ const DEFAULT_BLOCK_STYLE: CalendarBlockStyle = {
 
 function defaultBlockStyleFor(): CalendarBlockStyle {
   return DEFAULT_BLOCK_STYLE;
+}
+
+/** Half-open wall overlap in ms-within-day. */
+function intervalsOverlapMsInDay(
+  aStart: number,
+  aEnd: number,
+  bStart: number,
+  bEnd: number,
+): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+/**
+ * For one day's blocks, find overlap connected components and assign greedy
+ * interval-graph lanes per component so concurrent blocks split column width evenly.
+ */
+function assignLaneLayoutsForDay(blocks: CalendarBlock[]): CalendarBlock[] {
+  const n = blocks.length;
+  if (n === 0) return blocks;
+
+  const visited = new Array(n).fill(false);
+  const layoutByIndex = new Map<number, { laneIndex: number; laneCount: number }>();
+
+  for (let i = 0; i < n; i++) {
+    if (visited[i]) continue;
+    const comp: number[] = [];
+    const stack = [i];
+    visited[i] = true;
+    while (stack.length) {
+      const u = stack.pop()!;
+      comp.push(u);
+      const au = blocks[u];
+      for (let v = 0; v < n; v++) {
+        if (visited[v]) continue;
+        const bv = blocks[v];
+        if (
+          intervalsOverlapMsInDay(
+            au.startMsInDay,
+            au.endMsInDay,
+            bv.startMsInDay,
+            bv.endMsInDay,
+          )
+        ) {
+          visited[v] = true;
+          stack.push(v);
+        }
+      }
+    }
+
+    comp.sort((ia, ib) => blocks[ia].startMsInDay - blocks[ib].startMsInDay);
+    const laneEndAt: number[] = [];
+    const laneForIndex = new Map<number, number>();
+
+    for (const idx of comp) {
+      const b = blocks[idx];
+      const start = b.startMsInDay;
+      const end = b.endMsInDay;
+      let lane = -1;
+      for (let c = 0; c < laneEndAt.length; c++) {
+        if (laneEndAt[c] <= start) {
+          lane = c;
+          break;
+        }
+      }
+      if (lane === -1) {
+        lane = laneEndAt.length;
+        laneEndAt.push(end);
+      } else {
+        laneEndAt[lane] = end;
+      }
+      laneForIndex.set(idx, lane);
+    }
+
+    const laneCount = laneEndAt.length;
+    for (const idx of comp) {
+      layoutByIndex.set(idx, { laneIndex: laneForIndex.get(idx)!, laneCount });
+    }
+  }
+
+  return blocks.map((b, idx) => {
+    const L = layoutByIndex.get(idx) ?? { laneIndex: 0, laneCount: 1 };
+    return { ...b, laneLayout: L };
+  });
 }
 
 // ─── MonthGrid ────────────────────────────────────────────────────────────────
@@ -371,37 +456,9 @@ export function ActualsCalendarGrid({
       }
     }
 
-    // De-overlap by packing forward on 15-min slots within the day.
     for (const [k, arr] of map.entries()) {
       arr.sort((a, b) => a.startMsInDay - b.startMsInDay);
-      const occupied = new Array(96).fill(false);
-      const packed: CalendarBlock[] = [];
-      for (const b of arr) {
-        const slotsNeeded = Math.max(1, Math.round(Number(b.duration_hours) * 4));
-        if (slotsNeeded <= 0) continue;
-        let slot = Math.floor(b.startMsInDay / SLOT_MS);
-        slot = Math.max(0, Math.min(96 - slotsNeeded, slot));
-        while (slot <= 96 - slotsNeeded) {
-          let ok = true;
-          for (let i = 0; i < slotsNeeded; i++) {
-            if (occupied[slot + i]) {
-              ok = false;
-              break;
-            }
-          }
-          if (ok) break;
-          slot += 1;
-        }
-        if (slot > 96 - slotsNeeded) continue;
-        for (let i = 0; i < slotsNeeded; i++) occupied[slot + i] = true;
-        packed.push({
-          ...b,
-          startMsInDay: slot * SLOT_MS,
-          endMsInDay: (slot + slotsNeeded) * SLOT_MS,
-        });
-      }
-      packed.sort((a, b) => a.startMsInDay - b.startMsInDay);
-      map.set(k, packed);
+      map.set(k, assignLaneLayoutsForDay(arr));
     }
     return map;
   }, [days, sessions]);
@@ -780,6 +837,9 @@ export function ActualsCalendarGrid({
                       const isQuarterBlock = slots === 1 || height <= 18;
                       const hideTitleForShortDuration = slots <= 2;
                       const bStyle = blockStyleFor(b);
+                      const laneCount = b.laneLayout?.laneCount ?? 1;
+                      const laneIndex = b.laneLayout?.laneIndex ?? 0;
+                      const multiLane = laneCount > 1;
 
                       return (
                         <button
@@ -787,7 +847,9 @@ export function ActualsCalendarGrid({
                           type="button"
                           data-effort-block="1"
                           className={[
-                            "absolute left-1 right-1 z-[10] overflow-hidden rounded-md border text-left shadow-sm cursor-pointer transition-[background-color,border-color,box-shadow,transform] hover:shadow-md hover:-translate-y-[0.5px]",
+                            multiLane
+                              ? "absolute z-[10] overflow-hidden rounded-md border text-left shadow-sm cursor-pointer transition-[background-color,border-color,box-shadow,transform] hover:shadow-md hover:-translate-y-[0.5px]"
+                              : "absolute left-1 right-1 z-[10] overflow-hidden rounded-md border text-left shadow-sm cursor-pointer transition-[background-color,border-color,box-shadow,transform] hover:shadow-md hover:-translate-y-[0.5px]",
                             isQuarterBlock
                               ? "flex items-center justify-between gap-1 px-1 py-0"
                               : "flex flex-col justify-start px-2 py-1",
@@ -795,6 +857,13 @@ export function ActualsCalendarGrid({
                           style={{
                             top,
                             height,
+                            ...(multiLane
+                              ? {
+                                  left: `calc(0.25rem + (100% - 0.5rem) * ${laneIndex} / ${laneCount})`,
+                                  width: `calc((100% - 0.5rem) / ${laneCount})`,
+                                  right: "auto",
+                                }
+                              : {}),
                             borderColor: bStyle.borderColor,
                             background: bStyle.background,
                             color: "var(--app-text)",

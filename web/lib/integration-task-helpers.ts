@@ -91,3 +91,14 @@ export function nextMondayIsoUtc(todayIso: string): string {
   const daysUntilMonday = (1 - weekday + 7) % 7;
   return daysUntilMonday === 0 ? addDaysIsoUtc(todayIso, 7) : addDaysIsoUtc(todayIso, daysUntilMonday);
 }
+
+/**
+ * First calendar Sunday that begins the "next week" bucket on Work / tasks list.
+ * Mon–Sat: upcoming Sunday (same calendar week). If today is Sunday, use the following Sunday (+7).
+ */
+export function nextWeekBucketStartIsoUtc(todayIso: string): string {
+  const d = new Date(`${todayIso}T12:00:00.000Z`);
+  const wd = d.getUTCDay();
+  if (wd === 0) return addDaysIsoUtc(todayIso, 7);
+  return addDaysIsoUtc(todayIso, 7 - wd);
+}

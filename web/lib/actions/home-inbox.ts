@@ -22,3 +22,24 @@ export async function markHomeInboxItemDone(itemId: string): Promise<{ error?: s
   revalidatePath("/home");
   return {};
 }
+
+export async function markHomeInboxItemRead(itemId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("home_inbox_items")
+    .update({ read_at: now })
+    .eq("id", itemId)
+    .eq("owner_id", user.id)
+    .eq("status", "open")
+    .is("read_at", null);
+
+  if (error) return { error: error.message };
+  revalidatePath("/home");
+  return {};
+}

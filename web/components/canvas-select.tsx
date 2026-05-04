@@ -25,6 +25,7 @@ export function CanvasSelect({
   disabled = false,
   triggerClassName,
   chevronClassName,
+  listClassName,
 }: {
   id?: string;
   name: string;
@@ -39,6 +40,8 @@ export function CanvasSelect({
   triggerClassName?: string;
   /** Merged onto the chevron span (e.g. tuck icon toward the right edge). */
   chevronClassName?: string;
+  /** Merged onto the listbox `<ul>` (e.g. shorter max-height in tight dialogs). */
+  listClassName?: string;
 }) {
   const uid = useId();
   const id = idProp ?? uid;
@@ -118,7 +121,13 @@ export function CanvasSelect({
         </span>
       </button>
       {open ? (
-        <ul ref={listRef} id={listId} role="listbox" className="canvas-select-list" aria-labelledby={id}>
+        <ul
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          className={`canvas-select-list${listClassName ? ` ${listClassName}` : ""}`}
+          aria-labelledby={id}
+        >
           {options.map((o, idx) => {
             if ("kind" in o) {
               if (o.kind === "heading") {

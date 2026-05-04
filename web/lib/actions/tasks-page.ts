@@ -599,11 +599,10 @@ export async function rescheduleTaskByDrag(
 }
 
 /**
- * Within-bucket drag on /work: write a new sort_order for each task in the bucket.
+ * Within-bucket drag on /work: set `sort_order` to the task's index in `orderedTaskIds` (0..n-1).
  *
- * Tasks in `orderedTaskIds` are assigned sort_order = index. We accept any subset
- * (e.g. just the visible bucket) since `sort_order` is the same field used by the
- * integration panel — there is no namespace collision.
+ * Integration and internal rows share one visible list; using the **same** index for both types
+ * lets `sort_order` sort interleaved project + internal tasks on the Work page.
  */
 export async function reorderTaskWithinGroup(
   orderedTaskIds: string[],
@@ -621,54 +620,73 @@ export async function reorderTaskWithinGroup(
     .select("id, project_track_id")
     .in("id", orderedTaskIds);
 
-  if (integTaskRows && integTaskRows.length === orderedTaskIds.length) {
-    const trackIds = Array.from(new Set(integTaskRows.map((t) => t.project_track_id)));
-    const { data: trackRows } = await supabase
+  const integById = new Map((integTaskRows ?? []).map((r) => [r.id, r] as const));
+  const internalIdsInOrder = orderedTaskIds.filter((id) => !integById.has(id));
+  const integrationIdsInOrder = orderedTaskIds.filter((id) => integById.has(id));
+
+  if (internalIdsInOrder.length > 0) {
+    const { data: internalTaskRows } = await supabase
+      .from("internal_tasks")
+      .select("id, internal_track_id, internal_initiative_id")
+      .in("id", internalIdsInOrder);
+    if (!internalTaskRows || internalTaskRows.length !== internalIdsInOrder.length) {
+      return { error: "One or more tasks are invalid" };
+    }
+    for (const row of internalTaskRows) {
+      if (row.internal_initiative_id) {
+        const { data: inv } = await supabase
+          .from("internal_initiatives")
+          .select("id")
+          .eq("id", row.internal_initiative_id)
+          .eq("owner_id", user.id)
+          .maybeSingle();
+        if (!inv) return { error: "Not found" };
+      } else if (row.internal_track_id) {
+        const { data: tr } = await supabase
+          .from("internal_tracks")
+          .select("id")
+          .eq("id", row.internal_track_id)
+          .eq("owner_id", user.id)
+          .maybeSingle();
+        if (!tr) return { error: "Not found" };
+      } else {
+        return { error: "Not found" };
+      }
+    }
+  }
+
+  let trackRows: { id: string; project_id: string; project_integration_id: string | null }[] | null =
+    null;
+  if (integrationIdsInOrder.length > 0) {
+    const integRowsOrdered = integrationIdsInOrder.map((id) => integById.get(id)!);
+    const trackIds = Array.from(new Set(integRowsOrdered.map((t) => t.project_track_id)));
+    const { data: tr } = await supabase
       .from("project_tracks")
       .select("id, project_id, project_integration_id")
       .in("id", trackIds);
-    if (!trackRows) return { error: "Not found" };
+    if (!tr) return { error: "Not found" };
+    trackRows = tr;
 
-    const projectIds = Array.from(new Set(trackRows.map((r) => r.project_id)));
+    const projectIds = Array.from(new Set(tr.map((r) => r.project_id)));
     const { data: ownedProjects } = await supabase
       .from("projects")
       .select("id")
       .eq("owner_id", user.id)
       .in("id", projectIds);
     const ownedProjectIds = new Set((ownedProjects ?? []).map((r) => r.id));
-    if (trackRows.some((r) => !ownedProjectIds.has(r.project_id))) {
+    if (tr.some((r) => !ownedProjectIds.has(r.project_id))) {
       return { error: "Permission denied" };
     }
-
-    const updates = orderedTaskIds.map((taskId, index) =>
-      supabase.from("integration_tasks").update({ sort_order: index }).eq("id", taskId),
-    );
-    const results = await Promise.all(updates);
-    for (const { error } of results) {
-      if (error) return { error: error.message };
-    }
-
-    revalidatePath("/work");
-    revalidatePath("/tasks");
-    for (const track of trackRows) {
-      revalidatePath(`/projects/${track.project_id}`);
-      if (track.project_integration_id) {
-        revalidatePath(`/projects/${track.project_id}/integrations/${track.project_integration_id}`);
-      }
-    }
-    return {};
   }
 
-  const { data: internalTaskRows } = await supabase
-    .from("internal_tasks")
-    .select("id")
-    .in("id", orderedTaskIds);
-  if (!internalTaskRows || internalTaskRows.length !== orderedTaskIds.length) {
+  if (integrationIdsInOrder.length === 0 && internalIdsInOrder.length === 0) {
     return { error: "One or more tasks are invalid" };
   }
 
   const updates = orderedTaskIds.map((taskId, index) =>
-    supabase.from("internal_tasks").update({ sort_order: index }).eq("id", taskId),
+    integById.has(taskId)
+      ? supabase.from("integration_tasks").update({ sort_order: index }).eq("id", taskId)
+      : supabase.from("internal_tasks").update({ sort_order: index }).eq("id", taskId),
   );
   const results = await Promise.all(updates);
   for (const { error } of results) {
@@ -677,7 +695,18 @@ export async function reorderTaskWithinGroup(
 
   revalidatePath("/work");
   revalidatePath("/tasks");
-  revalidatePath("/internal");
+  if (trackRows) {
+    for (const track of trackRows) {
+      revalidatePath(`/projects/${track.project_id}`);
+      if (track.project_integration_id) {
+        revalidatePath(`/projects/${track.project_id}/integrations/${track.project_integration_id}`);
+      }
+    }
+  }
+  if (internalIdsInOrder.length > 0) {
+    revalidatePath("/internal");
+  }
+
   return {};
 }
 

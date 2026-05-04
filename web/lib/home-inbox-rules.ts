@@ -1,3 +1,16 @@
+/**
+ * Home inbox: server-side rule engine (`syncHomeInboxRules`) inserts rows into
+ * `home_inbox_items` with idempotent `(owner_id, dedupe_key)`.
+ *
+ * | `rule_key` | When it runs | Settings / inputs |
+ * |------------|----------------|-------------------|
+ * | `stale_integration` | No `integration_latest_updates` (or PI `created_at`) signal in the last 7 days | Not settings-gated; evaluated for every active project integration. |
+ * | `activity_summary_reminder` | On the user’s **activity summary day** (weekday), if that project has no `project_summaries` row whose `generated_at` falls in the current Mon–Sun calendar week (user TZ) | `UserPreferences.activity_summary_day` |
+ * | `forecast_review_reminder` | On the user’s **forecast review day** (weekday), once per week (`dedupe_key` uses week Monday) | `UserPreferences.forecast_review_day` |
+ *
+ * Per-project trigger overrides are not implemented yet (future: optional overrides + `metadata`).
+ */
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
@@ -76,11 +89,49 @@ export type HomeInboxItemRow = {
   link_path: string | null;
   status: string;
   created_at: string;
+  /** Null until the user opens the item in the inbox (master–detail). */
+  read_at: string | null;
 };
+
+const INBOX_LIST_COLUMNS =
+  "id, rule_key, dedupe_key, title, body, link_path, status, created_at, read_at";
+const INBOX_LIST_COLUMNS_LEGACY = "id, rule_key, dedupe_key, title, body, link_path, status, created_at";
+
+function logSupabaseError(context: string, error: unknown): void {
+  if (error && typeof error === "object") {
+    const e = error as { message?: string; code?: string; details?: string; hint?: string };
+    console.error(context, {
+      message: e.message,
+      code: e.code,
+      details: e.details,
+      hint: e.hint,
+    });
+  } else {
+    console.error(context, error);
+  }
+}
+
+/** True when Postgres/PostgREST rejects `read_at` (migration not applied on this DB). */
+function isReadAtColumnMissingError(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  if (msg.includes("read_at")) {
+    if (
+      msg.includes("does not exist") ||
+      msg.includes("undefined column") ||
+      msg.includes("could not find") ||
+      error.code === "42703"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Upserts deterministic inbox rows for the signed-in user. Call from Home RSC
- * with a server Supabase client (RLS as the user).
+ * with a server Supabase client (RLS as the user). See file-level table for
+ * `rule_key` meanings and settings linkage.
  */
 export async function syncHomeInboxRules(
   supabase: SupabaseClient,
@@ -242,29 +293,53 @@ export async function loadOpenHomeInboxItems(
   supabase: SupabaseClient,
   ownerId: string,
 ): Promise<HomeInboxItemRow[]> {
-  const { data, error } = await supabase
+  const first = await supabase
     .from("home_inbox_items")
-    .select("id, rule_key, dedupe_key, title, body, link_path, status, created_at")
+    .select(INBOX_LIST_COLUMNS)
     .eq("owner_id", ownerId)
     .eq("status", "open")
     .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error("[home-inbox] list failed", error);
-    return [];
+  let rows: Record<string, unknown>[] = (first.data ?? []) as Record<string, unknown>[];
+  let err = first.error;
+
+  if (err && isReadAtColumnMissingError(err)) {
+    const second = await supabase
+      .from("home_inbox_items")
+      .select(INBOX_LIST_COLUMNS_LEGACY)
+      .eq("owner_id", ownerId)
+      .eq("status", "open")
+      .order("created_at", { ascending: false });
+    err = second.error;
+    rows = (second.data ?? []) as Record<string, unknown>[];
   }
 
-  const rows = data ?? [];
+  if (err) {
+    logSupabaseError("[home-inbox] list failed", err);
+    return [];
+  }
   const rank = (rule: string) => {
     if (rule === "stale_integration") return 0;
     if (rule === "activity_summary_reminder") return 1;
     if (rule === "forecast_review_reminder") return 2;
     return 3;
   };
-  return [...rows].sort((a, b) => {
+  const normalized: HomeInboxItemRow[] = rows.map((r) => ({
+    id: r.id as string,
+    rule_key: r.rule_key as string,
+    dedupe_key: r.dedupe_key as string,
+    title: r.title as string,
+    body: (r.body as string | null) ?? null,
+    link_path: (r.link_path as string | null) ?? null,
+    status: r.status as string,
+    created_at: r.created_at as string,
+    read_at: (r.read_at as string | null | undefined) ?? null,
+  }));
+
+  return [...normalized].sort((a, b) => {
     const ra = rank(a.rule_key);
     const rb = rank(b.rule_key);
     if (ra !== rb) return ra - rb;
-    return (b.created_at as string).localeCompare(a.created_at as string);
-  }) as HomeInboxItemRow[];
+    return b.created_at.localeCompare(a.created_at);
+  });
 }

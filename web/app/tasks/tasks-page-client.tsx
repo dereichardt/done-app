@@ -344,28 +344,48 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
     indicatorToActiveSessionDto(initialSnapshot.activeWorkSessionIndicator),
   );
 
+  const activeWorkIndicatorSyncKey = useMemo(() => {
+    const i = initialSnapshot.activeWorkSessionIndicator;
+    if (!i) return "";
+    return `${i.scope}|${i.task_id}|${i.started_at}|${i.paused_ms_accumulated}|${i.pause_started_at ?? ""}`;
+  }, [
+    initialSnapshot.activeWorkSessionIndicator?.scope,
+    initialSnapshot.activeWorkSessionIndicator?.task_id,
+    initialSnapshot.activeWorkSessionIndicator?.started_at,
+    initialSnapshot.activeWorkSessionIndicator?.paused_ms_accumulated,
+    initialSnapshot.activeWorkSessionIndicator?.pause_started_at,
+  ]);
+
+  // Sync client session from server indicator only when indicator *fields* change (not object identity).
   useEffect(() => {
     setActiveWorkSession(indicatorToActiveSessionDto(initialSnapshot.activeWorkSessionIndicator));
-  }, [initialSnapshot.activeWorkSessionIndicator]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialSnapshot` read when `activeWorkIndicatorSyncKey` changes
+  }, [activeWorkIndicatorSyncKey]);
 
   const effectiveGlobalActiveTaskId =
     activeWorkSession?.task_id ?? initialSnapshot.activeWorkSessionIndicator?.task_id ?? null;
 
   const [expandedWorkTaskId, setExpandedWorkTaskId] = useState<string | null>(null);
 
+  const workSessionTaskId = activeWorkSession?.task_id ?? null;
+  const openTaskStatusForWorkSession = useMemo(() => {
+    if (!workSessionTaskId) return "";
+    const t = openTasks.find((x) => x.id === workSessionTaskId);
+    if (!t) return "__missing__";
+    return t.status;
+  }, [workSessionTaskId, openTasks]);
+
   useEffect(() => {
-    const aid = activeWorkSession?.task_id ?? null;
-    if (!aid) {
-      setExpandedWorkTaskId(null);
+    if (!workSessionTaskId) {
+      setExpandedWorkTaskId((prev) => (prev == null ? prev : null));
       return;
     }
-    const t = openTasks.find((x) => x.id === aid);
-    if (!t || t.status === "done") {
-      setExpandedWorkTaskId(null);
+    if (openTaskStatusForWorkSession === "__missing__" || openTaskStatusForWorkSession === "done") {
+      setExpandedWorkTaskId((prev) => (prev == null ? prev : null));
       return;
     }
-    setExpandedWorkTaskId(aid);
-  }, [activeWorkSession?.task_id, openTasks]);
+    setExpandedWorkTaskId((prev) => (prev === workSessionTaskId ? prev : workSessionTaskId));
+  }, [workSessionTaskId, openTaskStatusForWorkSession]);
 
   const closeWorkRow = useCallback(async () => {
     setActiveWorkSession(null);
@@ -470,7 +490,10 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       const reordered: TasksPageTask[] = orderedTaskIds
         .map((id) => lookup.get(id))
         .filter((v): v is TasksPageTask => Boolean(v))
-        .map((t, i) => ({ ...t, sort_order: i }));
+        .map((t, globalIndex) => ({
+          ...t,
+          sort_order: globalIndex,
+        }));
 
       setOpenTasks((prev) => {
         const inOrder = new Map(reordered.map((t) => [t.id, t] as const));
@@ -478,6 +501,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
       });
 
       const res = await reorderTaskWithinGroup(orderedTaskIds);
+
       if (res.error) {
         setWorkSessionActionError(res.error);
       }

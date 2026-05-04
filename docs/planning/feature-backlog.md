@@ -279,6 +279,39 @@ The backlog currently includes a timezone-only settings item (`## 5. User settin
 
 ---
 
+## 11. Career — quarterly check-in prep
+
+### Goal
+
+Add a **Career** destination in the primary side navigation with a dedicated surface that helps users **prepare for quarterly check-ins** (for example manager or HR conversations) by generating a **contribution summary** for a chosen **time period**, with **calendar quarter** as the default framing.
+
+### Context
+
+Done already captures execution signals across projects (tasks, effort, updates, and normalized activity). Career turns that into a time-bounded view users can refine before check-ins, instead of manually reconstructing the quarter from scattered project and integration screens.
+
+### Acceptance criteria
+
+- [ ] **Career** appears in the primary sidebar navigation (route TBD, e.g. `/career`) with active-state behavior consistent with other shell items.
+- [ ] Period selection defaults to **calendar quarter** (Q1–Q4 + year); users can choose a **custom date range** for partial quarters or other windows.
+- [ ] The summary aggregates **contributions** across projects and integrations the user is authorized to see for the selected period, including at minimum: notable task completions or progress, logged effort (task work sessions and manual effort entries where applicable), and integration updates / activity signals per agreed product rules (exact joins and weighting left to implementation tickets).
+- [ ] Presentation is **readable and shareable**: clear on-screen sections or narrative, with copy and/or export affordances (format TBD — see open questions).
+- [ ] **Empty**, **loading**, and **error** states are explicit when no data exists in the range, generation fails, or the requested scope is invalid.
+
+### Current baseline
+
+- Primary sidebar `navItems`: `web/components/projects-shell.tsx`.
+- Patterns to reuse for cross-entity summaries and activity context (project-scoped today, not Career): `web/lib/project-activity.ts`, `web/lib/project-summaries.ts`, `web/app/api/projects/[id]/summaries/route.ts`.
+
+### Open questions
+
+- **Quarter model:** calendar quarters only in v1 vs optional **fiscal quarter** alignment (employer fiscal year).
+- **Summary engine:** deterministic rollup from activity and effort data vs **AI-assisted** narrative (or hybrid); how much user editing is expected before paste into performance or HR tools.
+- **Scope defaults:** all authorized active projects vs a user-filtered subset for v1.
+- **Sensitivity:** default tone and field inclusion so excerpts are appropriate for external systems; optional redaction or separation of “internal notes” vs shareable bullets.
+- **Persistence:** ephemeral generated summary only vs **saved drafts** per quarter with simple version history.
+
+---
+
 ## Maintenance
 
 When an item ships, either remove it from this backlog or mark it with a status line and date so history stays readable.

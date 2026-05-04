@@ -109,6 +109,9 @@ const SESSION_TIME_PICKER_WIDTHS = {
   },
 } as const;
 
+/** Shorter than default `canvas-select-list` (16rem) so Finish dialog lists stay clear of the footer. */
+const finishModalSessionTimeSelectListClass = "!max-h-[9rem]";
+
 function SessionTimeCanvasPickers({
   valueMs,
   onTimeCommit,
@@ -116,6 +119,7 @@ function SessionTimeCanvasPickers({
   density = "default",
   selectMinWidthClass,
   ampmMinWidthClass,
+  selectListClassName,
   className = "",
 }: {
   valueMs: number;
@@ -124,6 +128,8 @@ function SessionTimeCanvasPickers({
   /** When set, overrides `density` for trigger widths. */
   selectMinWidthClass?: string;
   ampmMinWidthClass?: string;
+  /** Merged onto each time `CanvasSelect` listbox (e.g. cap height in finish modal). */
+  selectListClassName?: string;
   density?: keyof typeof SESSION_TIME_PICKER_WIDTHS;
   className?: string;
 }) {
@@ -164,6 +170,7 @@ function SessionTimeCanvasPickers({
           disabled={disabled}
           triggerClassName="!pr-1"
           chevronClassName="!mr-0"
+          listClassName={selectListClassName}
           onValueChange={(v) => {
             setHour(v);
             void commitWith(v, minute, ap);
@@ -178,6 +185,7 @@ function SessionTimeCanvasPickers({
           disabled={disabled}
           triggerClassName="!pr-1"
           chevronClassName="!mr-0"
+          listClassName={selectListClassName}
           onValueChange={(v) => {
             setMinute(v);
             void commitWith(hour, v, ap);
@@ -192,6 +200,7 @@ function SessionTimeCanvasPickers({
           disabled={disabled}
           triggerClassName="!pr-1"
           chevronClassName="!mr-0"
+          listClassName={selectListClassName}
           onValueChange={(v) => {
             setAp(v);
             void commitWith(hour, minute, v);
@@ -244,6 +253,7 @@ function ClickToEditSessionTime({
   /** In the finish modal, overlay the pickers on the display line to limit layout shift. */
   overlayEdit = false,
   pickerDensity = "default",
+  selectListClassName,
 }: {
   valueMs: number;
   onCommit: (ms: number) => boolean | void | Promise<boolean | void>;
@@ -257,6 +267,7 @@ function ClickToEditSessionTime({
   matchWorkMiniCardDisplayOnly?: boolean;
   overlayEdit?: boolean;
   pickerDensity?: keyof typeof SESSION_TIME_PICKER_WIDTHS;
+  selectListClassName?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -316,6 +327,7 @@ function ClickToEditSessionTime({
             disabled={pending}
             onTimeCommit={handleTimeCommit}
             density={pickerDensity}
+            selectListClassName={selectListClassName}
           />
         </div>
       </div>
@@ -333,6 +345,7 @@ function ClickToEditSessionTime({
           disabled={pending}
           onTimeCommit={handleTimeCommit}
           density={pickerDensity}
+          selectListClassName={selectListClassName}
           className="!min-w-min"
         />
       </div>
@@ -571,6 +584,7 @@ function WorkSessionFinishModalTimeHalf({
           ariaLabel={ariaLabel}
           onBeforeOpenEdit={onBeforeOpenEdit}
           onCommit={onCommit}
+          selectListClassName={finishModalSessionTimeSelectListClass}
         />
       </div>
     </div>
@@ -712,7 +726,7 @@ function WorkSessionFinishTimeSection({
     <div className="flex flex-col gap-2">
       <div className="flex w-full min-w-0 gap-3" role="group" aria-label="Session time summary">
         <div
-          className={`${finishDialogTimeCardShellClass} flex min-h-0 min-w-0 flex-[2] flex-col justify-center overflow-hidden`}
+          className={`${finishDialogTimeCardShellClass} flex min-h-0 min-w-0 flex-[2] flex-col justify-center`}
           style={finishDialogTimeCardSurface}
         >
           <div className="flex min-h-0 w-full min-w-0 flex-row items-stretch gap-4 sm:gap-5">

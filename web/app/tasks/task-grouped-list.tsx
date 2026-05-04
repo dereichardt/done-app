@@ -20,12 +20,14 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ActiveWorkSessionDTO } from "@/lib/actions/integration-tasks";
 import type { TasksPageTask } from "@/lib/tasks-page-shared";
 import {
   addDaysIsoUtc,
+  formatDateDisplay,
   nextMondayIsoUtc,
+  nextWeekBucketStartIsoUtc,
   type IntegrationTaskRow,
 } from "@/lib/integration-task-helpers";
 
@@ -34,6 +36,7 @@ export type TaskBucketId =
   | "today"
   | "tomorrow"
   | "this_week"
+  | "next_week"
   | "later"
   | "no_date"
   | "completed";
@@ -44,6 +47,8 @@ export type TaskBucket = {
   tasks: TasksPageTask[];
   /** Default ISO date used when a task is dropped into this bucket (null = clear due date). */
   defaultDueDateIso: string | null;
+  /** Next week only: visual groups by due date (same order as `tasks`). */
+  dateSubgroups?: { dateIso: string; title: string; tasks: TasksPageTask[] }[];
 };
 
 /**
@@ -60,12 +65,14 @@ export function computeTaskBuckets({
   todayIso: string;
 }): TaskBucket[] {
   const tomorrowIso = addDaysIsoUtc(todayIso, 1);
-  const endOfWeekIso = addDaysIsoUtc(todayIso, 7);
+  const nextWeekStartIso = nextWeekBucketStartIsoUtc(todayIso);
+  const nextWeekEndIso = addDaysIsoUtc(nextWeekStartIso, 6);
 
   const pastDue: TasksPageTask[] = [];
   const today: TasksPageTask[] = [];
   const tomorrow: TasksPageTask[] = [];
   const thisWeek: TasksPageTask[] = [];
+  const nextWeek: TasksPageTask[] = [];
   const later: TasksPageTask[] = [];
   const noDate: TasksPageTask[] = [];
 
@@ -78,15 +85,15 @@ export function computeTaskBuckets({
     if (due < todayIso) pastDue.push(task);
     else if (due === todayIso) today.push(task);
     else if (due === tomorrowIso) tomorrow.push(task);
-    else if (due <= endOfWeekIso) thisWeek.push(task);
+    else if (due < nextWeekStartIso) thisWeek.push(task);
+    else if (due <= nextWeekEndIso) nextWeek.push(task);
     else later.push(task);
   }
 
   /**
-   * Within-bucket order is the user's drag-reorder result (sort_order ASC).
-   * Tie-break on due_date so newly added tasks (sort_order = 0) still slot in
-   * by date inside multi-date buckets like "Past due" / "This week" / "Later".
-   * Tasks with no due_date sort to the end of "No due date".
+   * Manual drag order is stored in `sort_order` (per table). Sort by that first so reorder sticks;
+   * tie-break on due_date so new tasks (often sort_order 0) still group sensibly by date.
+   * Due-first ordering would undo any cross-date drag within the same bucket on the next render.
    */
   function sortBucket(rows: TasksPageTask[]) {
     rows.sort((a, b) => {
@@ -98,18 +105,47 @@ export function computeTaskBuckets({
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     });
   }
+
   sortBucket(pastDue);
   sortBucket(today);
   sortBucket(tomorrow);
   sortBucket(thisWeek);
+  sortBucket(nextWeek);
   sortBucket(later);
   sortBucket(noDate);
+
+  const nextWeekSubgroups =
+    nextWeek.length === 0
+      ? undefined
+      : (() => {
+          const byDate = new Map<string, TasksPageTask[]>();
+          for (const t of nextWeek) {
+            const key = t.due_date ?? "";
+            if (!key) continue;
+            const arr = byDate.get(key) ?? [];
+            arr.push(t);
+            byDate.set(key, arr);
+          }
+          const dates = [...byDate.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+          return dates.map((dateIso) => ({
+            dateIso,
+            title: formatDateDisplay(dateIso),
+            tasks: byDate.get(dateIso)!,
+          }));
+        })();
 
   const buckets: TaskBucket[] = [
     { id: "past_due", title: "Past due", tasks: pastDue, defaultDueDateIso: todayIso },
     { id: "today", title: "Today", tasks: today, defaultDueDateIso: todayIso },
     { id: "tomorrow", title: "Tomorrow", tasks: tomorrow, defaultDueDateIso: tomorrowIso },
     { id: "this_week", title: "This week", tasks: thisWeek, defaultDueDateIso: nextMondayIsoUtc(todayIso) },
+    {
+      id: "next_week",
+      title: "Next week",
+      tasks: nextWeek,
+      defaultDueDateIso: nextWeekStartIso,
+      dateSubgroups: nextWeekSubgroups,
+    },
     { id: "later", title: "Later", tasks: later, defaultDueDateIso: addDaysIsoUtc(todayIso, 14) },
     { id: "no_date", title: "No due date", tasks: noDate, defaultDueDateIso: null },
   ];
@@ -382,49 +418,103 @@ export function TaskGroupedList({
         {!collapsed ? (
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
             <ul className="mt-2 flex list-none flex-col gap-2.5">
-              {bucket.tasks.map((task) => {
-                const isExpandedWorkRow =
-                  expandedWorkTaskId === task.id && activeWorkSession?.task_id === task.id;
-                if (isExpandedWorkRow) {
-                  const crumb = crumbForTask(task);
-                  return (
-                    <li key={task.id} className="min-w-0">
-                      <TaskWorkRow
-                        taskId={task.id}
-                        taskTitle={task.title}
-                        taskCrumb={crumb}
-                        taskDueDateIso={task.due_date}
-                        finishSessionIntegrationLabel={crumb.integrationLabel}
-                        finishSessionProjectLabel={crumb.projectName}
-                        activeSession={activeWorkSession}
-                        onActiveSessionChange={onActiveWorkSessionChange}
-                        onClose={onCloseWorkRow}
+              {bucket.id === "next_week" && bucket.dateSubgroups && bucket.dateSubgroups.length > 0
+                ? bucket.dateSubgroups.map((g) => (
+                    <Fragment key={g.dateIso}>
+                      <li
+                        className="list-none pt-2 first:pt-0 text-xs font-normal"
+                        style={{ color: "var(--app-text-muted)" }}
+                      >
+                        {g.title}
+                      </li>
+                      {g.tasks.map((task) => {
+                        const isExpandedWorkRow =
+                          expandedWorkTaskId === task.id && activeWorkSession?.task_id === task.id;
+                        if (isExpandedWorkRow) {
+                          const crumb = crumbForTask(task);
+                          return (
+                            <li key={task.id} className="min-w-0">
+                              <TaskWorkRow
+                                taskId={task.id}
+                                taskTitle={task.title}
+                                taskCrumb={crumb}
+                                taskDueDateIso={task.due_date}
+                                finishSessionIntegrationLabel={crumb.integrationLabel}
+                                finishSessionProjectLabel={crumb.projectName}
+                                activeSession={activeWorkSession}
+                                onActiveSessionChange={onActiveWorkSessionChange}
+                                onClose={onCloseWorkRow}
+                              />
+                            </li>
+                          );
+                        }
+                        return (
+                          <SortableTaskRow
+                            key={task.id}
+                            task={task}
+                            bucketId={bucket.id}
+                            crumb={crumbForTask(task)}
+                            effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+                            starting={startWorkTaskId === task.id}
+                            collapsedDone={isCompletedBucket}
+                            onStartWork={onStartWork}
+                            onOpenHistory={onOpenHistory}
+                            onOpenDelete={onOpenDelete}
+                            onSaveTitle={onSaveTitle}
+                            onSavePriority={onSavePriority}
+                            onSaveDueDate={onSaveDueDate}
+                            onAfterToggleComplete={onAfterToggleComplete}
+                            onAfterUndo={onAfterUndo}
+                            onLongPressCompleteLog={onLongPressCompleteLog}
+                            dndReady={dndReady}
+                          />
+                        );
+                      })}
+                    </Fragment>
+                  ))
+                : bucket.tasks.map((task) => {
+                    const isExpandedWorkRow =
+                      expandedWorkTaskId === task.id && activeWorkSession?.task_id === task.id;
+                    if (isExpandedWorkRow) {
+                      const crumb = crumbForTask(task);
+                      return (
+                        <li key={task.id} className="min-w-0">
+                          <TaskWorkRow
+                            taskId={task.id}
+                            taskTitle={task.title}
+                            taskCrumb={crumb}
+                            taskDueDateIso={task.due_date}
+                            finishSessionIntegrationLabel={crumb.integrationLabel}
+                            finishSessionProjectLabel={crumb.projectName}
+                            activeSession={activeWorkSession}
+                            onActiveSessionChange={onActiveWorkSessionChange}
+                            onClose={onCloseWorkRow}
+                          />
+                        </li>
+                      );
+                    }
+                    return (
+                      <SortableTaskRow
+                        key={task.id}
+                        task={task}
+                        bucketId={bucket.id}
+                        crumb={crumbForTask(task)}
+                        effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+                        starting={startWorkTaskId === task.id}
+                        collapsedDone={isCompletedBucket}
+                        onStartWork={onStartWork}
+                        onOpenHistory={onOpenHistory}
+                        onOpenDelete={onOpenDelete}
+                        onSaveTitle={onSaveTitle}
+                        onSavePriority={onSavePriority}
+                        onSaveDueDate={onSaveDueDate}
+                        onAfterToggleComplete={onAfterToggleComplete}
+                        onAfterUndo={onAfterUndo}
+                        onLongPressCompleteLog={onLongPressCompleteLog}
+                        dndReady={dndReady}
                       />
-                    </li>
-                  );
-                }
-                return (
-                  <SortableTaskRow
-                    key={task.id}
-                    task={task}
-                    bucketId={bucket.id}
-                    crumb={crumbForTask(task)}
-                    effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-                    starting={startWorkTaskId === task.id}
-                    collapsedDone={isCompletedBucket}
-                    onStartWork={onStartWork}
-                    onOpenHistory={onOpenHistory}
-                    onOpenDelete={onOpenDelete}
-                    onSaveTitle={onSaveTitle}
-                    onSavePriority={onSavePriority}
-                    onSaveDueDate={onSaveDueDate}
-                    onAfterToggleComplete={onAfterToggleComplete}
-                    onAfterUndo={onAfterUndo}
-                    onLongPressCompleteLog={onLongPressCompleteLog}
-                    dndReady={dndReady}
-                  />
-                );
-              })}
+                    );
+                  })}
             </ul>
           </SortableContext>
         ) : null}
