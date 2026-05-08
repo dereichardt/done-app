@@ -261,12 +261,18 @@ export async function loadTasksPageSnapshot(): Promise<{
 
   let integrationDefById: Record<
     string,
-    { name: string | null; integration_code: string | null; integrating_with: string | null; direction: string | null }
+    {
+      name: string | null;
+      integration_code: string | null;
+      integrating_with: string | null;
+      direction: string | null;
+      internal_time_code: string | null;
+    }
   > = {};
   if (integrationDefIds.length > 0) {
     const { data: integDefs, error: integErr } = await supabase
       .from("integrations")
-      .select("id, name, integration_code, integrating_with, direction")
+      .select("id, name, integration_code, integrating_with, direction, internal_time_code")
       .in("id", integrationDefIds);
     if (integErr) return { error: integErr.message };
     integrationDefById = Object.fromEntries(
@@ -277,6 +283,7 @@ export async function loadTasksPageSnapshot(): Promise<{
           integration_code: row.integration_code ?? null,
           integrating_with: row.integrating_with ?? null,
           direction: row.direction ?? null,
+          internal_time_code: row.internal_time_code ?? null,
         },
       ]),
     );
@@ -292,10 +299,12 @@ export async function loadTasksPageSnapshot(): Promise<{
           direction: def.direction,
         }) || (def.name ?? "Integration")
       : "Integration";
+    const itcRaw = def?.internal_time_code != null ? String(def.internal_time_code).trim() : "";
     return {
       id: row.id,
       projectId: row.project_id,
       label,
+      internalTimeCode: itcRaw.length > 0 ? itcRaw : null,
     };
   });
 

@@ -23,6 +23,8 @@ export type TasksPageIntegration = {
   projectId: string;
   /** Combined integration display label, e.g. "Workday → ADP". */
   label: string;
+  /** From the integration definition; used on the timesheet worktag row. */
+  internalTimeCode: string | null;
 };
 
 export type TasksPageTrack = {
