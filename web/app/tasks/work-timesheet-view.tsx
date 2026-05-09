@@ -655,46 +655,48 @@ export function WorkTimesheetView({
           <div className="shrink-0 overflow-x-hidden">
             <table className="w-full table-fixed border-collapse text-left text-sm">
               <TimesheetColGroup dayYmcs={dayYmcs} />
-              <tr style={{ background: "var(--app-surface-alt)" }}>
-                <th
-                  scope="col"
-                  className="border-b border-r px-1.5 py-2 text-left text-xs font-medium text-muted-canvas"
-                  style={{
-                    borderColor: "var(--app-border)",
-                    background: "var(--app-surface-alt)",
-                    boxShadow: "1px 0 0 var(--app-border)",
-                  }}
-                >
-                  Project Worktag
-                </th>
-                {dayYmcs.map((ymd, i) => (
+              <tbody>
+                <tr style={{ background: "var(--app-surface-alt)" }}>
                   <th
-                    key={ymd}
                     scope="col"
-                    className="border-b px-1 py-2 text-center text-xs font-medium text-muted-canvas"
+                    className="border-b border-r px-1.5 py-2 text-left text-xs font-medium text-muted-canvas"
+                    style={{
+                      borderColor: "var(--app-border)",
+                      background: "var(--app-surface-alt)",
+                      boxShadow: "1px 0 0 var(--app-border)",
+                    }}
+                  >
+                    Project Worktag
+                  </th>
+                  {dayYmcs.map((ymd, i) => (
+                    <th
+                      key={ymd}
+                      scope="col"
+                      className="border-b px-1 py-2 text-center text-xs font-medium text-muted-canvas"
+                      style={{
+                        borderColor: "var(--app-border)",
+                        background: "var(--app-surface-alt)",
+                      }}
+                    >
+                      <div>{WEEKDAY_LABELS[i]}</div>
+                      <div className="mt-0.5 tabular-nums" style={{ color: "var(--app-text)" }}>
+                        {dayDates[i].getDate()}
+                      </div>
+                    </th>
+                  ))}
+                  <th
+                    scope="col"
+                    className="border-b border-l px-0.5 py-2 text-center text-xs font-medium text-muted-canvas"
                     style={{
                       borderColor: "var(--app-border)",
                       background: "var(--app-surface-alt)",
                     }}
+                    title="Total hours for the week (this row)"
                   >
-                    <div>{WEEKDAY_LABELS[i]}</div>
-                    <div className="mt-0.5 tabular-nums" style={{ color: "var(--app-text)" }}>
-                      {dayDates[i].getDate()}
-                    </div>
+                    Total
                   </th>
-                ))}
-                <th
-                  scope="col"
-                  className="border-b border-l px-0.5 py-2 text-center text-xs font-medium text-muted-canvas"
-                  style={{
-                    borderColor: "var(--app-border)",
-                    background: "var(--app-surface-alt)",
-                  }}
-                  title="Total hours for the week (this row)"
-                >
-                  Total
-                </th>
-              </tr>
+                </tr>
+              </tbody>
             </table>
           </div>
 
@@ -830,48 +832,50 @@ export function WorkTimesheetView({
           <div className="shrink-0 overflow-x-hidden border-t" style={{ borderColor: "var(--app-border)" }}>
             <table className="w-full table-fixed border-collapse text-left text-sm">
               <TimesheetColGroup dayYmcs={dayYmcs} />
-              <tr style={{ background: "var(--app-surface-alt)" }}>
-                <th
-                  scope="row"
-                  className="border-r px-1.5 py-1.5 text-left text-xs font-medium text-muted-canvas"
-                  style={{
-                    borderColor: "var(--app-border)",
-                    background: "var(--app-surface-alt)",
-                    boxShadow: "1px 0 0 var(--app-border)",
-                  }}
-                >
-                  Total
-                </th>
-                {dayYmcs.map((ymd) => (
+              <tbody>
+                <tr style={{ background: "var(--app-surface-alt)" }}>
+                  <th
+                    scope="row"
+                    className="border-r px-1.5 py-1.5 text-left text-xs font-medium text-muted-canvas"
+                    style={{
+                      borderColor: "var(--app-border)",
+                      background: "var(--app-surface-alt)",
+                      boxShadow: "1px 0 0 var(--app-border)",
+                    }}
+                  >
+                    Total
+                  </th>
+                  {dayYmcs.map((ymd) => (
+                    <td
+                      key={ymd}
+                      className="px-0.5 py-1.5 text-center align-middle"
+                      style={{
+                        borderColor: "var(--app-border)",
+                        background: "var(--app-surface-alt)",
+                      }}
+                      title="Sum of hours for this day"
+                    >
+                      <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-text)" }}>
+                        {(columnTotalsByDay.get(ymd) ?? 0) > 0.001
+                          ? formatEffortHoursLabel(columnTotalsByDay.get(ymd) ?? 0)
+                          : "—"}
+                      </span>
+                    </td>
+                  ))}
                   <td
-                    key={ymd}
-                    className="px-0.5 py-1.5 text-center align-middle"
+                    className="border-l px-0.5 py-1.5 text-center align-middle"
                     style={{
                       borderColor: "var(--app-border)",
                       background: "var(--app-surface-alt)",
                     }}
-                    title="Sum of hours for this day"
+                    title="Total hours for the week (all worktags)"
                   >
-                    <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-text)" }}>
-                      {(columnTotalsByDay.get(ymd) ?? 0) > 0.001
-                        ? formatEffortHoursLabel(columnTotalsByDay.get(ymd) ?? 0)
-                        : "—"}
+                    <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-action)" }}>
+                      {weekGrandTotal > 0.001 ? formatEffortHoursLabel(weekGrandTotal) : "—"}
                     </span>
                   </td>
-                ))}
-                <td
-                  className="border-l px-0.5 py-1.5 text-center align-middle"
-                  style={{
-                    borderColor: "var(--app-border)",
-                    background: "var(--app-surface-alt)",
-                  }}
-                  title="Total hours for the week (all worktags)"
-                >
-                  <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-action)" }}>
-                    {weekGrandTotal > 0.001 ? formatEffortHoursLabel(weekGrandTotal) : "—"}
-                  </span>
-                </td>
-              </tr>
+                </tr>
+              </tbody>
             </table>
           </div>
         </div>
