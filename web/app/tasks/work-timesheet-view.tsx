@@ -23,6 +23,90 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const DAY_MS = 86_400_000;
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
+/** Match `TasksEffortCalendar` detail popover width for consistent positioning. */
+const TIMESHEET_POPOVER_W = 320;
+const TIMESHEET_POPOVER_GAP = 10;
+
+type ActiveTimesheetCellPopover = {
+  x: number;
+  y: number;
+  trackLabel: string;
+  dayMeta: string;
+  hoursFormatted: string;
+  commentsText: string;
+};
+
+function TimesheetCellDetailPopover({
+  active,
+  onPointerEnter,
+  onPointerLeave,
+  onClose,
+}: {
+  active: ActiveTimesheetCellPopover;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="absolute z-[20] w-[20rem] rounded-xl border p-4 shadow-xl"
+      style={{
+        left: active.x,
+        top: active.y,
+        borderColor: "var(--app-border)",
+        background: "var(--app-surface)",
+        boxShadow: "0 8px 32px color-mix(in oklab, var(--app-text) 14%, transparent)",
+      }}
+      role="dialog"
+      aria-label="Timesheet cell details"
+      onMouseEnter={onPointerEnter}
+      onMouseLeave={onPointerLeave}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p
+            className="whitespace-pre-line text-sm font-semibold leading-snug"
+            style={{ color: "var(--app-text)" }}
+          >
+            {active.trackLabel}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-text)]"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <svg viewBox="0 0 24 24" width={14} height={14} aria-hidden>
+            <path
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M18 6 6 18M6 6l12 12"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <p className="mt-2 text-xs text-muted-canvas">
+        {active.dayMeta} ·{" "}
+        <span className="font-medium" style={{ color: "var(--app-text)" }}>
+          {active.hoursFormatted}
+        </span>
+      </p>
+
+      <div className="mt-3">
+        <p className="text-xs font-medium text-muted-canvas">Work accomplished</p>
+        <p className="mt-1 whitespace-pre-line text-sm" style={{ color: "var(--app-text)" }}>
+          {active.commentsText.trim() || "—"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function TimesheetColGroup({ dayYmcs }: { dayYmcs: readonly string[] }) {
   return (
     <colgroup>
@@ -33,6 +117,25 @@ function TimesheetColGroup({ dayYmcs }: { dayYmcs: readonly string[] }) {
       <col style={{ width: "3.5rem" }} />
     </colgroup>
   );
+}
+
+const ROW_FOCUS_RING = "color-mix(in oklab, var(--app-action) 30%, transparent)";
+
+/** One continuous outer ring for the row: each cell only draws its share of the perimeter. */
+function timesheetRowFocusBoxShadow(
+  segment: "worktag" | "day" | "total",
+  focused: boolean,
+): string | undefined {
+  const hairline = "1px 0 0 var(--app-border)";
+  const top = `inset 0 2px 0 0 ${ROW_FOCUS_RING}`;
+  const bottom = `inset 0 -2px 0 0 ${ROW_FOCUS_RING}`;
+  if (segment === "worktag") {
+    if (!focused) return hairline;
+    return `inset 2px 0 0 0 ${ROW_FOCUS_RING}, ${top}, ${bottom}, ${hairline}`;
+  }
+  if (!focused) return undefined;
+  if (segment === "day") return `${top}, ${bottom}`;
+  return `inset -2px 0 0 0 ${ROW_FOCUS_RING}, ${top}, ${bottom}`;
 }
 
 function addDaysYmd(ymd: string, delta: number): string {
@@ -274,7 +377,7 @@ function CopyIcon({ className }: { className?: string }) {
 
 function CheckIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width={16} height={16} className={className} aria-hidden>
+    <svg viewBox="0 0 24 24" className={className ?? "h-4 w-4"} aria-hidden>
       <path
         fill="none"
         stroke="currentColor"
@@ -284,6 +387,181 @@ function CheckIcon({ className }: { className?: string }) {
         d="M20 6 9 17l-5-5"
       />
     </svg>
+  );
+}
+
+function XIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className ?? "h-4 w-4"} aria-hidden>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M18 6 6 18M6 6l12 12"
+      />
+    </svg>
+  );
+}
+
+/** Top-right “copied” check; hover/focus shows X to clear session highlight (not clipboard). */
+function TimesheetCopiedIndicator({ onClear }: { onClear: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const showDismiss = hovered || focused;
+
+  return (
+    <button
+      type="button"
+      className={[
+        "absolute right-0.5 top-0.5 z-[5] flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]",
+        showDismiss
+          ? "text-[var(--app-text-muted)] hover:text-[var(--app-text)]"
+          : "text-[var(--app-state-active-fg)]",
+      ].join(" ")}
+      aria-label={showDismiss ? "Clear copied highlight" : "Copied this session"}
+      title={showDismiss ? "Clear copied highlight" : "Copied this session"}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClear();
+      }}
+    >
+      {showDismiss ? (
+        <XIcon className="h-3.5 w-3.5" />
+      ) : (
+        <CheckIcon className="h-3.5 w-3.5" />
+      )}
+    </button>
+  );
+}
+
+/**
+ * Comment preview + copy: flex row so text never paints under the control (no overlap / “see-through”).
+ * Copy column is a fixed 28px lane; hover/focus (from parent cell body) toggles the chip.
+ */
+function TimesheetCellCommentPreview({
+  previewBody,
+  copyText,
+  copyControlBg,
+  isCopied,
+  slotHover,
+  notice,
+  onCopy,
+}: {
+  previewBody: string;
+  copyText: string;
+  copyControlBg: string;
+  isCopied: boolean;
+  slotHover: boolean;
+  notice: string | undefined;
+  onCopy: () => void;
+}) {
+  const [copyFocused, setCopyFocused] = useState(false);
+  const showCopyChrome = slotHover || copyFocused;
+
+  return (
+    <div className="mt-3 min-w-0">
+      <div className="flex min-w-0 items-start gap-0">
+        <p className="line-clamp-2 min-w-0 flex-1 whitespace-pre-line break-words text-[11px] leading-snug text-muted-canvas">
+          {previewBody || "—"}
+        </p>
+        {copyText ? (
+          <div className="relative isolate h-7 w-7 shrink-0">
+            {showCopyChrome ? (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 rounded-md"
+                style={{ backgroundColor: copyControlBg }}
+              />
+            ) : null}
+            <button
+              type="button"
+              className={[
+                "absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[var(--app-text-muted)] hover:text-[var(--app-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]",
+                showCopyChrome ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+              ].join(" ")}
+              tabIndex={0}
+              aria-label={isCopied ? "Copy comments again" : "Copy comments"}
+              title={isCopied ? "Copy comments again" : "Copy all comments"}
+              onFocus={() => setCopyFocused(true)}
+              onBlur={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (!e.currentTarget.parentElement?.contains(next)) {
+                  setCopyFocused(false);
+                }
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onCopy();
+              }}
+            >
+              <CopyIcon />
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {notice ? <p className="mt-0.5 text-[10px] text-muted-canvas">{notice}</p> : null}
+    </div>
+  );
+}
+
+/** Hours + comment preview; hover anywhere here reveals the copy control. */
+function TimesheetDayCellBody({
+  has,
+  hoursFormatted,
+  linesLength,
+  previewBody,
+  copyText,
+  copyControlBg,
+  isCopied,
+  notice,
+  onCopy,
+}: {
+  has: boolean;
+  hoursFormatted: string;
+  linesLength: number;
+  previewBody: string;
+  copyText: string;
+  copyControlBg: string;
+  isCopied: boolean;
+  notice: string | undefined;
+  onCopy: () => void;
+}) {
+  const [cellHovered, setCellHovered] = useState(false);
+  const trackHover = linesLength > 0;
+
+  return (
+    <div
+      onMouseEnter={() => {
+        if (trackHover) setCellHovered(true);
+      }}
+      onMouseLeave={() => {
+        if (trackHover) setCellHovered(false);
+      }}
+    >
+      <div
+        className="text-left text-base font-semibold tabular-nums"
+        style={{ color: "var(--app-action)" }}
+      >
+        {has ? hoursFormatted : "—"}
+      </div>
+      {linesLength > 0 ? (
+        <TimesheetCellCommentPreview
+          previewBody={previewBody}
+          copyText={copyText}
+          copyControlBg={copyControlBg}
+          isCopied={isCopied}
+          slotHover={cellHovered}
+          notice={notice}
+          onCopy={onCopy}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -419,13 +697,22 @@ export function WorkTimesheetView({
 
   const [summaryMap, setSummaryMap] = useState<Map<string, SummaryState>>(() => new Map());
   const prefetchGen = useRef(0);
-  const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
-  const copyResetTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** Cells the user copied this session; cleared when leaving the timesheet (component unmount). */
+  const [copiedCellKeys, setCopiedCellKeys] = useState<Set<string>>(() => new Set());
+  const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
+  const [activeHoverDetail, setActiveHoverDetail] = useState<ActiveTimesheetCellPopover | null>(null);
+  const tableBodyWrapRef = useRef<HTMLDivElement | null>(null);
+  const closePopoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isPopoverHoveredRef = useRef(false);
+  /** Default off: hover popover for full comments only when user enables it. */
+  const [commentsPopoverEnabled, setCommentsPopoverEnabled] = useState(false);
 
   useEffect(() => {
     return () => {
-      for (const t of copyResetTimers.current.values()) clearTimeout(t);
-      copyResetTimers.current.clear();
+      if (closePopoverTimerRef.current) {
+        clearTimeout(closePopoverTimerRef.current);
+        closePopoverTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -468,6 +755,17 @@ export function WorkTimesheetView({
   /** Single primitive dep so the effect dependency array is always length 1 (React 19 dev invariant). */
   const trackIdsKey = trackRowIds.join("\x1e");
   const dayYmcsKey = dayYmcs.join("\x1e");
+
+  useEffect(() => {
+    setFocusedTrackId(null);
+    setActiveHoverDetail(null);
+    isPopoverHoveredRef.current = false;
+    if (closePopoverTimerRef.current) {
+      clearTimeout(closePopoverTimerRef.current);
+      closePopoverTimerRef.current = null;
+    }
+  }, [weekStartYmd, trackIdsKey]);
+
   const prefetchDepKey = useMemo(
     () =>
       JSON.stringify({
@@ -595,6 +893,111 @@ export function WorkTimesheetView({
     })();
   }, [prefetchDepKey]);
 
+  const showTimesheetCellPopover = useCallback(
+    (el: HTMLElement, opts: { trackId: string; dayYmd: string; hours: number; copyText: string }) => {
+      const wrap = tableBodyWrapRef.current;
+      let x = 24;
+      let y = 24;
+      if (wrap && el) {
+        const wr = wrap.getBoundingClientRect();
+        const br = el.getBoundingClientRect();
+        const rightX = br.right - wr.left + wrap.scrollLeft + TIMESHEET_POPOVER_GAP;
+        const leftX = br.left - wr.left + wrap.scrollLeft - TIMESHEET_POPOVER_W - TIMESHEET_POPOVER_GAP;
+        const maxX = wrap.scrollLeft + wr.width - TIMESHEET_POPOVER_W - 8;
+        x = Math.max(8, Math.min(maxX, rightX <= maxX ? rightX : leftX));
+        y = Math.max(
+          wrap.scrollTop + 8,
+          Math.min(
+            wrap.scrollTop + wr.height - 180,
+            br.top - wr.top + wrap.scrollTop - 8,
+          ),
+        );
+      }
+      const sample = sessionsInWeek.find((s) => s.project_track_id === opts.trackId);
+      const trackLabel = trackLabelForSummary(opts.trackId, projects, tracks, integrations, sample);
+      const dayIdx = dayYmcs.indexOf(opts.dayYmd);
+      const dayMeta =
+        dayIdx >= 0
+          ? `${WEEKDAY_LABELS[dayIdx]} · ${dayDates[dayIdx].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+          : opts.dayYmd;
+      const hasH = opts.hours > 0.001;
+      const hoursFormatted = hasH ? formatEffortHoursLabel(opts.hours) : "—";
+      setActiveHoverDetail({
+        x,
+        y,
+        trackLabel,
+        dayMeta,
+        hoursFormatted,
+        commentsText: opts.copyText,
+      });
+    },
+    [dayYmcs, dayDates, projects, sessionsInWeek, tracks, integrations],
+  );
+
+  const handleCellHoverEnter = useCallback(
+    (el: HTMLElement, opts: { trackId: string; dayYmd: string; hours: number; copyText: string }) => {
+      if (closePopoverTimerRef.current) {
+        clearTimeout(closePopoverTimerRef.current);
+        closePopoverTimerRef.current = null;
+      }
+      showTimesheetCellPopover(el, opts);
+    },
+    [showTimesheetCellPopover],
+  );
+
+  const handleCellHoverEnd = useCallback(() => {
+    if (closePopoverTimerRef.current) {
+      clearTimeout(closePopoverTimerRef.current);
+    }
+    closePopoverTimerRef.current = setTimeout(() => {
+      if (!isPopoverHoveredRef.current) {
+        setActiveHoverDetail(null);
+      }
+      closePopoverTimerRef.current = null;
+    }, 140);
+  }, []);
+
+  const handleTimesheetPopoverEnter = useCallback(() => {
+    isPopoverHoveredRef.current = true;
+    if (closePopoverTimerRef.current) {
+      clearTimeout(closePopoverTimerRef.current);
+      closePopoverTimerRef.current = null;
+    }
+  }, []);
+
+  const handleTimesheetPopoverLeave = useCallback(() => {
+    isPopoverHoveredRef.current = false;
+    if (closePopoverTimerRef.current) {
+      clearTimeout(closePopoverTimerRef.current);
+    }
+    closePopoverTimerRef.current = setTimeout(() => {
+      if (!isPopoverHoveredRef.current) {
+        setActiveHoverDetail(null);
+      }
+      closePopoverTimerRef.current = null;
+    }, 140);
+  }, []);
+
+  const closeTimesheetPopover = useCallback(() => {
+    setActiveHoverDetail(null);
+    isPopoverHoveredRef.current = false;
+  }, []);
+
+  const toggleCommentsPopover = useCallback(() => {
+    setCommentsPopoverEnabled((prev) => {
+      const next = !prev;
+      if (!next) {
+        setActiveHoverDetail(null);
+        isPopoverHoveredRef.current = false;
+        if (closePopoverTimerRef.current) {
+          clearTimeout(closePopoverTimerRef.current);
+          closePopoverTimerRef.current = null;
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const goPrevWeek = () => onAnchorChange(addDaysYmd(anchorYmd, -7));
   const goNextWeek = () => onAnchorChange(addDaysYmd(anchorYmd, 7));
   const goToday = () => onAnchorChange(formatLocalYmd(new Date()));
@@ -637,6 +1040,16 @@ export function WorkTimesheetView({
             {formatWeekRangeTitle(weekStart)}
           </p>
         </div>
+        {!loading && !fetchError && trackRowIds.length > 0 ? (
+          <button
+            type="button"
+            className="btn-cta-tertiary shrink-0 text-sm whitespace-nowrap"
+            onClick={toggleCommentsPopover}
+            aria-pressed={commentsPopoverEnabled}
+          >
+            {commentsPopoverEnabled ? "Hide Comments" : "Show Comments"}
+          </button>
+        ) : null}
       </div>
 
       {loading ? (
@@ -700,7 +1113,10 @@ export function WorkTimesheetView({
             </table>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+          <div
+            ref={tableBodyWrapRef}
+            className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+          >
             <table className="w-full table-fixed border-collapse text-left text-sm">
               <TimesheetColGroup dayYmcs={dayYmcs} />
               <tbody>
@@ -708,14 +1124,15 @@ export function WorkTimesheetView({
                 const sample = sessionsInWeek.find((s) => s.project_track_id === trackId);
                 const byDay = hoursByTrackAndDay.get(trackId);
                 const isLastRow = rowIndex === trackRowIds.length - 1;
+                const rowFocused = focusedTrackId === trackId;
                 return (
-                  <tr key={trackId}>
+                  <tr key={trackId} onClick={() => setFocusedTrackId(trackId)}>
                     <td
                       className={`min-w-0 max-w-0 border-r px-1.5 py-1 align-top ${isLastRow ? "" : "border-b"}`}
                       style={{
                         borderColor: "var(--app-border)",
                         background: "var(--app-surface)",
-                        boxShadow: "1px 0 0 var(--app-border)",
+                        boxShadow: timesheetRowFocusBoxShadow("worktag", rowFocused),
                       }}
                     >
                       <ProjectWorktagCell
@@ -744,67 +1161,79 @@ export function WorkTimesheetView({
                         .filter(Boolean)
                         .join("\n");
                       const cellKey = `${trackId}|${dayYmd}`;
-                      const isCopied = copiedCellKey === cellKey;
+                      const isCopied = copiedCellKeys.has(cellKey);
+                      const copyControlBg = isCopied
+                        ? "var(--app-state-active-surface)"
+                        : has
+                          ? "var(--app-surface-alt)"
+                          : "var(--app-surface)";
 
                       return (
                         <td
                           key={dayYmd}
-                          className={`group relative min-w-0 max-w-0 px-1 py-1.5 align-top ${isLastRow ? "" : "border-b"}`}
+                          className={`relative min-w-0 max-w-0 py-1.5 pl-2 pr-1 align-top ${isLastRow ? "" : "border-b"}`}
                           style={{
                             borderColor: "var(--app-border)",
-                            background: has ? "var(--app-surface-alt)" : "var(--app-surface)",
+                            background: isCopied
+                              ? "var(--app-state-active-surface)"
+                              : has
+                                ? "var(--app-surface-alt)"
+                                : "var(--app-surface)",
+                            boxShadow: timesheetRowFocusBoxShadow("day", rowFocused),
                           }}
                           tabIndex={has || lines.length > 0 ? 0 : -1}
+                          onMouseEnter={
+                            commentsPopoverEnabled && lines.length > 0
+                              ? (e) =>
+                                  handleCellHoverEnter(e.currentTarget, {
+                                    trackId,
+                                    dayYmd,
+                                    hours: h,
+                                    copyText,
+                                  })
+                              : undefined
+                          }
+                          onMouseLeave={
+                            commentsPopoverEnabled && lines.length > 0 ? handleCellHoverEnd : undefined
+                          }
                         >
-                          <div className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-action)" }}>
-                            {has ? formatEffortHoursLabel(h) : "—"}
-                          </div>
-                          {lines.length > 0 ? (
-                            <div className="relative mt-1 min-h-[4.5rem] pr-7">
-                              <p
-                                className="whitespace-pre-line break-words text-[11px] leading-snug text-muted-canvas line-clamp-6"
-                                title={copyText}
-                              >
-                                {previewBody || "—"}
-                              </p>
-                              {copyText ? (
-                                <button
-                                  type="button"
-                                  className={[
-                                    "absolute right-0 top-0 cursor-pointer rounded-md p-1 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]",
-                                    isCopied
-                                      ? "opacity-100 text-[var(--app-state-active-fg)]"
-                                      : "text-[var(--app-text-muted)] opacity-0 hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-text)] group-hover:opacity-100 group-focus-within:opacity-100",
-                                  ].join(" ")}
-                                  aria-label={isCopied ? "Copied to clipboard" : "Copy comments"}
-                                  title={isCopied ? "Copied" : "Copy all comments"}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void (async () => {
-                                      try {
-                                        await navigator.clipboard.writeText(copyText);
-                                        const prev = copyResetTimers.current.get(cellKey);
-                                        if (prev) clearTimeout(prev);
-                                        setCopiedCellKey(cellKey);
-                                        const timer = setTimeout(() => {
-                                          setCopiedCellKey((k) => (k === cellKey ? null : k));
-                                          copyResetTimers.current.delete(cellKey);
-                                        }, 2200);
-                                        copyResetTimers.current.set(cellKey, timer);
-                                      } catch {
-                                        /* clipboard denied or unavailable */
-                                      }
-                                    })();
-                                  }}
-                                >
-                                  {isCopied ? <CheckIcon /> : <CopyIcon />}
-                                </button>
-                              ) : null}
-                              {sum?.status === "ready" && sum.notice ? (
-                                <p className="mt-0.5 text-[10px] text-muted-canvas">{sum.notice}</p>
-                              ) : null}
-                            </div>
+                          {isCopied && copyText ? (
+                            <TimesheetCopiedIndicator
+                              onClear={() => {
+                                setCopiedCellKeys((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(cellKey);
+                                  return next;
+                                });
+                              }}
+                            />
                           ) : null}
+                          <TimesheetDayCellBody
+                            has={has}
+                            hoursFormatted={formatEffortHoursLabel(h)}
+                            linesLength={lines.length}
+                            previewBody={previewBody}
+                            copyText={copyText}
+                            copyControlBg={copyControlBg}
+                            isCopied={isCopied}
+                            notice={
+                              sum?.status === "ready" && sum.notice ? sum.notice : undefined
+                            }
+                            onCopy={() => {
+                              void (async () => {
+                                try {
+                                  await navigator.clipboard.writeText(copyText);
+                                  setCopiedCellKeys((prev) => {
+                                    const next = new Set(prev);
+                                    next.add(cellKey);
+                                    return next;
+                                  });
+                                } catch {
+                                  /* clipboard denied or unavailable */
+                                }
+                              })();
+                            }}
+                          />
                         </td>
                       );
                     })}
@@ -812,11 +1241,12 @@ export function WorkTimesheetView({
                       className={`border-l px-0.5 py-1.5 text-center align-middle ${isLastRow ? "" : "border-b"}`}
                       style={{
                         borderColor: "var(--app-border)",
-                        background: "var(--app-surface)",
+                        background: "var(--app-surface-alt)",
+                        boxShadow: timesheetRowFocusBoxShadow("total", rowFocused),
                       }}
                       title="Total hours this week for this worktag"
                     >
-                      <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-action)" }}>
+                      <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-text)" }}>
                         {(rowTotalsByTrack.get(trackId) ?? 0) > 0.001
                           ? formatEffortHoursLabel(rowTotalsByTrack.get(trackId) ?? 0)
                           : "—"}
@@ -827,6 +1257,14 @@ export function WorkTimesheetView({
               })}
             </tbody>
             </table>
+            {commentsPopoverEnabled && activeHoverDetail ? (
+              <TimesheetCellDetailPopover
+                active={activeHoverDetail}
+                onPointerEnter={handleTimesheetPopoverEnter}
+                onPointerLeave={handleTimesheetPopoverLeave}
+                onClose={closeTimesheetPopover}
+              />
+            ) : null}
           </div>
 
           <div className="shrink-0 overflow-x-hidden border-t" style={{ borderColor: "var(--app-border)" }}>
@@ -870,7 +1308,7 @@ export function WorkTimesheetView({
                     }}
                     title="Total hours for the week (all worktags)"
                   >
-                    <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-action)" }}>
+                    <span className="tabular-nums text-xs font-semibold" style={{ color: "var(--app-text)" }}>
                       {weekGrandTotal > 0.001 ? formatEffortHoursLabel(weekGrandTotal) : "—"}
                     </span>
                   </td>
