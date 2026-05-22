@@ -62,6 +62,8 @@ export type SerializedProjectIntegrationRow = {
   id: string;
   delivery_progress: string;
   integration_state: string;
+  /** Parsed from `project_integrations.estimated_effort_hours` when selected in the query. */
+  estimatedEffortHours: number | null;
   title: string;
   /** Type · functional area (same as `meta`; explicit name for project list UI). */
   catalogMeta: string;
@@ -78,11 +80,19 @@ export type SerializedProjectIntegrationRow = {
   openTaskCount?: number;
 };
 
+function parseEstimatedEffortHours(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
 export function serializeProjectIntegrationRow(row: {
   id: string;
   delivery_progress: string;
   integration_state: string;
   integrations: unknown;
+  estimated_effort_hours?: unknown;
 }): SerializedProjectIntegrationRow {
   const integObj = narrowProjectIntegration(row.integrations);
   const catalog = integrationCatalogMeta(integObj);
@@ -90,6 +100,7 @@ export function serializeProjectIntegrationRow(row: {
     id: row.id,
     delivery_progress: row.delivery_progress,
     integration_state: row.integration_state,
+    estimatedEffortHours: parseEstimatedEffortHours(row.estimated_effort_hours),
     title: projectIntegrationTitle(integObj),
     catalogMeta: catalog,
     meta: catalog,

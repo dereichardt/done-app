@@ -90,3 +90,25 @@ export async function loadHomeProjectIntegrationRows(
   const rows = (projectIntegrationRows ?? []).map((row) => serializeProjectIntegrationRow(row));
   return { rows };
 }
+
+export async function loadProjectBriefForOwner(
+  projectId: string,
+): Promise<{ customer_name?: string; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const { data: project, error } = await supabase
+    .from("projects")
+    .select("customer_name")
+    .eq("id", projectId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!project) return { error: "Project not found" };
+
+  return { customer_name: (project.customer_name ?? "").trim() || "Untitled project" };
+}

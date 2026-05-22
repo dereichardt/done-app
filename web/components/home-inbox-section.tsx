@@ -1,185 +1,424 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type MouseEvent,
+} from "react";
 
-import { markHomeInboxItemDone, markHomeInboxItemRead } from "@/lib/actions/home-inbox";
+import { EllipsisVerticalIcon, TrashIcon } from "@/components/action-icons";
+import { DialogCloseButton } from "@/components/dialog-close-button";
+import { HomeInboxItemResolverPanel } from "@/components/home-inbox-item-resolver-panel";
+import {
+  deleteAllHomeInboxItems,
+  deleteHomeInboxItem,
+  markAllHomeInboxItemsRead,
+  markHomeInboxItemRead,
+} from "@/lib/actions/home-inbox";
+import { formatInboxTimestamp } from "@/lib/inbox-format";
 import type { HomeInboxItemRow } from "@/lib/home-inbox-rules";
-
-function formatInboxTimestamp(iso: string, timeZone: string | null): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const tz = timeZone?.trim() || undefined;
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone: tz,
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(d);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(d);
-  }
-}
 
 export function HomeInboxSection({
   initialItems,
   timezone,
+  sectionId,
+  onRequestClose,
+  onItemsCountChange,
 }: {
   initialItems: HomeInboxItemRow[];
   timezone: string | null;
+  sectionId?: string;
+  onRequestClose?: () => void;
+  onItemsCountChange?: (count: number) => void;
 }) {
+  const router = useRouter();
   const [items, setItems] = useState(initialItems);
-  const [selectedId, setSelectedId] = useState<string | null>(initialItems[0]?.id ?? null);
-  const [pending, startTransition] = useTransition();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const itemsRef = useRef(initialItems);
+  const [pendingDelete, setPendingDelete] = useState<null | { type: "single"; id: string } | { type: "all" }>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteAllError, setDeleteAllError] = useState<string | null>(null);
+  const [inboxMenuOpen, setInboxMenuOpen] = useState(false);
+  const inboxMenuRef = useRef<HTMLDivElement>(null);
+  const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  const selectedItem = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
 
   useEffect(() => {
     setItems(initialItems);
   }, [initialItems]);
 
   useEffect(() => {
+    onItemsCountChange?.(items.length);
+  }, [items.length, onItemsCountChange]);
+
+  useEffect(() => {
     if (selectedId && !items.some((i) => i.id === selectedId)) {
-      setSelectedId(items[0]?.id ?? null);
+      setSelectedId(null);
     }
   }, [items, selectedId]);
 
-  const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (pendingDelete) {
+        setPendingDelete(null);
+        setDeleteError(null);
+        setDeleteAllError(null);
+        return;
+      }
+      setSelectedId(null);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [pendingDelete]);
 
-  const handleSelect = useCallback(
-    (id: string) => {
-      setSelectedId(id);
-      const row = items.find((i) => i.id === id);
-      if (!row || row.read_at != null) return;
+  useEffect(() => {
+    if (!inboxMenuOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (inboxMenuRef.current?.contains(e.target as Node)) return;
+      setInboxMenuOpen(false);
+    }
+    function handleMenuKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setInboxMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleMenuKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleMenuKeyDown);
+    };
+  }, [inboxMenuOpen]);
+
+  /** After removing `id`, optionally select the next row (same index) or the previous row if it was last. */
+  const removeFromList = useCallback((id: string, selectNext: boolean) => {
+    const prev = itemsRef.current;
+    const idx = prev.findIndex((i) => i.id === id);
+    if (idx === -1) return;
+    const nextItems = prev.filter((i) => i.id !== id);
+    setItems(nextItems);
+    setSelectedId((sel) => {
+      if (sel !== id) return sel;
+      if (!selectNext) return null;
+      if (nextItems.length === 0) return null;
+      return idx < nextItems.length ? nextItems[idx].id : nextItems[nextItems.length - 1].id;
+    });
+  }, []);
+
+  const handleSelectItem = useCallback(
+    (row: HomeInboxItemRow) => {
+      setPendingDelete(null);
+      setDeleteError(null);
+      setDeleteAllError(null);
+      setSelectedId(row.id);
+      if (row.read_at != null) return;
       startTransition(async () => {
-        const res = await markHomeInboxItemRead(id);
+        const res = await markHomeInboxItemRead(row.id);
         if (!res.error) {
           const readAt = new Date().toISOString();
-          setItems((prev) => prev.map((i) => (i.id === id ? { ...i, read_at: readAt } : i)));
+          setItems((prev) => prev.map((i) => (i.id === row.id ? { ...i, read_at: readAt } : i)));
         }
       });
     },
-    [items],
+    [],
   );
 
-  const handleDone = (id: string) => {
+  const handleConfirmDeleteSingle = () => {
+    if (pendingDelete?.type !== "single") return;
+    const id = pendingDelete.id;
+    setDeleteError(null);
     startTransition(async () => {
-      const res = await markHomeInboxItemDone(id);
+      const res = await deleteHomeInboxItem(id);
+      if (res.error) {
+        setDeleteError(res.error);
+        return;
+      }
+      setPendingDelete(null);
+      removeFromList(id, false);
+    });
+  };
+
+  const handleConfirmDeleteAll = () => {
+    setDeleteAllError(null);
+    startTransition(async () => {
+      const res = await deleteAllHomeInboxItems();
+      if (res.error) {
+        setDeleteAllError(res.error);
+        return;
+      }
+      setPendingDelete(null);
+      setItems([]);
+      setSelectedId(null);
+      router.refresh();
+    });
+  };
+
+  const hasItems = items.length > 0;
+  const hasUnread = items.some((i) => i.read_at == null);
+
+  const handleMarkAllRead = () => {
+    if (!hasItems || !hasUnread) return;
+    setInboxMenuOpen(false);
+    startTransition(async () => {
+      const res = await markAllHomeInboxItemsRead();
       if (!res.error) {
-        setItems((prev) => {
-          const next = prev.filter((i) => i.id !== id);
-          if (selectedId === id) {
-            setSelectedId(next[0]?.id ?? null);
-          }
-          return next;
-        });
+        const readAt = new Date().toISOString();
+        setItems((prev) => prev.map((i) => (i.read_at == null ? { ...i, read_at: readAt } : i)));
+        router.refresh();
       }
     });
   };
 
-  return (
-    <section
-      aria-label="Home inbox"
-      className="mt-10 rounded-xl border p-5"
-      style={{ borderColor: "var(--app-border)" }}
-    >
-      <h2 className="section-heading">Inbox</h2>
-      <p className="mt-1 text-sm text-muted-canvas">
-        Items are created automatically from your{" "}
-        <Link href="/settings" className="font-medium text-[var(--app-action)] underline">
-          Settings
-        </Link>{" "}
-        review days and integration activity. Open an item to read it; mark it done when handled.
-      </p>
+  const handleRequestDeleteAll = () => {
+    setInboxMenuOpen(false);
+    setDeleteAllError(null);
+    setPendingDelete({ type: "all" });
+    setSelectedId(null);
+  };
 
-      {items.length === 0 ? (
-        <p className="mt-6 text-center text-sm text-muted-canvas">Nothing in your inbox right now.</p>
-      ) : (
+  const handleTrashClick = (e: MouseEvent<HTMLButtonElement>, item: HomeInboxItemRow) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDeleteError(null);
+    setSelectedId(item.id);
+    setPendingDelete({ type: "single", id: item.id });
+  };
+
+  return (
+    <section id={sectionId} aria-label="Home inbox" className="mt-10 w-full min-w-0">
+      <div className="flex w-full min-w-0 items-center justify-between gap-2">
+        <div className="hover-reveal-edit hover-reveal-edit--compact flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <h2 className="section-heading shrink-0">Inbox</h2>
+          <div className="relative shrink-0" ref={inboxMenuRef}>
+            <button
+              type="button"
+              className={`hover-reveal-edit-btn border bg-[var(--app-surface)] text-[var(--app-text-muted)] hover:bg-[var(--app-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)] ${
+                inboxMenuOpen ? "!pointer-events-auto !opacity-100" : ""
+              }`}
+              style={{ borderColor: "var(--app-border)" }}
+              aria-label="Inbox menu"
+              aria-expanded={inboxMenuOpen}
+              aria-haspopup="menu"
+              onClick={() => setInboxMenuOpen((o) => !o)}
+            >
+              <EllipsisVerticalIcon size={14} />
+            </button>
+            {inboxMenuOpen ? (
+              <div
+                role="menu"
+                aria-orientation="vertical"
+                className="absolute left-0 z-[100] mt-1 min-w-[15rem] rounded-lg border py-1 shadow-lg"
+                style={{
+                  background: "var(--app-surface)",
+                  borderColor: "var(--app-border)",
+                  boxShadow: "0 8px 24px color-mix(in oklab, var(--app-text) 12%, transparent)",
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full px-3 py-2.5 text-left text-sm transition-colors hover:bg-[var(--app-surface-alt)]"
+                  style={{ color: "var(--app-text)" }}
+                  onClick={() => {
+                    setInboxMenuOpen(false);
+                    router.push("/settings");
+                  }}
+                >
+                  Edit Settings
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!hasItems || !hasUnread}
+                  className="flex w-full px-3 py-2.5 text-left text-sm transition-colors hover:bg-[var(--app-surface-alt)] disabled:cursor-not-allowed disabled:opacity-45"
+                  style={{ color: "var(--app-text)" }}
+                  onClick={() => handleMarkAllRead()}
+                >
+                  Mark All Read
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!hasItems}
+                  className="flex w-full px-3 py-2.5 text-left text-sm transition-colors hover:bg-[var(--app-surface-alt)] disabled:cursor-not-allowed disabled:opacity-45"
+                  style={{ color: "var(--app-danger)" }}
+                  onClick={() => handleRequestDeleteAll()}
+                >
+                  Delete All Inbox Items
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        {onRequestClose ? (
+          <DialogCloseButton aria-label="Close inbox" className="shrink-0" onClick={onRequestClose} />
+        ) : null}
+      </div>
+
+      <div className="mt-4 w-full min-w-0 rounded-[var(--app-radius)]">
         <div
-          className="mt-6 flex min-h-[min(28rem,70vh)] flex-col overflow-hidden rounded-lg border sm:flex-row"
-          style={{ borderColor: "var(--app-border)" }}
+          className="card-canvas flex min-h-0 max-h-[calc(100dvh-10rem)] w-full flex-col overflow-hidden md:min-h-[28rem] md:flex-row"
+          aria-label="Inbox list container"
         >
           <div
-            className="flex max-h-[40vh] w-full flex-col border-b sm:max-h-none sm:w-[20%] sm:min-w-[11rem] sm:border-b-0 sm:border-r"
+            className="flex max-h-[min(40vh,18rem)] min-h-0 w-full min-w-0 flex-col border-b md:max-h-none md:w-[min(22rem,40%)] md:max-w-[40%] md:shrink-0 md:border-b-0 md:border-r"
             style={{ borderColor: "var(--app-border)" }}
           >
-            <ul className="min-h-0 flex-1 list-none overflow-y-auto overscroll-contain p-0 m-0">
-              {items.map((item) => {
-                const unread = item.read_at == null;
-                const active = item.id === selectedId;
-                return (
-                  <li key={item.id} className="m-0 border-b last:border-b-0" style={{ borderColor: "var(--app-border)" }}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelect(item.id)}
-                      className={`flex w-full flex-col items-start gap-0.5 px-3 py-2.5 text-left text-sm transition-colors ${
-                        active ? "bg-[var(--app-surface-alt)]" : "hover:bg-[var(--app-surface-alt)]"
-                      }`}
-                      style={{ color: "var(--app-text)" }}
-                    >
-                      <span className="flex w-full min-w-0 items-start gap-2">
-                        {unread ? (
-                          <span
-                            className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--app-action)]"
-                            aria-hidden
-                          />
-                        ) : (
-                          <span className="mt-1.5 size-1.5 shrink-0" aria-hidden />
-                        )}
-                        <span className={`min-w-0 flex-1 leading-snug ${unread ? "font-medium" : "font-normal"}`}>
-                          {item.title}
-                        </span>
-                      </span>
-                      <span className="pl-3.5 text-xs text-muted-canvas">{formatInboxTimestamp(item.created_at, timezone)}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            {items.length === 0 ? (
+              <p className="p-5 text-center text-sm text-muted-canvas">Nothing in your inbox right now.</p>
+            ) : (
+              <ul className="m-0 list-none flex-1 overflow-y-auto overscroll-contain p-0 px-2 py-2 md:px-3">
+                {items.map((item) => {
+                  const unread = item.read_at == null;
+                  const selected = selectedId === item.id;
+                  return (
+                    <li key={item.id} className="m-0 list-none py-0.5">
+                      <div
+                        className={`group flex min-h-[2.75rem] cursor-pointer flex-wrap items-stretch rounded-lg transition-colors sm:flex-nowrap ${
+                          selected ? "bg-[var(--app-surface-alt)] ring-1 ring-[var(--app-border)]" : "hover:bg-[var(--app-surface-alt)]"
+                        } focus-within:bg-[var(--app-surface-alt)]`}
+                        style={{ outline: "none" }}
+                      >
+                        <button
+                          type="button"
+                          aria-current={selected ? "true" : undefined}
+                          className="flex min-w-0 flex-1 items-start gap-2 rounded-lg px-2 py-2 text-left text-sm"
+                          style={{ color: "var(--app-text)" }}
+                          onClick={() => handleSelectItem(item)}
+                        >
+                          {unread ? (
+                            <span
+                              className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--app-action)]"
+                              aria-hidden
+                            />
+                          ) : (
+                            <span className="mt-1.5 size-1.5 shrink-0 rounded-full opacity-40" aria-hidden />
+                          )}
+                          <span className="min-w-0 flex-1">
+                            <span
+                              className={`block leading-snug ${unread ? "font-medium text-[var(--app-text)]" : "font-normal"}`}
+                            >
+                              {item.title}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-muted-canvas">
+                              {formatInboxTimestamp(item.created_at, timezone)}
+                            </span>
+                          </span>
+                        </button>
+                        <div className="flex shrink-0 items-center justify-end gap-2 pr-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                          <button
+                            type="button"
+                            className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-[var(--app-text-muted)] transition-colors hover:bg-[var(--app-surface-alt)]"
+                            style={{ borderColor: "var(--app-border)" }}
+                            title="Delete inbox item"
+                            aria-label="Delete inbox item"
+                            onClick={(e) => handleTrashClick(e, item)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
-          <div className="flex min-h-[12rem] min-w-0 flex-1 flex-col bg-[var(--app-surface)] p-4 sm:min-h-0">
-            {selected ? (
-              <>
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <h3 className="text-base font-medium" style={{ color: "var(--app-text)" }}>
-                    {selected.title}
-                  </h3>
-                  <p className="mt-1 text-xs text-muted-canvas">
-                    {formatInboxTimestamp(selected.created_at, timezone)}
+          <div
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-t md:border-t-0"
+            style={{ borderColor: "var(--app-border)" }}
+          >
+            {pendingDelete?.type === "all" ? (
+              <div className="flex min-h-0 flex-1 flex-col p-5">
+                <h2 className="text-base font-semibold" style={{ color: "var(--app-text)" }}>
+                  Delete All Inbox Items?
+                </h2>
+                <p className="mt-3 text-sm text-muted-canvas">
+                  This permanently removes every inbox row for your account—including items not shown here. Automation can
+                  add new items later from your Settings and integrations.
+                </p>
+                {deleteAllError ? (
+                  <p className="mt-3 text-sm" role="alert" style={{ color: "var(--app-danger)" }}>
+                    {deleteAllError}
                   </p>
-                  {selected.body ? (
-                    <p className="mt-4 text-sm text-muted-canvas whitespace-pre-wrap">{selected.body}</p>
-                  ) : null}
-                  {selected.link_path ? (
-                    <p className="mt-4">
-                      <Link
-                        href={selected.link_path}
-                        className="text-sm font-medium text-[var(--app-action)] underline"
-                      >
-                        Open linked page
-                      </Link>
-                    </p>
-                  ) : null}
-                </div>
-                <div className="mt-4 shrink-0 border-t pt-4" style={{ borderColor: "var(--app-border)" }}>
+                ) : null}
+                <div className="mt-6 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className="btn-cta text-sm"
-                    disabled={pending}
-                    onClick={() => handleDone(selected.id)}
+                    className="btn-ghost text-sm"
+                    onClick={() => {
+                      setPendingDelete(null);
+                      setDeleteAllError(null);
+                    }}
                   >
-                    Mark done
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-[var(--app-radius)] px-3 py-2 text-sm font-medium transition-[background-color] duration-150 ease-out hover:bg-[color-mix(in_oklab,var(--app-danger)_78%,var(--app-text)_22%)] bg-[var(--app-danger)] text-[var(--app-surface)]"
+                    onClick={() => handleConfirmDeleteAll()}
+                  >
+                    Delete All
                   </button>
                 </div>
-              </>
+              </div>
+            ) : pendingDelete?.type === "single" ? (
+              <div className="flex min-h-0 flex-1 flex-col p-5">
+                <h2 className="text-base font-semibold" style={{ color: "var(--app-text)" }}>
+                  Delete this inbox item?
+                </h2>
+                <p className="mt-3 text-sm text-muted-canvas">This permanently removes it from your inbox.</p>
+                {deleteError ? (
+                  <p className="mt-3 text-sm" role="alert" style={{ color: "var(--app-danger)" }}>
+                    {deleteError}
+                  </p>
+                ) : null}
+                <div className="mt-6 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn-ghost text-sm"
+                    onClick={() => {
+                      setPendingDelete(null);
+                      setDeleteError(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-[var(--app-radius)] px-3 py-2 text-sm font-medium transition-[background-color] duration-150 ease-out hover:bg-[color-mix(in_oklab,var(--app-danger)_78%,var(--app-text)_22%)] bg-[var(--app-danger)] text-[var(--app-surface)]"
+                    onClick={() => handleConfirmDeleteSingle()}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : selectedItem ? (
+              <HomeInboxItemResolverPanel
+                key={selectedItem.id}
+                item={selectedItem}
+                timezone={timezone}
+                onDeselect={() => setSelectedId(null)}
+                onItemCompleted={(id) => removeFromList(id, true)}
+              />
             ) : (
-              <p className="text-sm text-muted-canvas">Select an inbox item.</p>
+              <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
+                <p className="text-sm text-muted-canvas">Select an item to view details and take action.</p>
+              </div>
             )}
           </div>
         </div>
-      )}
+      </div>
     </section>
   );
 }

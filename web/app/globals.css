@@ -16,6 +16,8 @@
   --app-focus: var(--cnvs-sys-color-focus-contrast, #2684ff);
   --app-input-focus-border: #000;
   --app-action: var(--cnvs-sys-color-accent-default, #005cb9);
+  /* Darker action blue for small emphasis (e.g. quick-action count); stays theme-aligned */
+  --app-action-emphasis: color-mix(in oklab, var(--app-action) 58%, var(--app-text) 42%);
   --app-info: var(--cnvs-sys-color-accent-info, #0a66c2);
   --app-info-surface: var(--cnvs-sys-color-surface-info-default, #eaf3ff);
   --app-danger: var(--cnvs-sys-color-accent-danger, #b42318);
@@ -1583,6 +1585,14 @@ button.task-due-date-pill:disabled {
 .hover-reveal-edit:focus-within .hover-reveal-edit-btn {
   opacity: 1;
   pointer-events: auto;
+}
+
+/** Tighter hit target next to `.section-heading` (1.125rem). */
+.hover-reveal-edit--compact .hover-reveal-edit-btn {
+  width: 1.5rem;
+  height: 1.5rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
 }
 
 .hover-reveal-edit .hover-reveal-edit-btn:hover:not(:disabled) {

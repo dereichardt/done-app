@@ -50,7 +50,7 @@ export function HomeSummaryStrip({ summary }: { summary: HomeSummary }) {
   ];
 
   return (
-    <section className="mt-10" aria-label="Home summary">
+    <section aria-label="Home summary">
       <h2 className="section-heading">Summary</h2>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch xl:grid-cols-4">
         {tiles.map((t) => (

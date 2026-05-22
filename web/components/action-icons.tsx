@@ -56,6 +56,17 @@ export function UndoIcon({ size = 16, className = "shrink-0" }: ActionIconProps)
   );
 }
 
+/** Three dots vertically (⋯), for overflow / “more actions” menus. */
+export function EllipsisVerticalIcon({ size = 20, className = "shrink-0" }: ActionIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden className={className}>
+      <circle cx="12" cy="5" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="19" r="1.75" />
+    </svg>
+  );
+}
+
 export function EditIcon({ size = 16, className = "shrink-0" }: ActionIconProps) {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden className={className}>

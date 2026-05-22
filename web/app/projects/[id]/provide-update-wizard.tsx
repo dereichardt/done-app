@@ -1,63 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { DialogCloseButton } from "@/components/dialog-close-button";
-import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import {
-  projectDeliveryProgressSelectOptions,
-  projectIntegrationStateSelectOptions,
-} from "@/lib/integration-metadata";
-import {
-  submitProvideUpdateBatch,
-  type ProvideUpdateEntry,
-} from "@/lib/actions/integration-bulk-updates";
+  IntegrationProvideUpdateFormFields,
+  type IntegrationProvideUpdateDraft,
+  SubmitUpdateSpinner,
+  seedIntegrationDrafts,
+} from "@/components/integration-provide-update-form";
+import { submitProvideUpdateBatch, type ProvideUpdateEntry } from "@/lib/actions/integration-bulk-updates";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
-
-const MAX_UPDATE_BODY = 300;
-
-const deliveryOptions: CanvasSelectOption[] = projectDeliveryProgressSelectOptions();
-const stateOptions: CanvasSelectOption[] = projectIntegrationStateSelectOptions();
-
-type Draft = {
-  delivery_progress: string;
-  integration_state: string;
-  integration_state_reason: string;
-  update_body: string;
-};
-
-function seedDrafts(rows: SerializedProjectIntegrationRow[]): Record<string, Draft> {
-  const out: Record<string, Draft> = {};
-  for (const row of rows) {
-    out[row.id] = {
-      delivery_progress: row.delivery_progress,
-      integration_state: row.integration_state,
-      integration_state_reason: "",
-      update_body: "",
-    };
-  }
-  return out;
-}
-
-function SubmitSpinner() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={14}
-      height={14}
-      aria-hidden
-      className="shrink-0 animate-spin"
-      fill="none"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-      />
-    </svg>
-  );
-}
 
 export function ProvideUpdateWizard({
   dialogRef,
@@ -66,7 +19,7 @@ export function ProvideUpdateWizard({
   integrationRows,
   onClose,
 }: {
-  dialogRef: React.RefObject<HTMLDialogElement | null>;
+  dialogRef: RefObject<HTMLDialogElement | null>;
   projectId: string;
   projectCustomerName: string;
   integrationRows: SerializedProjectIntegrationRow[];
@@ -74,13 +27,14 @@ export function ProvideUpdateWizard({
 }) {
   const router = useRouter();
 
-  // Open the dialog as soon as this component mounts (the bar conditionally renders it).
   useEffect(() => {
     dialogRef.current?.showModal();
   }, [dialogRef]);
 
   const [step, setStep] = useState(0);
-  const [drafts, setDrafts] = useState<Record<string, Draft>>(() => seedDrafts(integrationRows));
+  const [drafts, setDrafts] = useState<Record<string, IntegrationProvideUpdateDraft>>(() =>
+    seedIntegrationDrafts(integrationRows),
+  );
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -90,37 +44,31 @@ export function ProvideUpdateWizard({
   const isFirst = step === 0;
   const isLast = step === total - 1;
 
-  // Sync drafts when rows change (e.g. dialog reopened with updated data).
-  // Only re-seed fields that aren't in the draft yet so in-progress edits survive a hot reload.
   useEffect(() => {
-    setDrafts(seedDrafts(integrationRows));
+    setDrafts(seedIntegrationDrafts(integrationRows));
     setStep(0);
     setSubmitError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [integrationRows.map((r) => r.id).join(",")]);
 
-  const currentDraft = currentRow ? (drafts[currentRow.id] ?? seedDrafts([currentRow])[currentRow.id]) : null;
+  const currentDraft = currentRow
+    ? (drafts[currentRow.id] ?? seedIntegrationDrafts([currentRow])[currentRow.id])
+    : null;
 
-  const updateDraft = useCallback(
-    (id: string, patch: Partial<Draft>) => {
-      setDrafts((prev) => ({
-        ...prev,
-        [id]: { ...prev[id], ...patch },
-      }));
-    },
-    [],
-  );
+  const updateDraft = useCallback((id: string, patch: Partial<IntegrationProvideUpdateDraft>) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], ...patch },
+    }));
+  }, []);
 
   const moveTo = (nextStep: number) => {
     setStep(nextStep);
-    // Move focus to step heading on navigation.
     requestAnimationFrame(() => stepHeadingRef.current?.focus());
   };
 
-  // Called by the native dialog onClose event (Esc, programmatic .close(), DialogCloseButton).
-  // Buttons inside the dialog call dialogRef.current?.close() to trigger this chain.
   const handleDialogClose = () => {
-    setDrafts(seedDrafts(integrationRows));
+    setDrafts(seedIntegrationDrafts(integrationRows));
     setStep(0);
     setSubmitError(null);
     onClose();
@@ -132,7 +80,7 @@ export function ProvideUpdateWizard({
     setSubmitError(null);
 
     const entries: ProvideUpdateEntry[] = integrationRows.map((row) => {
-      const d = drafts[row.id] ?? seedDrafts([row])[row.id];
+      const d = drafts[row.id] ?? seedIntegrationDrafts([row])[row.id];
       const showReason = d.integration_state === "blocked" || d.integration_state === "on_hold";
       return {
         projectIntegrationId: row.id,
@@ -151,16 +99,11 @@ export function ProvideUpdateWizard({
       return;
     }
 
-    // Closing the dialog triggers handleDialogClose which resets state and calls onClose.
     dialogRef.current?.close();
     router.refresh();
   };
 
   if (!currentRow || !currentDraft) return null;
-
-  const showReason =
-    currentDraft.integration_state === "blocked" ||
-    currentDraft.integration_state === "on_hold";
 
   return (
     <dialog
@@ -176,138 +119,34 @@ export function ProvideUpdateWizard({
       onClose={handleDialogClose}
     >
       <div className="flex h-full min-h-0 flex-col" style={{ maxHeight: "inherit" }}>
-        {/* Header */}
         <div
           className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3"
           style={{ borderColor: "var(--app-border)" }}
         >
           <div className="min-w-0 flex-1 pr-2">
-            <h2
-              className="text-base font-medium"
-              style={{ color: "var(--app-text)" }}
-            >
+            <h2 className="text-base font-medium" style={{ color: "var(--app-text)" }}>
               Share update
             </h2>
-            <p
-              className="mt-0.5 text-sm truncate"
-              style={{ color: "var(--app-text-muted)" }}
-            >
+            <p className="mt-0.5 truncate text-sm" style={{ color: "var(--app-text-muted)" }}>
               {projectCustomerName}
             </p>
           </div>
           <DialogCloseButton onClick={() => dialogRef.current?.close()} />
         </div>
 
-        {/* Body */}
         <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-3">
-          {/* Integration identity */}
-          <div className="mb-4">
-            <h3
-              ref={stepHeadingRef}
-              tabIndex={-1}
-              className="text-sm font-medium leading-snug outline-none"
-              style={{ color: "var(--app-text)" }}
-            >
-              {currentRow.title}
-            </h3>
-            {currentRow.catalogMeta ? (
-              <p className="mt-0.5 text-xs" style={{ color: "var(--app-text-muted)" }}>
-                {currentRow.catalogMeta}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {/* Integration state */}
-            <label
-              className="flex flex-col gap-1 text-xs font-medium"
-              style={{ color: "var(--app-text-muted)" }}
-            >
-              Integration state
-              <CanvasSelect
-                name="integration_state"
-                options={stateOptions}
-                value={currentDraft.integration_state}
-                onValueChange={(v) => {
-                  updateDraft(currentRow.id, {
-                    integration_state: v,
-                    integration_state_reason: v === "active" ? "" : currentDraft.integration_state_reason,
-                  });
-                }}
-              />
-            </label>
-
-            {/* Delivery progress */}
-            <label
-              className="flex flex-col gap-1 text-xs font-medium"
-              style={{ color: "var(--app-text-muted)" }}
-            >
-              Delivery progress
-              <CanvasSelect
-                name="delivery_progress"
-                options={deliveryOptions}
-                value={currentDraft.delivery_progress}
-                onValueChange={(v) => updateDraft(currentRow.id, { delivery_progress: v })}
-              />
-            </label>
-
-            {/* Reason (blocked / on_hold only) */}
-            {showReason ? (
-              <label
-                className="flex flex-col gap-1 text-xs font-medium"
-                style={{ color: "var(--app-text-muted)" }}
-              >
-                Blocked / on hold reason
-                <textarea
-                  className="input-canvas min-h-[4.5rem] resize-y"
-                  rows={3}
-                  value={currentDraft.integration_state_reason}
-                  placeholder="Optional"
-                  onChange={(e) =>
-                    updateDraft(currentRow.id, { integration_state_reason: e.target.value })
-                  }
-                />
-              </label>
-            ) : null}
-
-            {/* Written update */}
-            <label
-              className="flex flex-col gap-1 text-xs font-medium"
-              style={{ color: "var(--app-text-muted)" }}
-            >
-              Update
-              <textarea
-                className="input-canvas min-h-[5rem] resize-y"
-                rows={3}
-                maxLength={MAX_UPDATE_BODY}
-                value={currentDraft.update_body}
-                placeholder="Share your update"
-                onChange={(e) => updateDraft(currentRow.id, { update_body: e.target.value })}
-              />
-              <span className="self-end tabular-nums text-xs" style={{ color: "var(--app-text-muted)" }}>
-                {currentDraft.update_body.length}/{MAX_UPDATE_BODY}
-              </span>
-            </label>
-          </div>
-
-          {/* Submit error */}
-          {submitError ? (
-            <p
-              className="mt-3 text-sm"
-              role="alert"
-              style={{ color: "var(--app-danger)" }}
-            >
-              {submitError}
-            </p>
-          ) : null}
+          <IntegrationProvideUpdateFormFields
+            integrationRow={currentRow}
+            draft={currentDraft}
+            onDraftChange={(patch) => updateDraft(currentRow.id, patch)}
+            headingRef={stepHeadingRef}
+            submitError={submitError}
+          />
         </div>
 
-        {/* Footer: prev/next arrows centered, submit right-aligned on last step */}
         <div className="grid shrink-0 grid-cols-3 items-center px-4 pb-5 pt-3">
-          {/* Left: placeholder to balance the grid */}
           <div />
 
-          {/* Center: navigation arrows */}
           <div className="flex items-center justify-center gap-2">
             <button
               type="button"
@@ -342,16 +181,15 @@ export function ProvideUpdateWizard({
             </button>
           </div>
 
-          {/* Right: submit on last step */}
           <div className="flex justify-end">
             {isLast ? (
               <button
                 type="button"
                 className="btn-cta-dark inline-flex h-9 items-center gap-2 px-4 text-sm disabled:opacity-60"
                 disabled={submitting}
-                onClick={handleSubmit}
+                onClick={() => void handleSubmit()}
               >
-                {submitting ? <SubmitSpinner /> : null}
+                {submitting ? <SubmitUpdateSpinner /> : null}
                 {submitting ? "Saving…" : "Submit update"}
               </button>
             ) : null}

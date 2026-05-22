@@ -1,7 +1,7 @@
-import { HomeInboxSection } from "@/components/home-inbox-section";
-import { HomeQuickActions } from "@/components/home-quick-actions";
+import { HomeInboxGate } from "@/components/home-inbox-gate";
 import { HomeSummaryStrip } from "@/components/home-summary-strip";
 import { loadHomeProjectPickerRows } from "@/lib/actions/home";
+import { loadHomeProjectStatus } from "@/lib/actions/home-project-status";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
 import { loadHomeSummary } from "@/lib/home-summary";
 import { loadOpenHomeInboxItems, syncHomeInboxRules } from "@/lib/home-inbox-rules";
@@ -27,15 +27,18 @@ export default async function HomePage() {
     loadHomeSummary(supabase, user.id, prefsRes.preferences),
   ]);
 
+  const initialStatus = projects[0] ? await loadHomeProjectStatus(projects[0].id) : undefined;
+
   return (
     <div>
-      <h1 className="heading-page">Home</h1>
-
       <HomeSummaryStrip summary={summary} />
 
-      <HomeInboxSection initialItems={inboxItems} timezone={prefsRes.preferences.timezone} />
-
-      <HomeQuickActions projects={projects} />
+      <HomeInboxGate
+        projects={projects}
+        initialItems={inboxItems}
+        timezone={prefsRes.preferences.timezone}
+        initialStatus={initialStatus}
+      />
     </div>
   );
 }

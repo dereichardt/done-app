@@ -14,7 +14,19 @@ type PickerMode = "share" | "summarize" | "add_integration" | null;
 
 const EMPTY_HINT_ID = "home-quick-actions-no-integrations-hint";
 
-export function HomeQuickActions({ projects }: { projects: HomeProjectPickerRow[] }) {
+export function HomeQuickActions({
+  projects,
+  inboxSectionId,
+  inboxItemCount,
+  inboxPanelOpen,
+  onOpenInboxPanel,
+}: {
+  projects: HomeProjectPickerRow[];
+  inboxSectionId?: string;
+  inboxItemCount?: number;
+  inboxPanelOpen?: boolean;
+  onOpenInboxPanel?: () => void;
+}) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
@@ -85,9 +97,28 @@ export function HomeQuickActions({ projects }: { projects: HomeProjectPickerRow[
 
   return (
     <>
-      <section aria-label="Home quick actions" className="mt-8">
-        <h2 className="section-heading">Quick actions</h2>
+      <section aria-label="Home actions" className="mt-8">
+        <h2 className="section-heading">Actions</h2>
         <div className="mt-3 flex flex-wrap items-center gap-3">
+          {onOpenInboxPanel ? (
+            <button
+              type="button"
+              className="btn-quick-action group"
+              aria-expanded={inboxPanelOpen}
+              aria-controls={inboxSectionId}
+              aria-label={`Open inbox, ${inboxItemCount ?? 0} items`}
+              onClick={() => onOpenInboxPanel()}
+            >
+              <span aria-hidden className="inline-flex items-center gap-1.5">
+                <span>Open Inbox</span>
+                <span
+                  className="tabular-nums text-[var(--app-action-emphasis)] transition-colors duration-150 ease-out group-hover:text-[color-mix(in_oklab,var(--app-surface)_78%,var(--app-text)_22%)]"
+                >
+                  {inboxItemCount ?? 0}
+                </span>
+              </span>
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn-quick-action"
@@ -97,12 +128,12 @@ export function HomeQuickActions({ projects }: { projects: HomeProjectPickerRow[
           >
             Share update
           </button>
-          <Link href="/projects/new" className="btn-quick-action">
-            Add project
-          </Link>
           <button type="button" className="btn-quick-action" onClick={() => openPicker("summarize")}>
             Summarize activity
           </button>
+          <Link href="/projects/new" className="btn-quick-action">
+            Add project
+          </Link>
           <button
             type="button"
             className="btn-quick-action"
@@ -111,6 +142,9 @@ export function HomeQuickActions({ projects }: { projects: HomeProjectPickerRow[
           >
             Add integration
           </button>
+          <Link href="/internal/initiatives/new" className="btn-quick-action">
+            Add initiative
+          </Link>
           {projects.length === 0 ? (
             <span id={EMPTY_HINT_ID} className="text-xs" style={{ color: "var(--app-text-muted)" }}>
               Create a project to enable project-scoped actions.
