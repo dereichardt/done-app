@@ -18,9 +18,18 @@ import { ProjectDetailHeader } from "./project-detail-header";
 import { ProjectQuickActionsBar } from "./project-quick-actions-bar";
 import { ProjectSummaryStrip } from "./project-summary-strip";
 import { ProjectTimeline } from "./project-timeline";
+import { ProjectForecastCard } from "./project-forecast-card";
+import { ProjectEffortCard } from "./project-effort-card";
 import { ProjectActivityFeed } from "./project-activity-feed";
 import { normalizeProjectColorKey, type ProjectColorKey } from "@/lib/project-colors";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
+import {
+  timelineSpanFromPhases,
+  type ProjectEffortRowDef,
+  type ProjectEffortSessionInput,
+} from "@/lib/project-weekly-effort";
+import { loadForecastProjectDTO } from "@/lib/forecast-data";
+import { loadHomeActualsVsForecast } from "@/lib/home-actuals-vs-forecast";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -71,7 +80,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const { data: phases } = await supabase
     .from("project_phases")
-    .select("id, name, sort_order, start_date, end_date")
+    .select("id, name, sort_order, start_date, end_date, phase_key")
     .eq("project_id", id)
     .order("sort_order");
 
@@ -83,6 +92,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       delivery_progress,
       integration_state,
       integration_id,
+      estimated_effort_hours,
       integrations (
         id,
         name,
@@ -99,16 +109,9 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     .eq("project_id", id)
     .order("created_at", { ascending: true });
 
-  const { data: pmTrack } = await supabase
-    .from("project_tracks")
-    .select("id, name")
-    .eq("project_id", id)
-    .eq("kind", "project_management")
-    .maybeSingle();
-
   const piIds = (projectIntegrationRows ?? []).map((r) => r.id);
 
-  const [{ data: latestUpdates }, { data: integrationTracks }] = await Promise.all([
+  const [{ data: latestUpdates }, { data: projectTracks }] = await Promise.all([
     piIds.length === 0
       ? Promise.resolve({
           data: null as { project_integration_id: string; body: string; created_at: string }[] | null,
@@ -117,24 +120,25 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           .from("integration_latest_updates")
           .select("project_integration_id, body, created_at")
           .in("project_integration_id", piIds),
-    piIds.length === 0
-      ? Promise.resolve({ data: null as { id: string; project_integration_id: string | null }[] | null })
-      : supabase
-          .from("project_tracks")
-          .select("id, project_integration_id")
-          .eq("kind", "integration")
-          .in("project_integration_id", piIds),
+    supabase
+      .from("project_tracks")
+      .select("id, name, kind, project_integration_id")
+      .eq("project_id", id),
   ]);
 
-  const trackIds = (integrationTracks ?? []).map((row) => row.id);
+  const pmTrack =
+    (projectTracks ?? []).find((t) => t.kind === "project_management") ?? null;
+  const integrationTracks = (projectTracks ?? []).filter((t) => t.kind === "integration");
+  const trackIds = (projectTracks ?? []).map((row) => row.id);
+  const integrationTrackIds = integrationTracks.map((row) => row.id);
   const { data: openTasks } =
-    trackIds.length === 0
+    integrationTrackIds.length === 0
       ? { data: null as { project_track_id: string }[] | null }
       : await supabase
           .from("integration_tasks")
           .select("project_track_id")
           .eq("status", "open")
-          .in("project_track_id", trackIds);
+          .in("project_track_id", integrationTrackIds);
 
   const projectIntegrationIdByTrackId = new Map<string, string>();
   for (const track of integrationTracks ?? []) {
@@ -193,11 +197,92 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     };
   });
 
-  const [activeIndicatorRes, initialActivity, pmSnapshotRes] = await Promise.all([
-    loadActiveWorkSessionIndicator(),
-    loadProjectActivity(id, { limitPerSource: 50 }),
-    pmTrack ? fetchProjectTrackTaskSnapshot(pmTrack.id) : Promise.resolve({ snapshot: undefined, error: undefined }),
-  ]);
+  const PM_EFFORT_ROW_KEY = "project_management";
+
+  const effortRows: ProjectEffortRowDef[] = [
+    ...integrationRowsSerialized.map((row) => ({
+      key: row.id,
+      label: row.title,
+      kind: "integration" as const,
+      estimatedEffortHours: row.estimatedEffortHours,
+    })),
+    {
+      key: PM_EFFORT_ROW_KEY,
+      label: (pmTrack?.name ?? "").trim() || "Project Management",
+      kind: "project_management" as const,
+      estimatedEffortHours: null,
+    },
+  ];
+
+  const rowKeyByTrackId = new Map<string, string>();
+  for (const track of integrationTracks) {
+    if (track.project_integration_id) {
+      rowKeyByTrackId.set(track.id, track.project_integration_id);
+    }
+  }
+  if (pmTrack) {
+    rowKeyByTrackId.set(pmTrack.id, PM_EFFORT_ROW_KEY);
+  }
+
+  const timelineSpan = timelineSpanFromPhases(phases ?? []);
+
+  const [
+    activeIndicatorRes,
+    initialActivity,
+    pmSnapshotRes,
+    effortWsRes,
+    effortMeRes,
+    forecastProject,
+    actualsVsForecast,
+  ] = await Promise.all([
+      loadActiveWorkSessionIndicator(),
+      loadProjectActivity(id, { limitPerSource: 50 }),
+      pmTrack
+        ? fetchProjectTrackTaskSnapshot(pmTrack.id)
+        : Promise.resolve({ snapshot: undefined, error: undefined }),
+      trackIds.length === 0
+        ? Promise.resolve({
+            data: null as {
+              id: string;
+              started_at: string;
+              finished_at: string | null;
+              duration_hours: number;
+              work_accomplished: string | null;
+              integration_tasks: { project_track_id: string } | { project_track_id: string }[] | null;
+            }[] | null,
+            error: null,
+          })
+        : supabase
+            .from("integration_task_work_sessions")
+            .select(
+              "id, started_at, finished_at, duration_hours, work_accomplished, integration_tasks!inner(project_track_id)",
+            )
+            .in("integration_tasks.project_track_id", trackIds)
+            .not("finished_at", "is", null),
+      trackIds.length === 0
+        ? Promise.resolve({
+            data: null as {
+              id: string;
+              entry_type: string;
+              title: string | null;
+              started_at: string;
+              finished_at: string;
+              duration_hours: number;
+              work_accomplished: string | null;
+              project_track_id: string;
+            }[] | null,
+            error: null,
+          })
+        : supabase
+            .from("integration_manual_effort_entries")
+            .select(
+              "id, entry_type, title, started_at, finished_at, duration_hours, work_accomplished, project_track_id",
+            )
+            .in("project_track_id", trackIds)
+            .not("finished_at", "is", null),
+      loadForecastProjectDTO(supabase, id, user.id),
+      loadHomeActualsVsForecast(supabase, user.id, userTodayIso, { projectId: id }),
+    ]);
   const initialActiveSessionIndicator =
     activeIndicatorRes.indicator != null &&
     activeIndicatorRes.indicator.scope === "integration" &&
@@ -206,6 +291,48 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       : null;
   const pmSnapshot = pmSnapshotRes.snapshot;
   const pmTrackLabel = (pmTrack?.name ?? "").trim() || "Project Management";
+
+  const effortSessions: ProjectEffortSessionInput[] = [];
+  for (const row of effortWsRes.data ?? []) {
+    const taskJoin = row.integration_tasks;
+    const trackId = Array.isArray(taskJoin)
+      ? taskJoin[0]?.project_track_id
+      : taskJoin?.project_track_id;
+    if (!trackId || !row.finished_at) continue;
+    const rowKey = rowKeyByTrackId.get(trackId);
+    if (!rowKey) continue;
+    const dh = Number(row.duration_hours);
+    if (!Number.isFinite(dh) || dh <= 0) continue;
+    effortSessions.push({
+      source: "task_work_session",
+      source_id: row.id,
+      started_at: row.started_at,
+      finished_at: row.finished_at,
+      duration_hours: dh,
+      integration_task_id: null,
+      title: "Task",
+      work_accomplished: row.work_accomplished ?? null,
+      rowKey,
+    });
+  }
+  for (const row of effortMeRes.data ?? []) {
+    const rowKey = rowKeyByTrackId.get(row.project_track_id);
+    if (!rowKey) continue;
+    const dh = Number(row.duration_hours);
+    if (!Number.isFinite(dh) || dh <= 0) continue;
+    effortSessions.push({
+      source: "manual",
+      source_id: row.id,
+      entry_type: row.entry_type === "meeting" ? "meeting" : "task",
+      started_at: row.started_at,
+      finished_at: row.finished_at,
+      duration_hours: dh,
+      integration_task_id: null,
+      title: String(row.title ?? "").trim() || (row.entry_type === "meeting" ? "Meeting" : "Task"),
+      work_accomplished: row.work_accomplished ?? null,
+      rowKey,
+    });
+  }
 
   return (
     <div>
@@ -229,11 +356,10 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       />
 
       <ProjectSummaryStrip
-        projectId={id}
-        customerName={project.customer_name ?? null}
         completedAt={project.completed_at ?? null}
         phaseStatus={phaseStatus}
-        integrationRows={integrationRowsSerialized}
+        integrationCount={integrationRowsSerialized.length}
+        actualsVsForecast={actualsVsForecast.thisWeek}
       />
 
       <section className="mt-10">
@@ -248,6 +374,25 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           }))}
         />
       </section>
+
+      {forecastProject ? (
+        <ProjectForecastCard
+          project={forecastProject}
+          todayIso={userTodayIso}
+          deploymentEffortByPhase={prefsRes.preferences.deployment_effort_by_phase}
+        />
+      ) : null}
+
+      <ProjectEffortCard
+        rows={effortRows}
+        sessions={effortSessions}
+        timelineStartYmd={timelineSpan?.startYmd ?? null}
+        timelineEndYmd={timelineSpan?.endYmd ?? null}
+        todayIso={userTodayIso}
+        quarterConfig={{
+          startMonth: prefsRes.preferences.effort_quarter_start_month,
+        }}
+      />
 
       <section className="mt-10">
         <ProjectIntegrationsSection

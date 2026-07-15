@@ -6,7 +6,9 @@
  * |------------|----------------|-------------------|
  * | `stale_integration` | No `integration_latest_updates` (or PI `created_at`) signal in the last 7 days | Not settings-gated; evaluated for every active project integration. |
  * | `activity_summary_reminder` | On the user’s **activity summary day** (weekday), if that project has no `project_summaries` row whose `generated_at` falls in the current Mon–Sun calendar week (user TZ) | `UserPreferences.activity_summary_day` |
- * | `forecast_review_reminder` | On the user’s **forecast review day** (weekday), once per week (`dedupe_key` uses week Monday) | `UserPreferences.forecast_review_day` |
+ * | `forecast_review_reminder` | On the user’s **forecast review day** (weekday), once per week | `UserPreferences.forecast_review_day` |
+ * | `variance_review` | Same day as forecast review | prior week + 4-week trend snapshot |
+ * | `capacity_gaps` | Same day as forecast review | weeks +4…+8 vs 32h capacity target |
  *
  * Per-project trigger overrides are not implemented yet (future: optional overrides + `metadata`).
  */
@@ -15,8 +17,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
 import {
+  capacityGapWeekStarts,
+  synthesizeCapacityGaps,
+} from "@/lib/home-capacity-gaps";
+import {
+  loadHomeActualsVsForecast,
+  variancePercentLabel,
+} from "@/lib/home-actuals-vs-forecast";
+import {
   formatIntegrationDefinitionDisplayName,
 } from "@/lib/integration-metadata";
+import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
+import { currentSundayWeekYmd } from "@/lib/project-forecast";
 import {
   WEEKDAY_VALUES,
   getUserTodayIso,
@@ -91,11 +103,15 @@ export type HomeInboxItemRow = {
   created_at: string;
   /** Null until the user opens the item in the inbox (master–detail). */
   read_at: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 const INBOX_LIST_COLUMNS =
+  "id, rule_key, dedupe_key, title, body, link_path, status, created_at, read_at, metadata";
+const INBOX_LIST_COLUMNS_LEGACY =
   "id, rule_key, dedupe_key, title, body, link_path, status, created_at, read_at";
-const INBOX_LIST_COLUMNS_LEGACY = "id, rule_key, dedupe_key, title, body, link_path, status, created_at";
+const INBOX_LIST_COLUMNS_LEGACY_NO_READ =
+  "id, rule_key, dedupe_key, title, body, link_path, status, created_at";
 
 function logSupabaseError(context: string, error: unknown): void {
   if (error && typeof error === "object") {
@@ -128,6 +144,31 @@ function isReadAtColumnMissingError(error: { message?: string; code?: string } |
   return false;
 }
 
+function isMetadataColumnMissingError(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  if (msg.includes("metadata")) {
+    if (
+      msg.includes("does not exist") ||
+      msg.includes("undefined column") ||
+      msg.includes("could not find") ||
+      error.code === "42703"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+type InboxInsert = {
+  rule_key: string;
+  dedupe_key: string;
+  title: string;
+  body: string | null;
+  link_path: string;
+  metadata?: Record<string, unknown> | null;
+};
+
 /**
  * Upserts deterministic inbox rows for the signed-in user. Call from Home RSC
  * with a server Supabase client (RLS as the user). See file-level table for
@@ -144,6 +185,7 @@ export async function syncHomeInboxRules(
   const todayName = todayWeekdayName(todayYmd);
   const weekMon = mondayYmdOfWeekContaining(todayYmd);
   const weekSun = sundayYmdOfWeekContaining(todayYmd);
+  const currentSunday = currentSundayWeekYmd(todayYmd);
 
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -199,13 +241,7 @@ export async function syncHomeInboxRules(
     }
   }
 
-  const inserts: {
-    rule_key: string;
-    dedupe_key: string;
-    title: string;
-    body: string | null;
-    link_path: string;
-  }[] = [];
+  const inserts: InboxInsert[] = [];
 
   for (const row of piRows ?? []) {
     const createdAt = row.created_at as string;
@@ -222,14 +258,16 @@ export async function syncHomeInboxRules(
         direction: integ?.direction ?? null,
       }).trim() || "integration";
 
+    const projectName = projectNameById.get(row.project_id) ?? "this project";
     const dedupe_key = `stale_integration:${row.id}:${weekMon}`;
     const link_path = `/projects/${row.project_id}/integrations/${row.id}`;
     inserts.push({
       rule_key: "stale_integration",
       dedupe_key,
       title: `Integration ${displayName} requires an update`,
-      body: `No update has been recorded for at least 7 days for ${displayName} on ${projectNameById.get(row.project_id) ?? "this project"}.`,
+      body: `No update has been recorded for at least 7 days for ${displayName} on ${projectName}.`,
       link_path,
+      metadata: { project_name: projectName, project_id: row.project_id },
     });
   }
 
@@ -262,18 +300,91 @@ export async function syncHomeInboxRules(
   }
 
   if (todayName === prefsRes.preferences.forecast_review_day) {
-    const dedupe_key = `forecast_review_reminder:${weekMon}`;
     inserts.push({
       rule_key: "forecast_review_reminder",
-      dedupe_key,
-      title: "Review workload and planning",
-      body: "Review your tasks and time on Work; adjust planning as needed.",
-      link_path: "/work",
+      dedupe_key: `forecast_review_reminder:${weekMon}`,
+      title: "Review forecast for the next 4 weeks",
+      body: "Adjust project-level forecast hours for the coming weeks. Current week is shown for context.",
+      link_path: "/forecast",
+    });
+
+    const variance = await loadHomeActualsVsForecast(supabase, ownerId, todayYmd);
+    const prior = variance.priorWeek;
+    const priorLabel = variancePercentLabel(prior.forecast, prior.variance);
+    const trendWeeks = variance.weeks.slice(-5, -1); // last 4 completed weeks before this week
+    let trendBlurb = "No prior-week trend yet.";
+    if (trendWeeks.length > 0) {
+      const parts = trendWeeks.map((w) => {
+        const totals = variance.projects.reduce(
+          (acc, p) => {
+            const t = p.byWeek[w];
+            return {
+              forecast: acc.forecast + (t?.forecast ?? 0),
+              actual: acc.actual + (t?.actual ?? 0),
+            };
+          },
+          { forecast: 0, actual: 0 },
+        );
+        const v = totals.forecast - totals.actual;
+        const lbl = variancePercentLabel(totals.forecast, v) ?? "n/a";
+        return lbl;
+      });
+      trendBlurb = `4-week trend: ${parts.join(" → ")}.`;
+    }
+
+    const priorBody =
+      prior.forecast > 0 || prior.actual > 0
+        ? `Last week: ${formatEffortHoursLabel(prior.forecast)} forecast vs ${formatEffortHoursLabel(prior.actual)} actual${priorLabel ? ` (${priorLabel})` : ""}. ${trendBlurb}`
+        : `No prior-week forecast/actuals yet. ${trendBlurb}`;
+
+    inserts.push({
+      rule_key: "variance_review",
+      dedupe_key: `variance_review:${weekMon}`,
+      title: "Review last week’s variance",
+      body: priorBody,
+      link_path: "/home",
+      metadata: {
+        priorWeek: prior,
+        trendWeekStarts: trendWeeks,
+        thisWeek: variance.thisWeek,
+      },
+    });
+
+    const gapWeeks = capacityGapWeekStarts(currentSunday);
+    const gapStart = gapWeeks[0]!;
+    const gapEnd = gapWeeks[gapWeeks.length - 1]!;
+    const { data: hoursRows } = await supabase
+      .from("project_forecast_hours")
+      .select("week_start_date, hours")
+      .in("project_id", projectIds)
+      .gte("week_start_date", gapStart)
+      .lte("week_start_date", gapEnd);
+
+    const weekHours: Record<string, number> = {};
+    for (const w of gapWeeks) weekHours[w] = 0;
+    for (const row of hoursRows ?? []) {
+      const week = String(row.week_start_date).slice(0, 10);
+      if (!(week in weekHours)) continue;
+      weekHours[week] = (weekHours[week] ?? 0) + Math.max(0, Math.round(Number(row.hours) || 0));
+    }
+
+    const synthesis = synthesizeCapacityGaps({ weekHours, weekStarts: gapWeeks });
+    inserts.push({
+      rule_key: "capacity_gaps",
+      dedupe_key: `capacity_gaps:${weekMon}`,
+      title: "Upcoming capacity gaps",
+      body: synthesis.body,
+      link_path: "/forecast",
+      metadata: {
+        weeks: synthesis.weeks,
+        freeHoursPerWeek: synthesis.freeHoursPerWeek,
+        freeStartingWeek: synthesis.freeStartingWeek,
+      },
     });
   }
 
   for (const row of inserts) {
-    const { error } = await supabase.from("home_inbox_items").insert({
+    const payload: Record<string, unknown> = {
       owner_id: ownerId,
       rule_key: row.rule_key,
       dedupe_key: row.dedupe_key,
@@ -282,9 +393,22 @@ export async function syncHomeInboxRules(
       link_path: row.link_path,
       status: "open",
       resolved_at: null,
-    });
+    };
+    if (row.metadata != null) {
+      payload.metadata = row.metadata;
+    }
+    const { error } = await supabase.from("home_inbox_items").insert(payload);
     if (error && error.code !== "23505") {
-      console.error("[home-inbox] insert failed", error, row.dedupe_key);
+      // Retry without metadata if column missing (should not happen; column exists from day one).
+      if (isMetadataColumnMissingError(error) && row.metadata != null) {
+        delete payload.metadata;
+        const retry = await supabase.from("home_inbox_items").insert(payload);
+        if (retry.error && retry.error.code !== "23505") {
+          console.error("[home-inbox] insert failed", retry.error, row.dedupe_key);
+        }
+      } else {
+        console.error("[home-inbox] insert failed", error, row.dedupe_key);
+      }
     }
   }
 }
@@ -303,7 +427,7 @@ export async function loadOpenHomeInboxItems(
   let rows: Record<string, unknown>[] = (first.data ?? []) as Record<string, unknown>[];
   let err = first.error;
 
-  if (err && isReadAtColumnMissingError(err)) {
+  if (err && isMetadataColumnMissingError(err)) {
     const second = await supabase
       .from("home_inbox_items")
       .select(INBOX_LIST_COLUMNS_LEGACY)
@@ -314,6 +438,17 @@ export async function loadOpenHomeInboxItems(
     rows = (second.data ?? []) as Record<string, unknown>[];
   }
 
+  if (err && isReadAtColumnMissingError(err)) {
+    const third = await supabase
+      .from("home_inbox_items")
+      .select(INBOX_LIST_COLUMNS_LEGACY_NO_READ)
+      .eq("owner_id", ownerId)
+      .eq("status", "open")
+      .order("created_at", { ascending: false });
+    err = third.error;
+    rows = (third.data ?? []) as Record<string, unknown>[];
+  }
+
   if (err) {
     logSupabaseError("[home-inbox] list failed", err);
     return [];
@@ -322,7 +457,9 @@ export async function loadOpenHomeInboxItems(
     if (rule === "stale_integration") return 0;
     if (rule === "activity_summary_reminder") return 1;
     if (rule === "forecast_review_reminder") return 2;
-    return 3;
+    if (rule === "variance_review") return 3;
+    if (rule === "capacity_gaps") return 4;
+    return 5;
   };
   const normalized: HomeInboxItemRow[] = rows.map((r) => ({
     id: r.id as string,
@@ -334,6 +471,7 @@ export async function loadOpenHomeInboxItems(
     status: r.status as string,
     created_at: r.created_at as string,
     read_at: (r.read_at as string | null | undefined) ?? null,
+    metadata: (r.metadata as Record<string, unknown> | null | undefined) ?? null,
   }));
 
   return [...normalized].sort((a, b) => {

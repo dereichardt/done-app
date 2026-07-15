@@ -4,10 +4,15 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
   DEFAULT_ACTIVITY_SUMMARY_DAY,
+  DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
+  DEFAULT_EFFORT_QUARTER_START_MONTH,
   DEFAULT_FORECAST_REVIEW_DAY,
   isValidIanaTimezone,
   isWeekdayValue,
   normalizeTimezone,
+  parseDeploymentEffortByPhase,
+  parseDeploymentEffortByPhaseFromFormData,
+  parseEffortQuarterStartMonth,
   type UserPreferences,
 } from "@/lib/user-preferences";
 
@@ -15,6 +20,8 @@ type UserPreferencesRow = {
   timezone: string | null;
   activity_summary_day: string;
   forecast_review_day: string;
+  effort_quarter_start_month: number;
+  deployment_effort_by_phase: unknown;
 };
 
 type SavePreferencesState = {
@@ -27,6 +34,8 @@ function defaults(): UserPreferences {
     timezone: null,
     activity_summary_day: DEFAULT_ACTIVITY_SUMMARY_DAY,
     forecast_review_day: DEFAULT_FORECAST_REVIEW_DAY,
+    effort_quarter_start_month: DEFAULT_EFFORT_QUARTER_START_MONTH,
+    deployment_effort_by_phase: { ...DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE },
   };
 }
 
@@ -40,6 +49,10 @@ function toPreferences(row: UserPreferencesRow | null | undefined): UserPreferen
     forecast_review_day: isWeekdayValue(row.forecast_review_day)
       ? row.forecast_review_day
       : DEFAULT_FORECAST_REVIEW_DAY,
+    effort_quarter_start_month:
+      parseEffortQuarterStartMonth(row.effort_quarter_start_month) ??
+      DEFAULT_EFFORT_QUARTER_START_MONTH,
+    deployment_effort_by_phase: parseDeploymentEffortByPhase(row.deployment_effort_by_phase),
   };
 }
 
@@ -52,7 +65,9 @@ export async function loadUserPreferences(): Promise<{ preferences: UserPreferen
 
   const { data, error } = await supabase
     .from("user_preferences")
-    .select("timezone, activity_summary_day, forecast_review_day")
+    .select(
+      "timezone, activity_summary_day, forecast_review_day, effort_quarter_start_month, deployment_effort_by_phase",
+    )
     .eq("user_id", user.id)
     .maybeSingle<UserPreferencesRow>();
   if (error) return { preferences: defaults(), error: error.message };
@@ -72,6 +87,10 @@ export async function saveUserPreferences(
   const timezoneRaw = String(formData.get("timezone") ?? "");
   const activitySummaryRaw = String(formData.get("activity_summary_day") ?? "").toLowerCase().trim();
   const forecastReviewRaw = String(formData.get("forecast_review_day") ?? "").toLowerCase().trim();
+  const effortQuarterStartMonth = parseEffortQuarterStartMonth(
+    formData.get("effort_quarter_start_month"),
+  );
+  const deploymentEffortByPhase = parseDeploymentEffortByPhaseFromFormData(formData);
   const timezone = normalizeTimezone(timezoneRaw);
 
   if (timezone && !isValidIanaTimezone(timezone)) {
@@ -83,6 +102,15 @@ export async function saveUserPreferences(
   if (!isWeekdayValue(forecastReviewRaw)) {
     return { error: "Select a valid Forecast review day." };
   }
+  if (effortQuarterStartMonth === null) {
+    return { error: "Select a valid Quarter start month." };
+  }
+  if (deploymentEffortByPhase === null) {
+    return {
+      error:
+        "Deployment effort by stage must use multiples of 5% that total exactly 100%.",
+    };
+  }
 
   const { error } = await supabase.from("user_preferences").upsert(
     {
@@ -90,6 +118,8 @@ export async function saveUserPreferences(
       timezone,
       activity_summary_day: activitySummaryRaw,
       forecast_review_day: forecastReviewRaw,
+      effort_quarter_start_month: effortQuarterStartMonth,
+      deployment_effort_by_phase: deploymentEffortByPhase,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" },

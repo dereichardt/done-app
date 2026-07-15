@@ -33,6 +33,22 @@ export function TrashIcon({ size = 16, className = "shrink-0" }: ActionIconProps
   );
 }
 
+/** Funnel filter control. */
+export function FilterIcon({ size = 16, className = "shrink-0" }: ActionIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 5h16l-6.2 7.2v5.3L10.2 19v-6.8L4 5Z"
+      />
+    </svg>
+  );
+}
+
 export function UndoIcon({ size = 16, className = "shrink-0" }: ActionIconProps) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>

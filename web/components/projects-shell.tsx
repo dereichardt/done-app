@@ -71,10 +71,23 @@ function CatalogIcon() {
   );
 }
 
+function ForecastIcon() {
+  return (
+    <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+      <path d="M3 12V7.5" />
+      <path d="M6.5 12V4.5" />
+      <path d="M10 12V6" />
+      <path d="M13.5 12V3.5" />
+      <path d="M2 13h12" />
+    </svg>
+  );
+}
+
 const navItems: NavEntry[] = [
   { key: "home", label: "Home", href: "/home", icon: <HomeIcon /> },
   { key: "work", label: "Work", href: "/work", icon: <TasksIcon /> },
   { key: "projects", label: "Projects", href: "/projects", icon: <FolderIcon /> },
+  { key: "forecast", label: "Forecast", href: "/forecast", icon: <ForecastIcon /> },
   { key: "internal", label: "Internal", href: "/internal", icon: <InternalIcon /> },
   {
     key: "integration-catalog",
@@ -129,6 +142,7 @@ export function ProjectsShell({
   const isIntegrationCatalogRoute = pathname?.startsWith("/integrations/catalog") ?? false;
   const isSettingsRoute = pathname === "/settings" || (pathname?.startsWith("/settings/") ?? false);
   const isInternalRoute = pathname === "/internal" || (pathname?.startsWith("/internal/") ?? false);
+  const isForecastRoute = pathname === "/forecast" || (pathname?.startsWith("/forecast/") ?? false);
   const isProjectDetailRoute = projectIdFromPath != null;
 
   useEffect(() => {
@@ -216,6 +230,7 @@ export function ProjectsShell({
     if (isProjectDetailRoute) return showProjectTitleInHeader ? projectTitle ?? "Project" : "Project";
     if (isSettingsRoute) return "Settings";
     if (isIntegrationCatalogRoute) return "Catalog";
+    if (isForecastRoute) return "Forecast Studio";
     if (isInternalRoute) return "Internal";
     if (isTasksRoute) return "Work";
     if (isProjectsRoute) return "Projects";
@@ -225,6 +240,7 @@ export function ProjectsShell({
     isProjectDetailRoute,
     isSettingsRoute,
     isIntegrationCatalogRoute,
+    isForecastRoute,
     isInternalRoute,
     isTasksRoute,
     isProjectsRoute,

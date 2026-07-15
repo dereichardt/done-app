@@ -1,6 +1,8 @@
+import type { HomeWeekTotals } from "@/lib/home-actuals-vs-forecast";
 import {
   isDeliveryProgress,
   PROJECT_DELIVERY_PROGRESS_VALUES,
+  type ProjectDeliveryProgress,
 } from "@/lib/integration-metadata";
 import type { PhaseForStatus } from "@/lib/project-phase-status";
 import { calendarDaysFromTo, resolvePhaseStatus } from "@/lib/project-phase-status";
@@ -30,6 +32,8 @@ export type HomeProjectStatusPayload = {
     estimatedHours: number;
   };
   integrations: HomeProjectStatusIntegration[];
+  /** This-week actuals vs forecast for the selected project. */
+  actualsVsForecast: HomeWeekTotals;
 };
 
 export type TimelineModel =
@@ -171,4 +175,38 @@ export function formatStatusHours(h: number): string {
   const rounded = Math.round(h * 100) / 100;
   if (rounded === Math.floor(rounded)) return `${rounded} hr`;
   return `${rounded} hr`;
+}
+
+/** Remaining hours vs estimate; remaining is 0 when over. */
+export function hoursRemaining(
+  actual: number,
+  estimated: number | null,
+): { remaining: number | null; overEstimate: boolean; overage: number } {
+  const e =
+    estimated != null && Number.isFinite(estimated) && estimated > 0 ? estimated : null;
+  if (e == null) {
+    return { remaining: null, overEstimate: false, overage: 0 };
+  }
+  const a = Number.isFinite(actual) && actual > 0 ? actual : 0;
+  if (a > e) {
+    return { remaining: 0, overEstimate: true, overage: a - e };
+  }
+  return { remaining: e - a, overEstimate: false, overage: 0 };
+}
+
+/** Bucket integrations into delivery-progress columns (all stages present, may be empty). */
+export function groupIntegrationsByDeliveryProgress(
+  integrations: HomeProjectStatusIntegration[],
+): Record<ProjectDeliveryProgress, HomeProjectStatusIntegration[]> {
+  const out = Object.fromEntries(
+    PROJECT_DELIVERY_PROGRESS_VALUES.map((v) => [v, [] as HomeProjectStatusIntegration[]]),
+  ) as Record<ProjectDeliveryProgress, HomeProjectStatusIntegration[]>;
+
+  for (const integ of integrations) {
+    const key: ProjectDeliveryProgress = isDeliveryProgress(integ.delivery_progress)
+      ? integ.delivery_progress
+      : "not_started";
+    out[key].push(integ);
+  }
+  return out;
 }

@@ -12,8 +12,8 @@ const valueRegion = "flex min-h-[2.5rem] flex-1 flex-col items-center justify-ce
 
 function formatWeekHours(h: number): string {
   if (!Number.isFinite(h) || h <= 0) return "0";
-  const rounded = Math.round(h * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const q = Math.round(h * 100) / 100;
+  return Number.isInteger(q) ? String(q) : String(parseFloat(q.toFixed(2)));
 }
 
 export function HomeSummaryStrip({ summary }: { summary: HomeSummary }) {

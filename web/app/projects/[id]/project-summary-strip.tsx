@@ -1,14 +1,16 @@
+import { VarianceCard } from "@/components/home-actuals-vs-forecast";
+import type { HomeWeekTotals } from "@/lib/home-actuals-vs-forecast";
 import {
   formatPhaseDate,
   formatPhaseDaysRemainingLabel,
   type PhaseStatusResult,
 } from "@/lib/project-phase-status";
-import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
-import { ProjectSummaryIntegrationCards } from "./project-summary-integration-cards";
 
 const labelSm = "text-sm font-medium text-muted-canvas";
 /** Phase / timing metrics: slightly smaller than legacy 3xl/4xl so they align visually with integration count cards */
 const valueCenter = "text-2xl font-semibold leading-tight tracking-tight sm:text-3xl";
+const valueCenterLarge =
+  "text-3xl font-semibold leading-tight tracking-tight tabular-nums sm:text-4xl";
 
 const cardShell =
   "card-canvas flex min-h-[10.5rem] flex-col px-4 py-5 sm:min-h-[11rem]";
@@ -22,22 +24,23 @@ function formatProjectCompletedOn(iso: string): string {
 }
 
 export function ProjectSummaryStrip({
-  projectId,
-  customerName,
   completedAt,
   phaseStatus,
-  integrationRows,
+  integrationCount,
+  actualsVsForecast,
+  embedded = false,
 }: {
-  projectId: string;
-  customerName: string | null;
   completedAt: string | null;
   phaseStatus: PhaseStatusResult;
-  integrationRows: SerializedProjectIntegrationRow[];
+  integrationCount: number;
+  actualsVsForecast: HomeWeekTotals;
+  /** When true, omit top margin (for nesting inside another panel). */
+  embedded?: boolean;
 }) {
   const projectCompleted = completedAt != null && completedAt.length > 0;
 
   return (
-    <section className="mt-10" aria-label="Project summary">
+    <section className={embedded ? undefined : "mt-10"} aria-label="Project summary">
       <h2 className="section-heading">Summary</h2>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch xl:grid-cols-4">
         <div className={cardShell}>
@@ -196,11 +199,22 @@ export function ProjectSummaryStrip({
           ) : null}
         </div>
 
-        <ProjectSummaryIntegrationCards
-          projectId={projectId}
-          customerName={customerName}
-          integrationRows={integrationRows}
-        />
+        <div className={cardShell}>
+          <div className={topLeft}>
+            <p className={labelSm}>Integrations</p>
+          </div>
+          <div className={valueRegion}>
+            <p
+              className={valueCenterLarge}
+              style={{ color: "var(--app-text)" }}
+              aria-label={`${integrationCount} ${integrationCount === 1 ? "integration" : "integrations"}`}
+            >
+              {integrationCount}
+            </p>
+          </div>
+        </div>
+
+        <VarianceCard title="Actuals vs Forecast" totals={actualsVsForecast} />
       </div>
     </section>
   );

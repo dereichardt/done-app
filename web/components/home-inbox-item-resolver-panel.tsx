@@ -21,6 +21,9 @@ import {
   type SummarizeActivityPanelHandle,
 } from "@/app/projects/[id]/summarize-activity-panel";
 import { DialogCloseButton } from "@/components/dialog-close-button";
+import { InboxCapacityGapsPanel } from "@/components/inbox-capacity-gaps-panel";
+import { InboxForecastReviewPanel } from "@/components/inbox-forecast-review-panel";
+import { InboxVariancePanel } from "@/components/inbox-variance-panel";
 import {
   IntegrationProvideUpdateFormFields,
   type IntegrationProvideUpdateDraft,
@@ -30,7 +33,7 @@ import {
 import { loadHomeProjectIntegrationRows, loadProjectBriefForOwner } from "@/lib/actions/home";
 import { markHomeInboxItemDone } from "@/lib/actions/home-inbox";
 import { submitProvideUpdateBatch } from "@/lib/actions/integration-bulk-updates";
-import { formatInboxTimestamp } from "@/lib/inbox-format";
+import { formatInboxTimestamp, staleIntegrationProjectName } from "@/lib/inbox-format";
 import type { HomeInboxItemRow } from "@/lib/home-inbox-rules";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
 
@@ -100,6 +103,8 @@ export function HomeInboxItemResolverPanel({
     });
   };
 
+  const projectName = staleIntegrationProjectName(item);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div
@@ -110,6 +115,11 @@ export function HomeInboxItemResolverPanel({
           <h2 id="home-inbox-resolver-title" className="text-base font-medium" style={{ color: "var(--app-text)" }}>
             {item.title}
           </h2>
+          {projectName ? (
+            <p className="mt-0.5 truncate text-sm font-medium" style={{ color: "var(--app-text)" }}>
+              {projectName}
+            </p>
+          ) : null}
           <p className="mt-0.5 truncate text-sm" style={{ color: "var(--app-text-muted)" }}>
             {formatInboxTimestamp(item.created_at, timezone)}
           </p>
@@ -131,6 +141,22 @@ export function HomeInboxItemResolverPanel({
             panelRef={summarizePanelRef}
             onInboxActivityBar={setInboxActivityBar}
           />
+        ) : item.rule_key === "forecast_review_reminder" ? (
+          <InboxForecastReviewPanel
+            onSaveAndDone={() => {
+              startTransition(async () => {
+                const res = await markHomeInboxItemDone(item.id);
+                if (!res.error) {
+                  onItemCompleted(item.id);
+                  router.refresh();
+                }
+              });
+            }}
+          />
+        ) : item.rule_key === "variance_review" ? (
+          <InboxVariancePanel fallbackBody={item.body} />
+        ) : item.rule_key === "capacity_gaps" ? (
+          <InboxCapacityGapsPanel fallbackBody={item.body} metadata={item.metadata} />
         ) : (
           <GenericResolverBody item={item} />
         )}
@@ -197,15 +223,13 @@ export function HomeInboxItemResolverPanel({
             </button>
           </div>
         </div>
-      ) : item.rule_key !== "stale_integration" ? (
+      ) : item.rule_key === "forecast_review_reminder" ? null : item.rule_key === "variance_review" ||
+        item.rule_key === "capacity_gaps" ? (
         <div className="shrink-0 border-t px-4 py-3" style={{ borderColor: "var(--app-border)" }}>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {item.link_path ? (
-              <Link
-                href={item.link_path}
-                className={`${inboxFooterBtnClass} btn-ghost text-sm`}
-              >
-                {item.rule_key === "forecast_review_reminder" ? "Open Work" : "Open linked page"}
+            {item.link_path && item.rule_key === "capacity_gaps" ? (
+              <Link href={item.link_path} className={`${inboxFooterBtnClass} btn-ghost text-sm`}>
+                Open Forecast
               </Link>
             ) : null}
             <button
@@ -218,7 +242,25 @@ export function HomeInboxItemResolverPanel({
             </button>
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="shrink-0 border-t px-4 py-3" style={{ borderColor: "var(--app-border)" }}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {item.link_path ? (
+              <Link href={item.link_path} className={`${inboxFooterBtnClass} btn-ghost text-sm`}>
+                Open linked page
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              className={`${inboxFooterBtnClass} btn-cta-dark text-sm`}
+              disabled={pending}
+              onClick={() => handleMarkDone()}
+            >
+              {pending ? "Saving…" : "Mark done"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -474,6 +516,7 @@ const StaleIntegrationResolverBody = forwardRef(function StaleIntegrationResolve
 
   return (
     <div className="flex flex-col gap-4">
+      {item.body ? <p className="text-sm text-muted-canvas whitespace-pre-wrap">{item.body}</p> : null}
       {integrationDisplayErr ? (
         <p className="text-sm" role="alert" style={{ color: "var(--app-danger)" }}>
           {integrationDisplayErr}

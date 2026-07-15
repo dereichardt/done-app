@@ -26,7 +26,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 function relationName(value: unknown): string | undefined {
   if (value == null) return undefined;
@@ -144,6 +144,7 @@ function SortableRow({
   activeSessionSlot,
   metricsVariant = "default",
   isDragOverlay = false,
+  dndReady = true,
 }: {
   project: ProjectsActiveSessionListProjectRow;
   attrs: string;
@@ -153,9 +154,11 @@ function SortableRow({
   activeSessionSlot: React.ReactNode;
   metricsVariant?: "default" | "completed";
   isDragOverlay?: boolean;
+  dndReady?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.id,
+    disabled: !dndReady,
   });
 
   const style: React.CSSProperties = {
@@ -194,8 +197,8 @@ function SortableRow({
           ].join(" ")}
           style={{ touchAction: "none" }}
           onClick={(e) => e.preventDefault()}
-          {...attributes}
-          {...listeners}
+          {...(dndReady ? attributes : {})}
+          {...(dndReady ? listeners : {})}
         >
           <GripHandleIcon />
         </button>
@@ -285,6 +288,8 @@ export function ProjectsActiveSessionList({
   allowReorder?: boolean;
 }) {
   const router = useRouter();
+  // Stable id required so dnd-kit aria-describedby matches across SSR/hydration.
+  const dndContextId = useId();
   const [activeSessionIndicator, setActiveSessionIndicator] = useState<ActiveWorkSessionIndicatorDTO | null>(
     initialActiveSessionIndicator ?? null,
   );
@@ -293,11 +298,16 @@ export function ProjectsActiveSessionList({
   // Local ordered list — synced from props, updated optimistically on drag end.
   const [orderedProjects, setOrderedProjects] = useState(projects);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [dndReady, setDndReady] = useState(false);
 
   // Sync if props change (e.g. router.refresh() after save).
   useEffect(() => {
     setOrderedProjects(projects);
   }, [projects]);
+
+  useEffect(() => {
+    setDndReady(true);
+  }, []);
 
   const openActiveWorkSessionModal = useCallback(() => {
     requestAnimationFrame(() => activeWorkSessionDialogRef.current?.showModal());
@@ -391,6 +401,7 @@ export function ProjectsActiveSessionList({
                 project={p}
                 {...rowProps}
                 metricsVariant={summaryMetricsVariant}
+                dndReady={dndReady}
               />
             );
           })}
@@ -415,6 +426,7 @@ export function ProjectsActiveSessionList({
     <>
       {allowReorder ? (
         <DndContext
+          id={dndContextId}
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragStart={handleDragStart}

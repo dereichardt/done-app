@@ -7,6 +7,7 @@ import {
   type HomeProjectStatusPayload,
   type HomeProjectStatusPhase,
 } from "@/lib/home-project-status";
+import { loadHomeActualsVsForecast, makeWeekTotals } from "@/lib/home-actuals-vs-forecast";
 import { serializeProjectIntegrationRow } from "@/lib/project-integration-row";
 import { getUserTodayIso } from "@/lib/user-preferences";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
@@ -33,21 +34,25 @@ export async function loadHomeProjectStatus(
   const prefsRes = await loadUserPreferences();
   const todayYmd = getUserTodayIso(prefsRes.preferences.timezone);
 
-  const [{ data: phaseRows, error: phaseErr }, { data: trackRows, error: trackErr }, { data: piRows, error: piErr }] =
-    await Promise.all([
-      supabase
-        .from("project_phases")
-        .select("name, sort_order, start_date, end_date")
-        .eq("project_id", projectId)
-        .order("sort_order"),
-      supabase
-        .from("project_tracks")
-        .select("id, kind, project_integration_id")
-        .eq("project_id", projectId),
-      supabase
-        .from("project_integrations")
-        .select(
-          `
+  const [
+    { data: phaseRows, error: phaseErr },
+    { data: trackRows, error: trackErr },
+    { data: piRows, error: piErr },
+    actualsVsForecast,
+  ] = await Promise.all([
+    supabase
+      .from("project_phases")
+      .select("name, sort_order, start_date, end_date")
+      .eq("project_id", projectId)
+      .order("sort_order"),
+    supabase
+      .from("project_tracks")
+      .select("id, kind, project_integration_id")
+      .eq("project_id", projectId),
+    supabase
+      .from("project_integrations")
+      .select(
+        `
       id,
       delivery_progress,
       integration_state,
@@ -65,10 +70,11 @@ export async function loadHomeProjectStatus(
         integration_domains ( name )
       )
     `,
-        )
-        .eq("project_id", projectId)
-        .order("created_at", { ascending: true }),
-    ]);
+      )
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: true }),
+    loadHomeActualsVsForecast(supabase, user.id, todayYmd, { projectId }),
+  ]);
 
   if (phaseErr) return { error: phaseErr.message };
   if (trackErr) return { error: trackErr.message };
@@ -157,6 +163,7 @@ export async function loadHomeProjectStatus(
       estimatedHours: estimatedSum,
     },
     integrations,
+    actualsVsForecast: actualsVsForecast.thisWeek ?? makeWeekTotals(0, 0),
   };
 
   return { payload };

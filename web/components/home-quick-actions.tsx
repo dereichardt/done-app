@@ -20,12 +20,18 @@ export function HomeQuickActions({
   inboxItemCount,
   inboxPanelOpen,
   onOpenInboxPanel,
+  progressSectionId,
+  progressPanelOpen,
+  onOpenProgressPanel,
 }: {
   projects: HomeProjectPickerRow[];
   inboxSectionId?: string;
   inboxItemCount?: number;
   inboxPanelOpen?: boolean;
   onOpenInboxPanel?: () => void;
+  progressSectionId?: string;
+  progressPanelOpen?: boolean;
+  onOpenProgressPanel?: () => void;
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -117,6 +123,19 @@ export function HomeQuickActions({
                   {inboxItemCount ?? 0}
                 </span>
               </span>
+            </button>
+          ) : null}
+          {onOpenProgressPanel ? (
+            <button
+              type="button"
+              className="btn-quick-action"
+              aria-expanded={progressPanelOpen}
+              aria-controls={progressSectionId}
+              aria-label="Open progress"
+              disabled={projects.length === 0}
+              onClick={() => onOpenProgressPanel()}
+            >
+              Open Progress
             </button>
           ) : null}
           <button

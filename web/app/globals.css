@@ -21,6 +21,10 @@
   --app-info: var(--cnvs-sys-color-accent-info, #0a66c2);
   --app-info-surface: var(--cnvs-sys-color-surface-info-default, #eaf3ff);
   --app-danger: var(--cnvs-sys-color-accent-danger, #b42318);
+  /* Success / at-capacity — same weight family as --app-action, in green */
+  --app-success: var(--project-color-green-medium, #19be52);
+  /* Warning / overload emphasis (e.g. portfolio week above sustainable load) */
+  --app-warning: var(--project-color-yellow-medium, #fde65e);
   /* Primary dark CTA fill (.btn-cta-dark); reuse for matching form controls (e.g. checkboxes) */
   --app-cta-dark-fill: #1f2937;
   --app-cta-dark-fg: #f3f5f8;

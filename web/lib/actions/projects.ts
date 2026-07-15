@@ -16,16 +16,9 @@ import {
 import { defaultProjectManagementTrackName } from "@/lib/project-tracks";
 import type { CatalogIntegrationDetailDTO } from "@/lib/load-catalog-integration-detail";
 import { loadCatalogIntegrationDetail } from "@/lib/load-catalog-integration-detail";
+import { DEFAULT_PHASES } from "@/lib/project-phases";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-
-const DEFAULT_PHASES = [
-  { name: "Plan", sort_order: 1, phase_key: "plan" },
-  { name: "Architect & Configure", sort_order: 2, phase_key: "architect_configure" },
-  { name: "Test", sort_order: 3, phase_key: "test" },
-  { name: "Deploy", sort_order: 4, phase_key: "deploy" },
-  { name: "Hypercare", sort_order: 5, phase_key: "hypercare" },
-] as const;
 
 export async function loadProjectHeader(projectId: string): Promise<{
   error?: string;
@@ -909,6 +902,59 @@ export async function patchProjectIntegrationStatus(
 
   revalidatePath(`/projects/${row.project_id}`);
   revalidatePath(`/projects/${row.project_id}/integrations/${projectIntegrationId}`);
+  return {};
+}
+
+/** Update delivery progress only (preserves integration state). Used by home Progress kanban DnD. */
+export async function patchProjectIntegrationDeliveryProgress(
+  projectIntegrationId: string,
+  deliveryProgress: string,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const dp = String(deliveryProgress ?? "").trim();
+  if (!isDeliveryProgress(dp)) return { error: "Invalid delivery progress" };
+
+  const { data: row } = await supabase
+    .from("project_integrations")
+    .select("id, project_id, delivery_progress")
+    .eq("id", projectIntegrationId)
+    .maybeSingle();
+
+  if (!row) return { error: "Not found" };
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", row.project_id)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (!project) return { error: "Not found" };
+
+  if (row.delivery_progress === dp) return {};
+
+  const { error } = await supabase
+    .from("project_integrations")
+    .update({ delivery_progress: dp })
+    .eq("id", projectIntegrationId);
+
+  if (error) return { error: error.message };
+
+  const { error: transitionError } = await supabase.from("delivery_progress_transitions").insert({
+    project_integration_id: projectIntegrationId,
+    from_delivery_progress: row.delivery_progress,
+    to_delivery_progress: dp,
+  });
+  if (transitionError) return { error: transitionError.message };
+
+  revalidatePath(`/projects/${row.project_id}`);
+  revalidatePath(`/projects/${row.project_id}/integrations/${projectIntegrationId}`);
+  revalidatePath("/home");
   return {};
 }
 

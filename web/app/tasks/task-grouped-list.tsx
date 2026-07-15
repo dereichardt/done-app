@@ -20,7 +20,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import type { ActiveWorkSessionDTO } from "@/lib/actions/integration-tasks";
 import type { TasksPageTask } from "@/lib/tasks-page-shared";
 import {
@@ -338,6 +338,8 @@ export function TaskGroupedList({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  // Stable id required so dnd-kit aria-describedby matches across SSR/hydration.
+  const dndContextId = useId();
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
   const [dndReady, setDndReady] = useState(false);
@@ -529,6 +531,7 @@ export function TaskGroupedList({
 
   return (
     <DndContext
+      id={dndContextId}
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragStart={handleDragStart}
