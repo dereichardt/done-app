@@ -11,24 +11,26 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { ForecastBankedSummaryPanel } from "@/components/forecast-banked-summary";
+import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
 import { GenerateForecastDialog } from "@/components/generate-forecast-dialog";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
 import { saveProjectForecastDraft } from "@/lib/actions/project-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
+  applyForecastProjectTotalEdit,
+  applyForecastRowEdit,
   buildForecastPhaseWeekSegments,
-  computeForecastBankedSummary,
+  computeEstimateVariance,
+  computeForecastPastPhaseSummary,
   currentSundayWeekYmd,
   DEFAULT_FORECAST_PM_PERCENT,
   diffForecastCells,
-  forecastBankWeekStarts,
   forecastPrerequisites,
   forecastStartModeFromStartDate,
   PM_FORECAST_ROW_KEY,
   projectTotalsByWeek,
-  redistributeForecastAfterEdit,
-  redistributeProjectTotalAfterEdit,
+  sumActualsConsumedHours,
+  sumEstimatedRoundedHours,
 } from "@/lib/project-forecast";
 import { sundayWeekStartsInclusive, formatSundayWeekLabel } from "@/lib/project-weekly-effort";
 import type { DeploymentEffortByPhase } from "@/lib/user-preferences";
@@ -49,6 +51,9 @@ type ProjectEditSession = {
   persisted: HoursByRow;
   /** Working draft. */
   draft: HoursByRow;
+  sessionBaselineReserveHours: number;
+  persistedReserveHours: number;
+  reserveHours: number;
 };
 
 const TRACK_COL_DEFAULT_PX = 220;
@@ -133,7 +138,7 @@ function weekInSpan(weekStart: string, startYmd: string | null, endYmd: string |
   return weekStart >= weeks[0] && weekStart <= weeks[weeks.length - 1];
 }
 
-/** Timeline ∩ forecast window — used for redistribute (not the portfolio axis). */
+/** Timeline ∩ forecast window — used for editable weeks (not the portfolio axis). */
 function projectWritableWeeks(
   project: ForecastProjectDTO,
   sharedWeeks: string[],
@@ -149,23 +154,8 @@ function projectWritableWeeks(
   );
 }
 
-function sumProjectBankHours(
-  hoursByRow: HoursByRow,
-  rowKeys: string[],
-  bankWeeks: string[],
-): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const w of bankWeeks) {
-    out[w] = rowKeys.reduce(
-      (s, key) => s + Math.max(0, Math.round(hoursByRow[key]?.[w] ?? 0)),
-      0,
-    );
-  }
-  return out;
-}
-
-function totalBankHours(hoursByBankWeek: Record<string, number>): number {
-  return Object.values(hoursByBankWeek).reduce((s, h) => s + Math.max(0, Math.round(h)), 0);
+function projectReserveHours(project: ForecastProjectDTO): number {
+  return Math.max(0, Math.round(project.forecast?.reserve_hours ?? 0));
 }
 
 function forecastCellKey(
@@ -229,6 +219,7 @@ export function ForecastStudio({
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef<HoursByRow | null>(null);
   const persistedRef = useRef<HoursByRow | null>(null);
+  const reserveHoursRef = useRef<number | null>(null);
   const editingIdRef = useRef<string | null>(null);
   /** Bumped to ignore in-flight autosaves after regenerate / hard reset. */
   const saveEpochRef = useRef(0);
@@ -371,15 +362,6 @@ export function ForecastStudio({
     return out;
   }, [projects, sharedWeeks, projectEdits]);
 
-  const portfolioGrandTotal = useMemo(() => {
-    let sum = 0;
-    for (const [w, h] of Object.entries(portfolioTotalsByWeek)) {
-      if (w < currentSunday) continue;
-      if (Number.isFinite(h) && h > 0) sum += h;
-    }
-    return Math.round(sum);
-  }, [portfolioTotalsByWeek, currentSunday]);
-
   const targetScrollLeft = useMemo(() => {
     if (!scrollTargetWeekYmd) return 0;
     const idx = sharedWeeks.indexOf(scrollTargetWeekYmd);
@@ -439,40 +421,58 @@ export function ForecastStudio({
     }
   }, []);
 
-  const applyPersistedToProjects = useCallback((projectId: string, hours: HoursByRow) => {
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== projectId) return p;
-        return {
-          ...p,
-          hoursByRow: cloneHours(hours),
-          hours: Object.entries(hours).flatMap(([row_key, weeks]) =>
-            Object.entries(weeks).map(([week_start_date, h]) => ({
-              row_key,
-              week_start_date,
-              hours: h,
-            })),
-          ),
-        };
-      }),
-    );
-  }, []);
+  const applyPersistedToProjects = useCallback(
+    (projectId: string, hours: HoursByRow, reserveHours: number) => {
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== projectId) return p;
+          return {
+            ...p,
+            hoursByRow: cloneHours(hours),
+            hours: Object.entries(hours).flatMap(([row_key, weeks]) =>
+              Object.entries(weeks).map(([week_start_date, h]) => ({
+                row_key,
+                week_start_date,
+                hours: h,
+              })),
+            ),
+            forecast: p.forecast
+              ? { ...p.forecast, reserve_hours: reserveHours }
+              : p.forecast,
+          };
+        }),
+      );
+    },
+    [],
+  );
 
   const flushSave = useCallback(
-    (opts?: { after?: () => void; projectId?: string; draftOverride?: HoursByRow }) => {
+    (opts?: {
+      after?: () => void;
+      projectId?: string;
+      draftOverride?: HoursByRow;
+      reserveOverride?: number;
+    }) => {
       clearAutosaveTimer();
       const projectId = opts?.projectId ?? editingIdRef.current;
       const edit = projectId ? projectEdits[projectId] : undefined;
       const currentDraft =
         opts?.draftOverride ?? (opts?.projectId ? edit?.draft : draftRef.current);
       const currentPersisted = opts?.projectId ? edit?.persisted : persistedRef.current;
+      const currentReserve =
+        opts?.reserveOverride ??
+        (opts?.projectId ? edit?.reserveHours : reserveHoursRef.current) ??
+        edit?.reserveHours ??
+        0;
+      const persistedReserve = edit?.persistedReserveHours ?? currentReserve;
       const epoch = saveEpochRef.current;
       if (!projectId || !currentDraft || !currentPersisted) {
         opts?.after?.();
         return;
       }
       const cells = diffForecastCells(currentPersisted, currentDraft);
-      if (cells.length === 0) {
+      const reserveChanged = Math.round(currentReserve) !== Math.round(persistedReserve);
+      if (cells.length === 0 && !reserveChanged) {
         setSaveStatus("saved");
         opts?.after?.();
         return;
@@ -487,6 +487,7 @@ export function ForecastStudio({
             weekStartDate: c.weekStartDate,
             hours: c.hours,
           })),
+          reserveHours: Math.max(0, Math.round(currentReserve)),
         });
         if (epoch !== saveEpochRef.current) {
           opts?.after?.();
@@ -498,17 +499,25 @@ export function ForecastStudio({
           return;
         }
         const saved = cloneHours(currentDraft);
+        const savedReserve = Math.max(0, Math.round(currentReserve));
         persistedRef.current = saved;
         draftRef.current = saved;
+        reserveHoursRef.current = savedReserve;
         setProjectEdits((prev) => {
           const entry = prev[projectId];
           if (!entry) return prev;
           return {
             ...prev,
-            [projectId]: { ...entry, persisted: saved, draft: saved },
+            [projectId]: {
+              ...entry,
+              persisted: saved,
+              draft: saved,
+              persistedReserveHours: savedReserve,
+              reserveHours: savedReserve,
+            },
           };
         });
-        applyPersistedToProjects(projectId, saved);
+        applyPersistedToProjects(projectId, saved, savedReserve);
         setSaveStatus("saved");
         setSaveError(null);
         router.refresh();
@@ -533,7 +542,9 @@ export function ForecastStudio({
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       const anyDirty = Object.values(projectEdits).some(
-        (edit) => diffForecastCells(edit.persisted, edit.draft).length > 0,
+        (edit) =>
+          diffForecastCells(edit.persisted, edit.draft).length > 0 ||
+          Math.round(edit.persistedReserveHours) !== Math.round(edit.reserveHours),
       );
       const saving = autosaveTimerRef.current != null;
       if (anyDirty || saving) {
@@ -567,6 +578,7 @@ export function ForecastStudio({
     editingIdRef.current = null;
     persistedRef.current = null;
     draftRef.current = null;
+    reserveHoursRef.current = null;
     setActiveProjectId(null);
     setActiveRowKey(null);
     setProjectEdits({});
@@ -577,6 +589,7 @@ export function ForecastStudio({
 
   function activateProject(project: ForecastProjectDTO, rowKey: "project" | string) {
     const hours = cloneHours(project.hoursByRow);
+    const reserve = projectReserveHours(project);
     setProjectEdits((prev) => {
       const next = prev[project.id]
         ? prev
@@ -586,12 +599,16 @@ export function ForecastStudio({
               sessionBaseline: cloneHours(hours),
               persisted: cloneHours(hours),
               draft: cloneHours(hours),
+              sessionBaselineReserveHours: reserve,
+              persistedReserveHours: reserve,
+              reserveHours: reserve,
             },
           };
       const edit = next[project.id]!;
       editingIdRef.current = project.id;
       draftRef.current = edit.draft;
       persistedRef.current = edit.persisted;
+      reserveHoursRef.current = edit.reserveHours;
       return next;
     });
     setActiveProjectId(project.id);
@@ -609,9 +626,16 @@ export function ForecastStudio({
       const entry = prev[activeProjectId];
       if (!entry) return prev;
       const persisted = cloneHours(entry.persisted);
+      const reserve = entry.persistedReserveHours;
+      draftRef.current = persisted;
+      reserveHoursRef.current = reserve;
       return {
         ...prev,
-        [activeProjectId]: { ...entry, draft: persisted },
+        [activeProjectId]: {
+          ...entry,
+          draft: persisted,
+          reserveHours: reserve,
+        },
       };
     });
   }
@@ -632,7 +656,9 @@ export function ForecastStudio({
       const activeEdit = projectEdits[activeProjectId];
       const hasDirty =
         activeEdit &&
-        diffForecastCells(activeEdit.persisted, activeEdit.draft).length > 0;
+        (diffForecastCells(activeEdit.persisted, activeEdit.draft).length > 0 ||
+          Math.round(activeEdit.persistedReserveHours) !==
+            Math.round(activeEdit.reserveHours));
       if (hasDirty || autosaveTimerRef.current != null || saveStatus === "saving") {
         setPendingLeaveAction(() => () => activateProject(project, rowKey));
         setDiscardOpen(true);
@@ -648,12 +674,14 @@ export function ForecastStudio({
 
   const revertCellToSessionOriginal = useCallback(
     (project: ForecastProjectDTO, rowKey: "project" | string, weekStart: string) => {
-      const sessionBaseline = projectEdits[project.id]?.sessionBaseline;
-      if (!sessionBaseline) return;
+      const session = projectEdits[project.id];
+      const sessionBaseline = session?.sessionBaseline;
+      if (!sessionBaseline || !session) return;
 
       const writable = projectWritableWeeks(project, sharedWeeks, currentSunday);
-      const bankWeekStarts = forecastBankWeekStarts(writable, project.phases);
-      const base = cloneHours(projectEdits[project.id]?.draft ?? project.hoursByRow);
+      const base = cloneHours(session.draft);
+      const estimated = sumEstimatedRoundedHours(project.integrations);
+      const actuals = sumActualsConsumedHours(project.integrations, project.actualsByRowKey);
 
       let sessionValue: number;
       if (rowKey === "project") {
@@ -684,42 +712,61 @@ export function ForecastStudio({
       setLastEditedCellKey(cellKey);
 
       let nextDraft: HoursByRow;
+      let nextReserve: number;
       if (rowKey === "project") {
         const keys = childRowKeys(project);
-        nextDraft = redistributeProjectTotalAfterEdit({
+        const result = applyForecastProjectTotalEdit({
           hoursByRow: base,
           rowKeys: keys,
           editedWeekStart: weekStart,
           nextTotalHours: sessionValue,
           currentSundayWeek: currentSunday,
           weekStarts: writable,
-          bankWeekStarts,
+          reserveHours: session.reserveHours,
+          estimated,
+          actuals,
         });
+        nextDraft = result.hoursByRow;
+        nextReserve = result.reserveHours;
       } else {
         const rowHours = { ...(base[rowKey] ?? {}) };
-        const nextRow = redistributeForecastAfterEdit({
+        const projectForecastTotal = sumRemainingForecastHours(base, currentSunday);
+        const result = applyForecastRowEdit({
           hoursByWeek: rowHours,
           editedWeekStart: weekStart,
           nextHours: sessionValue,
           currentSundayWeek: currentSunday,
           weekStarts: writable,
-          bankWeekStarts,
+          reserveHours: session.reserveHours,
+          projectForecastTotal,
+          estimated,
+          actuals,
         });
-        nextDraft = { ...base, [rowKey]: nextRow };
+        nextDraft = { ...base, [rowKey]: result.hoursByWeek };
+        nextReserve = result.reserveHours;
       }
 
       draftRef.current = nextDraft;
+      reserveHoursRef.current = nextReserve;
       setProjectEdits((prev) => {
         const entry = prev[project.id];
         if (!entry) return prev;
-        return { ...prev, [project.id]: { ...entry, draft: nextDraft } };
+        return {
+          ...prev,
+          [project.id]: { ...entry, draft: nextDraft, reserveHours: nextReserve },
+        };
       });
       setLastEditedCellKey(null);
       if (activeProjectId === project.id) {
         draftRef.current = nextDraft;
+        reserveHoursRef.current = nextReserve;
         scheduleAutosave();
       } else {
-        flushSave({ projectId: project.id, draftOverride: nextDraft });
+        flushSave({
+          projectId: project.id,
+          draftOverride: nextDraft,
+          reserveOverride: nextReserve,
+        });
       }
     },
     [projectEdits, activeProjectId, sharedWeeks, currentSunday, scheduleAutosave, flushSave],
@@ -732,26 +779,44 @@ export function ForecastStudio({
       const cellKey = forecastCellKey(project.id, rowKey, weekStart);
       setLastEditedCellKey(cellKey);
       const writable = projectWritableWeeks(project, sharedWeeks, currentSunday);
-      const bankWeekStarts = forecastBankWeekStarts(writable, project.phases);
-      const base = cloneHours(projectEdits[project.id]?.draft ?? project.hoursByRow);
+      const entry = projectEdits[project.id];
+      const base = cloneHours(entry?.draft ?? project.hoursByRow);
+      const reserve = entry?.reserveHours ?? projectReserveHours(project);
+      const estimated = sumEstimatedRoundedHours(project.integrations);
+      const actuals = sumActualsConsumedHours(project.integrations, project.actualsByRowKey);
+      const projectForecastTotal = sumRemainingForecastHours(base, currentSunday);
       const rowHours = { ...(base[rowKey] ?? {}) };
-      const nextRow = redistributeForecastAfterEdit({
+      const result = applyForecastRowEdit({
         hoursByWeek: rowHours,
         editedWeekStart: weekStart,
         nextHours,
         currentSundayWeek: currentSunday,
         weekStarts: writable,
-        bankWeekStarts,
+        reserveHours: reserve,
+        projectForecastTotal,
+        estimated,
+        actuals,
       });
-      const nextDraft = { ...base, [rowKey]: nextRow };
+      const nextDraft = { ...base, [rowKey]: result.hoursByWeek };
       draftRef.current = nextDraft;
+      reserveHoursRef.current = result.reserveHours;
       setProjectEdits((prev) => {
-        const entry = prev[project.id] ?? {
+        const existing = prev[project.id] ?? {
           sessionBaseline: cloneHours(project.hoursByRow),
           persisted: cloneHours(project.hoursByRow),
           draft: cloneHours(project.hoursByRow),
+          sessionBaselineReserveHours: projectReserveHours(project),
+          persistedReserveHours: projectReserveHours(project),
+          reserveHours: projectReserveHours(project),
         };
-        return { ...prev, [project.id]: { ...entry, draft: nextDraft } };
+        return {
+          ...prev,
+          [project.id]: {
+            ...existing,
+            draft: nextDraft,
+            reserveHours: result.reserveHours,
+          },
+        };
       });
       scheduleAutosave();
     },
@@ -766,26 +831,42 @@ export function ForecastStudio({
       const cellKey = forecastCellKey(project.id, "project", weekStart);
       setLastEditedCellKey(cellKey);
       const writable = projectWritableWeeks(project, sharedWeeks, currentSunday);
-      const bankWeekStarts = forecastBankWeekStarts(writable, project.phases);
       const keys = childRowKeys(project);
-      const base = cloneHours(projectEdits[project.id]?.draft ?? project.hoursByRow);
-      const nextDraft = redistributeProjectTotalAfterEdit({
+      const entry = projectEdits[project.id];
+      const base = cloneHours(entry?.draft ?? project.hoursByRow);
+      const reserve = entry?.reserveHours ?? projectReserveHours(project);
+      const estimated = sumEstimatedRoundedHours(project.integrations);
+      const actuals = sumActualsConsumedHours(project.integrations, project.actualsByRowKey);
+      const result = applyForecastProjectTotalEdit({
         hoursByRow: base,
         rowKeys: keys,
         editedWeekStart: weekStart,
         nextTotalHours: nextTotal,
         currentSundayWeek: currentSunday,
         weekStarts: writable,
-        bankWeekStarts,
+        reserveHours: reserve,
+        estimated,
+        actuals,
       });
-      draftRef.current = nextDraft;
+      draftRef.current = result.hoursByRow;
+      reserveHoursRef.current = result.reserveHours;
       setProjectEdits((prev) => {
-        const entry = prev[project.id] ?? {
+        const existing = prev[project.id] ?? {
           sessionBaseline: cloneHours(project.hoursByRow),
           persisted: cloneHours(project.hoursByRow),
           draft: cloneHours(project.hoursByRow),
+          sessionBaselineReserveHours: projectReserveHours(project),
+          persistedReserveHours: projectReserveHours(project),
+          reserveHours: projectReserveHours(project),
         };
-        return { ...prev, [project.id]: { ...entry, draft: nextDraft } };
+        return {
+          ...prev,
+          [project.id]: {
+            ...existing,
+            draft: result.hoursByRow,
+            reserveHours: result.reserveHours,
+          },
+        };
       });
       scheduleAutosave();
     },
@@ -916,11 +997,7 @@ export function ForecastStudio({
                   All projects
                 </div>
                 <div className="mt-0.5 text-[11px] text-[var(--app-text-muted)]">
-                  Weekly total ·{" "}
-                  <span className="font-medium tabular-nums text-[var(--app-text)]">
-                    {formatSummaryHours(portfolioGrandTotal)}
-                  </span>{" "}
-                  remaining
+                  Weekly total
                 </div>
               </div>
               {renderTrackColResizeHandle()}
@@ -981,30 +1058,26 @@ export function ForecastStudio({
             : "this_week";
           const phaseSegments = buildForecastPhaseWeekSegments(sharedWeeks, project.phases);
           const phaseBoundaries = phaseBoundaryWeekStarts(phaseSegments);
-          const writable = projectWritableWeeks(project, sharedWeeks, currentSunday);
-          const bankWeekStarts = forecastBankWeekStarts(writable, project.phases);
 
-          let estimatedTotal = 0;
-          for (const integ of project.integrations) {
-            const h = Number(integ.estimatedEffortHours);
-            if (Number.isFinite(h) && h > 0) estimatedTotal += h;
-          }
-          let actualsTotal = 0;
-          for (const v of Object.values(project.actualsByRowKey)) {
-            if (Number.isFinite(v) && v > 0) actualsTotal += v;
-          }
+          const estimatedTotal = sumEstimatedRoundedHours(project.integrations);
+          const actualsTotal = sumActualsConsumedHours(
+            project.integrations,
+            project.actualsByRowKey,
+          );
           const forecastRemainingTotal = sumRemainingForecastHours(displayHours, currentSunday);
           const originalForecastTotal = sumRemainingForecastHours(sessionHours, currentSunday);
           const showSessionTotals = hasStudioSession;
-          const forecastTotalChanged =
-            showSessionTotals && forecastRemainingTotal !== originalForecastTotal;
 
-          const liveBankedTotal = totalBankHours(
-            sumProjectBankHours(displayHours, rowKeys, bankWeekStarts),
-          );
-          const originalBankedTotal = totalBankHours(
-            sumProjectBankHours(sessionHours, rowKeys, bankWeekStarts),
-          );
+          const liveVariance = computeEstimateVariance({
+            estimated: estimatedTotal,
+            actuals: actualsTotal,
+            forecastTotal: forecastRemainingTotal,
+          });
+          const originalVariance = computeEstimateVariance({
+            estimated: estimatedTotal,
+            actuals: actualsTotal,
+            forecastTotal: originalForecastTotal,
+          });
 
           function sessionBaselineHoursForCell(
             rowKey: "project" | string,
@@ -1036,8 +1109,8 @@ export function ForecastStudio({
             };
           }
 
-          const bankedSummary = hasForecast
-            ? computeForecastBankedSummary({
+          const pastPhaseSummary = hasForecast
+            ? computeForecastPastPhaseSummary({
                 phases: project.phases,
                 integrations: project.integrations,
                 deploymentEffortByPhase,
@@ -1147,13 +1220,8 @@ export function ForecastStudio({
                           </div>
                           {showSessionTotals ? (
                             <div
-                              className={`truncate text-xs tabular-nums ${
-                                forecastTotalChanged
-                                  ? "rounded-md bg-[color-mix(in_oklab,var(--app-warning)_16%,var(--app-surface))] px-1 py-0.5 font-medium text-[var(--app-warning)]"
-                                  : "font-medium text-[var(--app-text)]"
-                              }`}
+                              className="truncate text-xs font-medium tabular-nums text-[var(--app-text)]"
                               title={`Original ${formatSummaryHours(originalForecastTotal)} → ${formatSummaryHours(forecastRemainingTotal)}`}
-                              role={forecastTotalChanged ? "status" : undefined}
                             >
                               <span className="line-through opacity-70">
                                 {formatSummaryHours(originalForecastTotal)}
@@ -1169,37 +1237,39 @@ export function ForecastStudio({
                             </div>
                           )}
                           <div className="mt-1 text-[10px] font-medium text-[var(--app-text-muted)]">
-                            Banked
+                            {liveVariance.kind === "under"
+                              ? "Under estimate"
+                              : liveVariance.kind === "over"
+                                ? "Over estimate"
+                                : "Estimate"}
                           </div>
-                          {showSessionTotals ? (
+                          {showSessionTotals &&
+                          originalVariance.label !== liveVariance.label ? (
                             <div
-                              className="flex min-w-0 items-center gap-1 truncate text-xs font-medium tabular-nums text-[var(--app-text)]"
-                              title={`Original ${formatSummaryHours(originalBankedTotal)} → ${formatSummaryHours(liveBankedTotal)}`}
+                              className={`flex min-w-0 items-center gap-1 truncate text-xs font-medium tabular-nums ${
+                                liveVariance.kind === "over"
+                                  ? "rounded-md bg-[color-mix(in_oklab,var(--app-warning)_16%,var(--app-surface))] px-1 py-0.5 text-[var(--app-warning)]"
+                                  : "text-[var(--app-text)]"
+                              }`}
+                              title={`Original ${originalVariance.label} → ${liveVariance.label}`}
+                              role={liveVariance.kind === "over" ? "status" : undefined}
                             >
                               <span className="min-w-0 truncate">
                                 <span className="line-through opacity-70">
-                                  {formatSummaryHours(originalBankedTotal)}
+                                  {originalVariance.kind === "on"
+                                    ? "0h"
+                                    : formatSummaryHours(originalVariance.absHours)}
                                 </span>
                                 {" → "}
-                                <span>{formatSummaryHours(liveBankedTotal)}</span>
+                                <span>
+                                  {liveVariance.kind === "on"
+                                    ? "0h"
+                                    : formatSummaryHours(liveVariance.absHours)}
+                                </span>
                               </span>
-                              {bankedSummary ? (
-                                <ForecastBankedSummaryPanel
-                                  summary={bankedSummary}
-                                  inline
-                                  valueOnly
-                                  hideValue
-                                />
-                              ) : null}
-                            </div>
-                          ) : liveBankedTotal > 0 || (bankedSummary?.bankedHours ?? 0) > 0 ? (
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs font-medium tabular-nums text-[var(--app-text)]">
-                                {formatSummaryHours(liveBankedTotal)}
-                              </span>
-                              {bankedSummary ? (
-                                <ForecastBankedSummaryPanel
-                                  summary={bankedSummary}
+                              {pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
+                                <ForecastEstimateVariancePanel
+                                  summary={pastPhaseSummary}
                                   inline
                                   valueOnly
                                   hideValue
@@ -1207,9 +1277,34 @@ export function ForecastStudio({
                               ) : null}
                             </div>
                           ) : (
-                            <span className="text-xs font-medium tabular-nums text-[var(--app-text)]">
-                              0h
-                            </span>
+                            <div
+                              className={`flex items-center gap-1 ${
+                                liveVariance.kind === "over"
+                                  ? "rounded-md bg-[color-mix(in_oklab,var(--app-warning)_16%,var(--app-surface))] px-1 py-0.5"
+                                  : ""
+                              }`}
+                            >
+                              <span
+                                className={`text-xs font-medium tabular-nums ${
+                                  liveVariance.kind === "over"
+                                    ? "text-[var(--app-warning)]"
+                                    : "text-[var(--app-text)]"
+                                }`}
+                                title={liveVariance.label}
+                              >
+                                {liveVariance.kind === "on"
+                                  ? "0h"
+                                  : formatSummaryHours(liveVariance.absHours)}
+                              </span>
+                              {pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
+                                <ForecastEstimateVariancePanel
+                                  summary={pastPhaseSummary}
+                                  inline
+                                  valueOnly
+                                  hideValue
+                                />
+                              ) : null}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1293,8 +1388,6 @@ export function ForecastStudio({
                       0,
                       sumRowRemainingHours(sessionHours[rowKey], currentSunday),
                     );
-                    const rowTotalChanged =
-                      showSessionTotals && rowHours !== rowOriginal;
                     const showRowDelta =
                       showSessionTotals &&
                       rowHoursDiffer(displayHours[rowKey], sessionHours[rowKey], sharedWeeks);
@@ -1322,18 +1415,14 @@ export function ForecastStudio({
                               {label}
                             </span>
                             {showRowDelta ? (
-                              <div
-                                className={`mt-0.5 truncate text-[10px] tabular-nums ${
-                                  rowTotalChanged
-                                    ? "font-medium text-[var(--app-warning)]"
-                                    : "text-[var(--app-text-muted)]"
-                                }`}
-                              >
+                              <div className="mt-0.5 truncate text-[10px] tabular-nums text-[var(--app-text-muted)]">
                                 <span className="line-through opacity-70">
                                   {formatSummaryHours(rowOriginal)}
                                 </span>
                                 {" → "}
-                                <span className="font-medium">{formatSummaryHours(rowHours)}</span>
+                                <span className="font-medium text-[var(--app-text)]">
+                                  {formatSummaryHours(rowHours)}
+                                </span>
                               </div>
                             ) : null}
                           </div>
@@ -1410,6 +1499,9 @@ export function ForecastStudio({
           deploymentEffortByPhase={deploymentEffortByPhase}
           defaultPmPercent={generateFor.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT}
           defaultSpreadMode={generateFor.forecast?.spread_mode ?? "even"}
+          defaultIncludePastPhaseHours={
+            generateFor.forecast?.include_past_phases_in_spread ?? false
+          }
           hasExistingForecast={generateFor.forecast != null}
           todayIso={todayIso}
           onClose={() => setGenerateFor(null)}
@@ -1427,6 +1519,7 @@ export function ForecastStudio({
               editingIdRef.current = null;
               draftRef.current = null;
               persistedRef.current = null;
+              reserveHoursRef.current = null;
             }
             if (project) {
               setProjects((prev) => prev.map((p) => (p.id === project.id ? project : p)));

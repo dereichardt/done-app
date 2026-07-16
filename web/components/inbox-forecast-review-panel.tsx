@@ -11,12 +11,13 @@ import {
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
   PM_FORECAST_ROW_KEY,
+  applyForecastProjectTotalEdit,
   currentSundayWeekYmd,
   diffForecastCells,
-  forecastBankWeekStarts,
   formatForecastSundayDate,
   projectTotalsByWeek,
-  redistributeProjectTotalAfterEdit,
+  sumActualsConsumedHours,
+  sumEstimatedRoundedHours,
 } from "@/lib/project-forecast";
 import { sundayWeekStartsInclusive } from "@/lib/project-weekly-effort";
 import { addDaysYmd } from "@/lib/zoned-datetime";
@@ -58,6 +59,10 @@ function projectWritableWeeks(
   );
 }
 
+function projectReserveHours(project: ForecastProjectDTO): number {
+  return Math.max(0, Math.round(project.forecast?.reserve_hours ?? 0));
+}
+
 function reviewWeekAxis(currentSunday: string): string[] {
   // Current week (read-only) + next 4 Sundays (editable)
   return Array.from({ length: 5 }, (_, i) => addDaysYmd(currentSunday, i * 7));
@@ -75,10 +80,16 @@ export function InboxForecastReviewPanel({
   const [projects, setProjects] = useState<ForecastProjectDTO[]>([]);
   const [drafts, setDrafts] = useState<Record<string, HoursByRow>>({});
   const [persisted, setPersisted] = useState<Record<string, HoursByRow>>({});
+  const [reserveByProject, setReserveByProject] = useState<Record<string, number>>({});
+  const [persistedReserveByProject, setPersistedReserveByProject] = useState<
+    Record<string, number>
+  >({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const draftsRef = useRef(drafts);
   const persistedRef = useRef(persisted);
+  const reserveRef = useRef(reserveByProject);
+  const persistedReserveRef = useRef(persistedReserveByProject);
   const todayIsoRef = useRef(todayIso);
 
   useEffect(() => {
@@ -87,6 +98,12 @@ export function InboxForecastReviewPanel({
   useEffect(() => {
     persistedRef.current = persisted;
   }, [persisted]);
+  useEffect(() => {
+    reserveRef.current = reserveByProject;
+  }, [reserveByProject]);
+  useEffect(() => {
+    persistedReserveRef.current = persistedReserveByProject;
+  }, [persistedReserveByProject]);
   useEffect(() => {
     todayIsoRef.current = todayIso;
   }, [todayIso]);
@@ -104,12 +121,16 @@ export function InboxForecastReviewPanel({
       setProjects(res.projects);
       const nextDrafts: Record<string, HoursByRow> = {};
       const nextPersisted: Record<string, HoursByRow> = {};
+      const nextReserve: Record<string, number> = {};
       for (const p of res.projects) {
         nextDrafts[p.id] = cloneHours(p.hoursByRow);
         nextPersisted[p.id] = cloneHours(p.hoursByRow);
+        nextReserve[p.id] = projectReserveHours(p);
       }
       setDrafts(nextDrafts);
       setPersisted(nextPersisted);
+      setReserveByProject(nextReserve);
+      setPersistedReserveByProject({ ...nextReserve });
       setLoading(false);
     });
     return () => {
@@ -145,19 +166,28 @@ export function InboxForecastReviewPanel({
       );
       if (!reviewWritable.includes(weekStart)) return;
 
-      const bankWeekStarts = forecastBankWeekStarts(reviewWritable, project.phases);
       const base = cloneHours(draftsRef.current[project.id] ?? project.hoursByRow);
       const keys = childRowKeys(project);
-      const nextDraft = redistributeProjectTotalAfterEdit({
+      const reserve =
+        reserveRef.current[project.id] ?? projectReserveHours(project);
+      const estimated = sumEstimatedRoundedHours(project.integrations);
+      const actuals = sumActualsConsumedHours(
+        project.integrations,
+        project.actualsByRowKey,
+      );
+      const result = applyForecastProjectTotalEdit({
         hoursByRow: base,
         rowKeys: keys,
         editedWeekStart: weekStart,
         nextTotalHours: nextTotal,
         currentSundayWeek: currentSunday,
         weekStarts: reviewWritable,
-        bankWeekStarts,
+        reserveHours: reserve,
+        estimated,
+        actuals,
       });
-      setDrafts((prev) => ({ ...prev, [project.id]: nextDraft }));
+      setDrafts((prev) => ({ ...prev, [project.id]: result.hoursByRow }));
+      setReserveByProject((prev) => ({ ...prev, [project.id]: result.reserveHours }));
     },
     [currentSunday, todayIso, weeks],
   );
@@ -172,7 +202,11 @@ export function InboxForecastReviewPanel({
       const base = persistedRef.current[p.id];
       if (!draft || !base) continue;
       const cells = diffForecastCells(base, draft);
-      if (cells.length === 0) continue;
+      const reserve = reserveRef.current[p.id] ?? projectReserveHours(p);
+      const persistedReserve =
+        persistedReserveRef.current[p.id] ?? projectReserveHours(p);
+      const reserveChanged = Math.round(reserve) !== Math.round(persistedReserve);
+      if (cells.length === 0 && !reserveChanged) continue;
       const res = await saveProjectForecastDraft(p.id, {
         todayIso: iso,
         cells: cells.map((c) => ({
@@ -180,9 +214,11 @@ export function InboxForecastReviewPanel({
           weekStartDate: c.weekStartDate,
           hours: c.hours,
         })),
+        reserveHours: Math.max(0, Math.round(reserve)),
       });
       if (res.error) return { error: res.error };
       setPersisted((prev) => ({ ...prev, [p.id]: cloneHours(draft) }));
+      setPersistedReserveByProject((prev) => ({ ...prev, [p.id]: reserve }));
     }
     return {};
   }, [projects]);

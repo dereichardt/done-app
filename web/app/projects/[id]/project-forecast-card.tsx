@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ForecastBankedSummaryPanel } from "@/components/forecast-banked-summary";
+import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
 import { GenerateForecastDialog } from "@/components/generate-forecast-dialog";
 import {
   formatLocalYmd,
@@ -11,10 +11,13 @@ import {
   parseLocalYmd,
 } from "@/lib/integration-effort-buckets";
 import {
-  computeForecastBankedSummary,
+  computeEstimateVariance,
+  computeForecastPastPhaseSummary,
   currentSundayWeekYmd,
   forecastPrerequisites,
   projectTotalsByWeek,
+  sumActualsConsumedHours,
+  sumEstimatedRoundedHours,
   DEFAULT_FORECAST_PM_PERCENT,
 } from "@/lib/project-forecast";
 import { formatSundayWeekLabel } from "@/lib/project-weekly-effort";
@@ -74,22 +77,15 @@ export function ProjectForecastCard({
     [project.hoursByRow, previewWeeks],
   );
 
-  const estimatedTotal = useMemo(() => {
-    let sum = 0;
-    for (const integ of project.integrations) {
-      const h = Number(integ.estimatedEffortHours);
-      if (Number.isFinite(h) && h > 0) sum += h;
-    }
-    return sum;
-  }, [project.integrations]);
+  const estimatedTotal = useMemo(
+    () => sumEstimatedRoundedHours(project.integrations),
+    [project.integrations],
+  );
 
-  const actualsTotal = useMemo(() => {
-    let sum = 0;
-    for (const v of Object.values(project.actualsByRowKey)) {
-      if (Number.isFinite(v) && v > 0) sum += v;
-    }
-    return sum;
-  }, [project.actualsByRowKey]);
+  const actualsTotal = useMemo(
+    () => sumActualsConsumedHours(project.integrations, project.actualsByRowKey),
+    [project.integrations, project.actualsByRowKey],
+  );
 
   const forecastRemainingTotal = useMemo(() => {
     let sum = 0;
@@ -102,9 +98,19 @@ export function ProjectForecastCard({
     return Math.round(sum);
   }, [project.hoursByRow, currentSunday]);
 
-  const bankedSummary = useMemo(() => {
+  const variance = useMemo(
+    () =>
+      computeEstimateVariance({
+        estimated: estimatedTotal,
+        actuals: actualsTotal,
+        forecastTotal: forecastRemainingTotal,
+      }),
+    [estimatedTotal, actualsTotal, forecastRemainingTotal],
+  );
+
+  const pastPhaseSummary = useMemo(() => {
     if (!hasForecast) return null;
-    return computeForecastBankedSummary({
+    return computeForecastPastPhaseSummary({
       phases: project.phases,
       integrations: project.integrations,
       deploymentEffortByPhase,
@@ -122,8 +128,6 @@ export function ProjectForecastCard({
     deploymentEffortByPhase,
     todayIso,
   ]);
-
-  const bankedHours = bankedSummary?.bankedHours ?? 0;
 
   return (
     <section className="mt-10">
@@ -212,13 +216,32 @@ export function ProjectForecastCard({
               </div>
               <div className="flex min-w-[6.5rem] flex-1 flex-col gap-0.5 border-l border-[var(--app-border)] px-3 last:pr-0">
                 <span className="text-xs font-medium text-[var(--app-text-muted)]">
-                  Banked Hours
+                  {variance.kind === "under"
+                    ? "Under estimate"
+                    : variance.kind === "over"
+                      ? "Over estimate"
+                      : "Estimate"}
                 </span>
-                {bankedHours > 0 ? (
-                  <ForecastBankedSummaryPanel summary={bankedSummary} inline valueOnly />
-                ) : (
-                  <span className="text-sm font-medium tabular-nums text-[var(--app-text)]">0h</span>
-                )}
+                <div className="flex items-center gap-1">
+                  <span
+                    className={`text-sm font-medium tabular-nums ${
+                      variance.kind === "over"
+                        ? "text-[var(--app-warning)]"
+                        : "text-[var(--app-text)]"
+                    }`}
+                    title={variance.label}
+                  >
+                    {variance.kind === "on" ? "0h" : formatSummaryHours(variance.absHours)}
+                  </span>
+                  {pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
+                    <ForecastEstimateVariancePanel
+                      summary={pastPhaseSummary}
+                      inline
+                      valueOnly
+                      hideValue
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
@@ -235,6 +258,9 @@ export function ProjectForecastCard({
           deploymentEffortByPhase={deploymentEffortByPhase}
           defaultPmPercent={project.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT}
           defaultSpreadMode={project.forecast?.spread_mode ?? "even"}
+          defaultIncludePastPhaseHours={
+            project.forecast?.include_past_phases_in_spread ?? false
+          }
           hasExistingForecast={project.forecast != null}
           todayIso={todayIso}
           onClose={() => setShowGenerate(false)}

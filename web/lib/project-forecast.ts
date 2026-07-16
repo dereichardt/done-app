@@ -1,5 +1,5 @@
 /**
- * Pure helpers for project weekly hour forecasts (generate + edit redistribution).
+ * Pure helpers for project weekly hour forecasts (generate + reserve-aware edits).
  */
 
 import {
@@ -67,6 +67,11 @@ export type GenerateForecastInput = {
   startMode: ForecastStartMode;
   /** Even peanut-butter vs per-phase bell curve. */
   spreadMode?: ForecastSpreadMode;
+  /**
+   * When true, past-phase hours are peanut-buttered across remaining writable weeks.
+   * When false (default), they stay unallocated as reserve (under estimate).
+   */
+  includePastPhaseHours?: boolean;
   /** User-local today YYYY-MM-DD. */
   todayIso: string;
   /** Actual hours logged to date, keyed by rowKey (integration id or PM). */
@@ -78,8 +83,48 @@ export type GenerateForecastResult = {
   rows: ForecastRowHours[];
   integrationTargets: Record<string, number>;
   pmTarget: number;
+  /** Hours held off the grid (past-phase under estimate). */
+  reserveHours: number;
   error?: string;
 };
+
+/** estimated − actuals − forecastTotal. Positive = under estimate. */
+export type EstimateVariance = {
+  variance: number;
+  /** Absolute hours away from estimate (0 when on estimate). */
+  absHours: number;
+  kind: "under" | "over" | "on";
+  label: string;
+};
+
+export function computeEstimateVariance(input: {
+  estimated: number;
+  actuals: number;
+  forecastTotal: number;
+}): EstimateVariance {
+  const variance =
+    Math.round(input.estimated) -
+    Math.round(input.actuals) -
+    Math.round(input.forecastTotal);
+  const absHours = Math.abs(variance);
+  if (variance > 0) {
+    return {
+      variance,
+      absHours,
+      kind: "under",
+      label: `Under estimate by ${absHours}h`,
+    };
+  }
+  if (variance < 0) {
+    return {
+      variance,
+      absHours,
+      kind: "over",
+      label: `Over estimate by ${absHours}h`,
+    };
+  }
+  return { variance: 0, absHours: 0, kind: "on", label: "On estimate" };
+}
 
 function dateOnlyYmd(iso: string | null | undefined): string | null {
   if (iso == null || iso.trim() === "") return null;
@@ -87,9 +132,36 @@ function dateOnlyYmd(iso: string | null | undefined): string | null {
   return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
-function roundWholeHours(n: number): number {
+export function roundWholeHours(n: number): number {
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.round(n);
+}
+
+/** Sum of whole-hour integration estimates (same pool PM is carved from). */
+export function sumEstimatedRoundedHours(
+  integrations: ForecastIntegrationInput[],
+): number {
+  let sum = 0;
+  for (const integ of integrations) {
+    sum += roundWholeHours(Number(integ.estimatedEffortHours ?? 0));
+  }
+  return sum;
+}
+
+/**
+ * Actuals that reduce the project forecast budget: ceil per forecast row
+ * (integrations in the generate input + project management).
+ */
+export function sumActualsConsumedHours(
+  integrations: ForecastIntegrationInput[],
+  actualsByRowKey: Record<string, number>,
+): number {
+  let sum = 0;
+  for (const integ of integrations) {
+    sum += actualsHoursConsumed(Number(actualsByRowKey[integ.key] ?? 0));
+  }
+  sum += actualsHoursConsumed(Number(actualsByRowKey[PM_FORECAST_ROW_KEY] ?? 0));
+  return sum;
 }
 
 /** Largest-remainder allocation of `total` across `weights` (non-negative). */
@@ -399,7 +471,10 @@ export function forecastBankWeekStarts(
 export type SpreadRemainingResult = {
   hoursByWeekYmd: Record<string, number>;
   bankWeekStarts: string[];
+  /** Hours belonging to stages past the writable window. */
   bankedHours: number;
+  /** Past-phase hours not placed on the grid (when includePastPhaseHours is false). */
+  unallocatedHours: number;
 };
 
 function weekWeightsForPhase(input: {
@@ -433,8 +508,9 @@ function weekWeightsForPhase(input: {
 /**
  * Spread `remaining` whole hours across `writableWeeks` using deployment phase %.
  * Active stages keep their native settings % (not renormalized). Hours belonging to
- * stages already past the writable window are banked and placed on the last bank
- * week (end of Hypercare when available).
+ * stages already past the writable window are either peanut-buttered across the
+ * remaining writable weeks (`includePastPhaseHours: true`) or returned as
+ * `unallocatedHours` (default).
  */
 export function spreadRemainingAcrossWeeks(input: {
   remaining: number;
@@ -442,15 +518,18 @@ export function spreadRemainingAcrossWeeks(input: {
   phases: ForecastPhaseInput[];
   deploymentEffortByPhase: DeploymentEffortByPhase;
   spreadMode?: ForecastSpreadMode;
+  /** Default false — hold past-phase hours as unallocated reserve. */
+  includePastPhaseHours?: boolean;
 }): SpreadRemainingResult {
   const hoursByWeekYmd: Record<string, number> = {};
   for (const w of input.writableWeeks) hoursByWeekYmd[w] = 0;
 
   const spreadMode = input.spreadMode ?? DEFAULT_FORECAST_SPREAD_MODE;
+  const includePast = input.includePastPhaseHours ?? false;
   const bankWeekStarts = forecastBankWeekStarts(input.writableWeeks, input.phases);
   const remaining = Math.max(0, Math.round(input.remaining));
   if (remaining === 0 || input.writableWeeks.length === 0) {
-    return { hoursByWeekYmd, bankWeekStarts, bankedHours: 0 };
+    return { hoursByWeekYmd, bankWeekStarts, bankedHours: 0, unallocatedHours: 0 };
   }
 
   const phases = datedDefaultPhases(input.phases);
@@ -462,7 +541,7 @@ export function spreadRemainingAcrossWeeks(input: {
     input.writableWeeks.forEach((w, i) => {
       hoursByWeekYmd[w] = parts[i] ?? 0;
     });
-    return { hoursByWeekYmd, bankWeekStarts, bankedHours: 0 };
+    return { hoursByWeekYmd, bankWeekStarts, bankedHours: 0, unallocatedHours: 0 };
   }
 
   const isActive = (phase: { startYmd: string; endYmd: string }) =>
@@ -481,7 +560,7 @@ export function spreadRemainingAcrossWeeks(input: {
     input.writableWeeks.forEach((w, i) => {
       hoursByWeekYmd[w] = parts[i] ?? 0;
     });
-    return { hoursByWeekYmd, bankWeekStarts, bankedHours: 0 };
+    return { hoursByWeekYmd, bankWeekStarts, bankedHours: 0, unallocatedHours: 0 };
   }
 
   const allShares = allocateByLargestRemainder(remaining, allWeights);
@@ -508,16 +587,23 @@ export function spreadRemainingAcrossWeeks(input: {
     });
   }
 
-  if (bankedHours > 0) {
-    const bankWeeks =
-      bankWeekStarts.length > 0
-        ? bankWeekStarts
-        : [input.writableWeeks[input.writableWeeks.length - 1]];
-    const lastBankWeek = bankWeeks[bankWeeks.length - 1];
-    hoursByWeekYmd[lastBankWeek] = (hoursByWeekYmd[lastBankWeek] ?? 0) + bankedHours;
+  if (bankedHours > 0 && includePast) {
+    // Peanut-butter past-phase hours across the remaining project weeks.
+    const parts = allocateSparseOrLargestRemainder(
+      bankedHours,
+      input.writableWeeks.map(() => 1),
+    );
+    input.writableWeeks.forEach((w, i) => {
+      hoursByWeekYmd[w] = (hoursByWeekYmd[w] ?? 0) + (parts[i] ?? 0);
+    });
   }
 
-  return { hoursByWeekYmd, bankWeekStarts, bankedHours };
+  return {
+    hoursByWeekYmd,
+    bankWeekStarts,
+    bankedHours,
+    unallocatedHours: includePast ? 0 : bankedHours,
+  };
 }
 
 export function computeForecastTargets(
@@ -540,31 +626,97 @@ export function computeForecastTargets(
   return { integrationTargets, pmTarget };
 }
 
-export type ForecastBankedPhaseShare = {
+export type ForecastPastPhaseShare = {
   phase_key: DefaultPhaseKey;
   label: string;
   percent: number;
   hours: number;
 };
 
+/** @deprecated Prefer ForecastPastPhaseShare */
+export type ForecastBankedPhaseShare = ForecastPastPhaseShare;
+
 /**
- * Hours “banked” from stages that no longer overlap the forecast window.
- * Those stage shares sit at the end of Hypercare (last bank week) and are
- * drawn from first when manually adjusting earlier weeks.
+ * Hours from stages that no longer overlap the forecast window.
+ * Default generate holds these as reserve (under estimate); optional include
+ * peanut-butters them across the remaining writable weeks.
  */
-export type ForecastBankedSummary = {
+export type ForecastPastPhaseSummary = {
   remainingHours: number;
+  /** Alias for pastPhaseHours (compat). */
   bankedHours: number;
-  /** Remaining − banked (native share of still-active stages). */
+  pastPhaseHours: number;
+  /** Remaining − past-phase (native share of still-active stages). */
   activeNativeHours: number;
-  bankedPhases: ForecastBankedPhaseShare[];
-  activePhases: ForecastBankedPhaseShare[];
-  /** Hypercare (or fallback) weeks that form the bank pool; hours land on the last. */
+  bankedPhases: ForecastPastPhaseShare[];
+  pastPhases: ForecastPastPhaseShare[];
+  activePhases: ForecastPastPhaseShare[];
+  /** Hypercare (or fallback) weeks used when including past phases in spread. */
   bankWeekStarts: string[];
 };
 
+/** @deprecated Prefer ForecastPastPhaseSummary */
+export type ForecastBankedSummary = ForecastPastPhaseSummary;
+
 function phaseLabel(phaseKey: DefaultPhaseKey): string {
   return DEPLOYMENT_EFFORT_PHASES.find((p) => p.phase_key === phaseKey)?.label ?? phaseKey;
+}
+
+/**
+ * Project-level remaining hours, allocated across tracks by per-track headroom.
+ * Overage on one track reduces other tracks' (including PM) remaining so that
+ * Forecast + Actuals ≈ Estimated at the project level.
+ */
+export function allocateTrackRemainingHours(input: {
+  integrations: ForecastIntegrationInput[];
+  pmPercent: number;
+  actualsByRowKey: Record<string, number>;
+}): { trackKeys: string[]; trackRemaining: number[]; projectRemaining: number } {
+  const { integrationTargets, pmTarget } = computeForecastTargets(
+    input.integrations,
+    input.pmPercent,
+  );
+
+  const estimatedRounded = sumEstimatedRoundedHours(input.integrations);
+  const actualsConsumed = sumActualsConsumedHours(
+    input.integrations,
+    input.actualsByRowKey,
+  );
+  const projectRemaining = Math.max(0, estimatedRounded - actualsConsumed);
+
+  const trackKeys: string[] = [];
+  const headroom: number[] = [];
+  for (const integ of input.integrations) {
+    const target = integrationTargets[integ.key] ?? 0;
+    if (target <= 0 && !(Number(integ.estimatedEffortHours) > 0)) continue;
+    const actuals = actualsHoursConsumed(
+      Number(input.actualsByRowKey[integ.key] ?? 0),
+    );
+    trackKeys.push(integ.key);
+    headroom.push(Math.max(0, target - actuals));
+  }
+  {
+    const actuals = actualsHoursConsumed(
+      Number(input.actualsByRowKey[PM_FORECAST_ROW_KEY] ?? 0),
+    );
+    trackKeys.push(PM_FORECAST_ROW_KEY);
+    headroom.push(Math.max(0, pmTarget - actuals));
+  }
+
+  const headroomSum = headroom.reduce((a, b) => a + b, 0);
+  let trackRemaining: number[];
+  if (projectRemaining <= 0) {
+    trackRemaining = trackKeys.map(() => 0);
+  } else if (headroomSum <= 0) {
+    // Every track over — park remaining on the PM row so hours still land.
+    trackRemaining = trackKeys.map((key) =>
+      key === PM_FORECAST_ROW_KEY ? projectRemaining : 0,
+    );
+  } else {
+    trackRemaining = allocateByLargestRemainder(projectRemaining, headroom);
+  }
+
+  return { trackKeys, trackRemaining, projectRemaining };
 }
 
 function totalRemainingHours(input: {
@@ -572,25 +724,10 @@ function totalRemainingHours(input: {
   pmPercent: number;
   actualsByRowKey: Record<string, number>;
 }): number {
-  const { integrationTargets, pmTarget } = computeForecastTargets(
-    input.integrations,
-    input.pmPercent,
-  );
-  let remaining = 0;
-  for (const integ of input.integrations) {
-    const target = integrationTargets[integ.key] ?? 0;
-    if (target <= 0 && !(Number(integ.estimatedEffortHours) > 0)) continue;
-    const actuals = actualsHoursConsumed(Number(input.actualsByRowKey[integ.key] ?? 0));
-    remaining += Math.max(0, target - actuals);
-  }
-  const pmActuals = actualsHoursConsumed(
-    Number(input.actualsByRowKey[PM_FORECAST_ROW_KEY] ?? 0),
-  );
-  remaining += Math.max(0, pmTarget - pmActuals);
-  return remaining;
+  return allocateTrackRemainingHours(input).projectRemaining;
 }
 
-export function computeForecastBankedSummary(input: {
+export function computeForecastPastPhaseSummary(input: {
   phases: ForecastPhaseInput[];
   integrations: ForecastIntegrationInput[];
   deploymentEffortByPhase: DeploymentEffortByPhase;
@@ -598,7 +735,7 @@ export function computeForecastBankedSummary(input: {
   startMode: ForecastStartMode;
   todayIso: string;
   actualsByRowKey: Record<string, number>;
-}): ForecastBankedSummary | null {
+}): ForecastPastPhaseSummary | null {
   const span = timelineSpanFromPhases(input.phases);
   if (!span) return null;
 
@@ -615,8 +752,10 @@ export function computeForecastBankedSummary(input: {
     return {
       remainingHours,
       bankedHours: 0,
+      pastPhaseHours: 0,
       activeNativeHours: remainingHours,
       bankedPhases: [],
+      pastPhases: [],
       activePhases: [],
       bankWeekStarts,
     };
@@ -629,14 +768,14 @@ export function computeForecastBankedSummary(input: {
     });
 
   const active = phases.filter(isActive);
-  const banked = phases.filter((p) => !isActive(p));
+  const past = phases.filter((p) => !isActive(p));
 
   const allWeights = phases.map((p) => input.deploymentEffortByPhase[p.phase_key] ?? 0);
   const allShares = allocateByLargestRemainder(remainingHours, allWeights);
 
-  const bankedPhases: ForecastBankedPhaseShare[] = [];
-  const activePhases: ForecastBankedPhaseShare[] = [];
-  let bankedHours = 0;
+  const pastPhases: ForecastPastPhaseShare[] = [];
+  const activePhases: ForecastPastPhaseShare[] = [];
+  let pastPhaseHours = 0;
   let activeNativeHours = 0;
 
   phases.forEach((p, i) => {
@@ -648,9 +787,9 @@ export function computeForecastBankedSummary(input: {
       percent,
       hours,
     };
-    if (banked.some((b) => b.phase_key === p.phase_key)) {
-      bankedPhases.push(entry);
-      bankedHours += hours;
+    if (past.some((b) => b.phase_key === p.phase_key)) {
+      pastPhases.push(entry);
+      pastPhaseHours += hours;
     } else if (active.some((a) => a.phase_key === p.phase_key)) {
       activePhases.push(entry);
       activeNativeHours += hours;
@@ -659,12 +798,21 @@ export function computeForecastBankedSummary(input: {
 
   return {
     remainingHours,
-    bankedHours,
+    bankedHours: pastPhaseHours,
+    pastPhaseHours,
     activeNativeHours,
-    bankedPhases,
+    bankedPhases: pastPhases,
+    pastPhases,
     activePhases,
     bankWeekStarts,
   };
+}
+
+/** @deprecated Prefer computeForecastPastPhaseSummary */
+export function computeForecastBankedSummary(
+  input: Parameters<typeof computeForecastPastPhaseSummary>[0],
+): ForecastPastPhaseSummary | null {
+  return computeForecastPastPhaseSummary(input);
 }
 
 export function generateForecastHours(input: GenerateForecastInput): GenerateForecastResult {
@@ -675,6 +823,7 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
       rows: [],
       integrationTargets: {},
       pmTarget: 0,
+      reserveHours: 0,
       error: prereq.reason,
     };
   }
@@ -691,6 +840,7 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
       rows: [],
       integrationTargets: {},
       pmTarget: 0,
+      reserveHours: 0,
       error: "No current or future weeks remain in the project timeline.",
     };
   }
@@ -701,25 +851,16 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
   );
 
   const spreadMode = input.spreadMode ?? DEFAULT_FORECAST_SPREAD_MODE;
+  const includePastPhaseHours = input.includePastPhaseHours ?? false;
   const rows: ForecastRowHours[] = [];
+  let reserveHours = 0;
 
-  // Build per-track remaining (after actuals). Project total remaining = sum of these.
-  const trackKeys: string[] = [];
-  const trackRemaining: number[] = [];
-  for (const integ of input.integrations) {
-    const target = integrationTargets[integ.key] ?? 0;
-    if (target <= 0 && !(Number(integ.estimatedEffortHours) > 0)) continue;
-    const actuals = actualsHoursConsumed(Number(input.actualsByRowKey[integ.key] ?? 0));
-    trackKeys.push(integ.key);
-    trackRemaining.push(Math.max(0, target - actuals));
-  }
-  {
-    const actuals = actualsHoursConsumed(
-      Number(input.actualsByRowKey[PM_FORECAST_ROW_KEY] ?? 0),
-    );
-    trackKeys.push(PM_FORECAST_ROW_KEY);
-    trackRemaining.push(Math.max(0, pmTarget - actuals));
-  }
+  // Project-level remaining after actuals, then carve across tracks by headroom.
+  const { trackKeys, trackRemaining } = allocateTrackRemainingHours({
+    integrations: input.integrations,
+    pmPercent: input.pmPercent,
+    actualsByRowKey: input.actualsByRowKey,
+  });
 
   if (spreadMode === "even") {
     // Peanut-butter week totals first, then carve each week across tracks by
@@ -732,6 +873,7 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
       phases: input.phases,
       deploymentEffortByPhase: input.deploymentEffortByPhase,
       spreadMode: "even",
+      includePastPhaseHours,
     });
     const budgets = [...trackRemaining];
     const maps = trackKeys.map(() => {
@@ -748,7 +890,7 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
       if (H <= 0) continue;
       const weightSum = budgets.reduce((a, b) => a + Math.max(0, b), 0);
       if (weightSum <= 0) {
-        if (dumpWeek) {
+        if (includePastPhaseHours && dumpWeek) {
           maps[0][dumpWeek] = (maps[0][dumpWeek] ?? 0) + H;
         }
         continue;
@@ -763,12 +905,15 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
     }
 
     for (let i = 0; i < trackKeys.length; i++) {
-      if (budgets[i] > 0 && dumpWeek) {
-        maps[i][dumpWeek] = (maps[i][dumpWeek] ?? 0) + budgets[i];
+      if (budgets[i] > 0) {
+        if (includePastPhaseHours && dumpWeek) {
+          maps[i][dumpWeek] = (maps[i][dumpWeek] ?? 0) + budgets[i];
+        }
         budgets[i] = 0;
       }
       rows.push({ rowKey: trackKeys[i], hoursByWeekYmd: maps[i] });
     }
+    reserveHours = includePastPhaseHours ? 0 : spread.unallocatedHours;
   } else {
     // Bell: shape each track independently so phase peaks stay intentional.
     for (let i = 0; i < trackKeys.length; i++) {
@@ -778,7 +923,9 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
         phases: input.phases,
         deploymentEffortByPhase: input.deploymentEffortByPhase,
         spreadMode: "bell",
+        includePastPhaseHours,
       });
+      reserveHours += spread.unallocatedHours;
       rows.push({ rowKey: trackKeys[i], hoursByWeekYmd: spread.hoursByWeekYmd });
     }
   }
@@ -791,159 +938,112 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
     rows,
     integrationTargets,
     pmTarget,
+    reserveHours,
   };
 }
 
 /**
- * After editing week `editedWeekStart` to `nextHours`, redistribute delta so the
- * sum of editable weeks stays constant. Prefer bank weeks (end of Hypercare) first
- * when taking or returning hours — deplete / refill the last bank week first.
+ * Edit a single row week without redistributing across other weeks.
+ * Increases draw from reserve first; decreases return to reserve when not over estimate.
  */
-export function redistributeForecastAfterEdit(input: {
+export function applyForecastRowEdit(input: {
   hoursByWeek: Record<string, number>;
   editedWeekStart: string;
   nextHours: number;
   currentSundayWeek: string;
   /** Ordered week starts (ascending). */
   weekStarts: string[];
-  /** Weeks that hold banked hours (Hypercare pool; hours sit on the last). */
-  bankWeekStarts?: string[];
-}): Record<string, number> {
+  reserveHours: number;
+  /** Project-level totals for variance (all rows, editable weeks). */
+  projectForecastTotal: number;
+  estimated: number;
+  actuals: number;
+}): { hoursByWeek: Record<string, number>; reserveHours: number } {
   const editable = input.weekStarts.filter((w) => w >= input.currentSundayWeek);
-  if (editable.length === 0) return { ...input.hoursByWeek };
-  if (!editable.includes(input.editedWeekStart)) return { ...input.hoursByWeek };
+  if (editable.length === 0 || !editable.includes(input.editedWeekStart)) {
+    return {
+      hoursByWeek: { ...input.hoursByWeek },
+      reserveHours: Math.max(0, Math.round(input.reserveHours)),
+    };
+  }
 
   const out: Record<string, number> = { ...input.hoursByWeek };
   for (const w of editable) {
     if (out[w] == null) out[w] = 0;
   }
 
-  const editableTotal = editable.reduce((s, w) => s + Math.max(0, Math.round(out[w] ?? 0)), 0);
   const desired = Math.max(0, Math.round(input.nextHours));
-  const idx = editable.indexOf(input.editedWeekStart);
-  const later = editable.slice(idx + 1);
-
-  if (later.length === 0) {
-    out[input.editedWeekStart] = Math.min(desired, editableTotal);
-    return out;
+  const oldEdited = Math.max(0, Math.round(out[input.editedWeekStart] ?? 0));
+  const delta = desired - oldEdited;
+  let reserve = Math.max(0, Math.round(input.reserveHours));
+  if (delta === 0) {
+    return { hoursByWeek: out, reserveHours: reserve };
   }
 
-  const othersBefore = editable
-    .slice(0, idx)
-    .reduce((s, w) => s + Math.max(0, Math.round(out[w] ?? 0)), 0);
-  const maxForEdited = editableTotal - othersBefore;
-  const clamped = Math.min(desired, maxForEdited);
-  const oldEdited = Math.max(0, Math.round(out[input.editedWeekStart] ?? 0));
-  const delta = clamped - oldEdited;
-  out[input.editedWeekStart] = clamped;
+  const varianceBefore = computeEstimateVariance({
+    estimated: input.estimated,
+    actuals: input.actuals,
+    forecastTotal: input.projectForecastTotal,
+  }).variance;
 
-  if (delta === 0) return out;
-
-  const bankSet = new Set(input.bankWeekStarts ?? []);
-  const bankLater = later.filter((w) => bankSet.has(w));
-  const otherLater = later.filter((w) => !bankSet.has(w));
+  out[input.editedWeekStart] = desired;
 
   if (delta > 0) {
-    // Increase edited week: draw from last bank week first, then other later weeks.
-    let need = delta;
-    need = takeHoursFromWeeksEndFirst(out, bankLater, need);
-    if (need > 0) need = takeHoursFromWeeks(out, otherLater, need);
-    if (need > 0) {
-      out[input.editedWeekStart] = clamped - need;
-    }
-  } else {
-    // Decrease edited week: return hours to last bank week first, then other later weeks.
-    let give = -delta;
-    give = addHoursToWeeksEndFirst(out, bankLater, give);
-    if (give > 0) addHoursToWeeks(out, otherLater, give);
+    const fromReserve = Math.min(delta, reserve);
+    reserve -= fromReserve;
+  } else if (varianceBefore >= 0) {
+    reserve += -delta;
   }
 
-  return out;
-}
-
-/** Remove up to `need` hours from `weeks` end-first (last week depleted first). */
-function takeHoursFromWeeksEndFirst(
-  hoursByWeek: Record<string, number>,
-  weeks: string[],
-  need: number,
-): number {
-  if (need <= 0 || weeks.length === 0) return need;
-  let remaining = need;
-  for (let i = weeks.length - 1; i >= 0 && remaining > 0; i--) {
-    const w = weeks[i];
-    const available = Math.max(0, Math.round(hoursByWeek[w] ?? 0));
-    const take = Math.min(remaining, available);
-    hoursByWeek[w] = available - take;
-    remaining -= take;
-  }
-  return remaining;
-}
-
-/** Add `give` hours onto the last week in `weeks`. */
-function addHoursToWeeksEndFirst(
-  hoursByWeek: Record<string, number>,
-  weeks: string[],
-  give: number,
-): number {
-  if (give <= 0 || weeks.length === 0) return give;
-  const last = weeks[weeks.length - 1];
-  hoursByWeek[last] = Math.max(0, Math.round(hoursByWeek[last] ?? 0)) + give;
-  return 0;
-}
-
-/** Remove up to `need` hours from `weeks` (prefer proportional to current hours). Returns unpaid remainder. */
-function takeHoursFromWeeks(
-  hoursByWeek: Record<string, number>,
-  weeks: string[],
-  need: number,
-): number {
-  if (need <= 0 || weeks.length === 0) return need;
-  const current = weeks.map((w) => Math.max(0, Math.round(hoursByWeek[w] ?? 0)));
-  const sum = current.reduce((a, b) => a + b, 0);
-  const take = Math.min(need, sum);
-  if (take <= 0) return need;
-  const weights = sum > 0 ? current : weeks.map(() => 1);
-  const next = allocateByLargestRemainder(sum - take, weights);
-  weeks.forEach((w, i) => {
-    hoursByWeek[w] = next[i] ?? 0;
-  });
-  return need - take;
-}
-
-/** Add `give` hours into `weeks` (proportional when they already have hours). Returns unplaced remainder. */
-function addHoursToWeeks(
-  hoursByWeek: Record<string, number>,
-  weeks: string[],
-  give: number,
-): number {
-  if (give <= 0 || weeks.length === 0) return give;
-  const current = weeks.map((w) => Math.max(0, Math.round(hoursByWeek[w] ?? 0)));
-  const sum = current.reduce((a, b) => a + b, 0);
-  const weights = sum > 0 ? current : weeks.map(() => 1);
-  const next = allocateByLargestRemainder(sum + give, weights);
-  weeks.forEach((w, i) => {
-    hoursByWeek[w] = next[i] ?? 0;
-  });
-  return 0;
+  return { hoursByWeek: out, reserveHours: reserve };
 }
 
 /**
- * Edit project weekly total for `editedWeekStart`; split that week across rows by current share,
- * then rebalance each row's later weeks (bank first) to conserve that row's editable total.
+ * @deprecated Prefer applyForecastRowEdit — conserved redistribution is no longer used in studio.
  */
-export function redistributeProjectTotalAfterEdit(input: {
-  /** rowKey → week → hours */
+export function redistributeForecastAfterEdit(input: {
+  hoursByWeek: Record<string, number>;
+  editedWeekStart: string;
+  nextHours: number;
+  currentSundayWeek: string;
+  weekStarts: string[];
+  bankWeekStarts?: string[];
+}): Record<string, number> {
+  // Thin wrapper: edit the week only (no cross-week conservation).
+  return applyForecastRowEdit({
+    hoursByWeek: input.hoursByWeek,
+    editedWeekStart: input.editedWeekStart,
+    nextHours: input.nextHours,
+    currentSundayWeek: input.currentSundayWeek,
+    weekStarts: input.weekStarts,
+    reserveHours: 0,
+    projectForecastTotal: 0,
+    estimated: 0,
+    actuals: 0,
+  }).hoursByWeek;
+}
+
+/**
+ * Edit project weekly total for `editedWeekStart`; split that week across rows by
+ * current share. Does not rebalance other weeks. Draws from / returns to reserve.
+ */
+export function applyForecastProjectTotalEdit(input: {
   hoursByRow: Record<string, Record<string, number>>;
   rowKeys: string[];
   editedWeekStart: string;
   nextTotalHours: number;
   currentSundayWeek: string;
   weekStarts: string[];
-  bankWeekStarts?: string[];
-}): Record<string, Record<string, number>> {
+  reserveHours: number;
+  estimated: number;
+  actuals: number;
+}): { hoursByRow: Record<string, Record<string, number>>; reserveHours: number } {
   const editable = input.weekStarts.filter((w) => w >= input.currentSundayWeek);
   if (!editable.includes(input.editedWeekStart)) {
-    return structuredClone(input.hoursByRow);
+    return {
+      hoursByRow: structuredClone(input.hoursByRow),
+      reserveHours: Math.max(0, Math.round(input.reserveHours)),
+    };
   }
 
   const result: Record<string, Record<string, number>> = {};
@@ -952,38 +1052,72 @@ export function redistributeProjectTotalAfterEdit(input: {
   }
 
   const desired = Math.max(0, Math.round(input.nextTotalHours));
+  const oldWeekTotal = input.rowKeys.reduce(
+    (s, key) => s + Math.max(0, Math.round(result[key][input.editedWeekStart] ?? 0)),
+    0,
+  );
+  const delta = desired - oldWeekTotal;
 
-  const totalByWeek: Record<string, number> = {};
-  for (const w of editable) {
-    totalByWeek[w] = input.rowKeys.reduce(
-      (s, key) => s + Math.max(0, Math.round(result[key][w] ?? 0)),
-      0,
-    );
+  const projectForecastTotal = editable.reduce(
+    (sum, w) =>
+      sum +
+      input.rowKeys.reduce(
+        (s, key) => s + Math.max(0, Math.round(result[key][w] ?? 0)),
+        0,
+      ),
+    0,
+  );
+
+  let reserve = Math.max(0, Math.round(input.reserveHours));
+  const varianceBefore = computeEstimateVariance({
+    estimated: input.estimated,
+    actuals: input.actuals,
+    forecastTotal: projectForecastTotal,
+  }).variance;
+
+  if (delta !== 0) {
+    if (delta > 0) {
+      const fromReserve = Math.min(delta, reserve);
+      reserve -= fromReserve;
+    } else if (varianceBefore >= 0) {
+      reserve += -delta;
+    }
   }
-  const redistributedTotals = redistributeForecastAfterEdit({
-    hoursByWeek: totalByWeek,
-    editedWeekStart: input.editedWeekStart,
-    nextHours: desired,
-    currentSundayWeek: input.currentSundayWeek,
-    weekStarts: input.weekStarts,
-    bankWeekStarts: input.bankWeekStarts,
+
+  const shares = input.rowKeys.map((key) =>
+    Math.max(0, Math.round(result[key][input.editedWeekStart] ?? 0)),
+  );
+  const parts = allocateByLargestRemainder(desired, shares);
+  input.rowKeys.forEach((key, i) => {
+    result[key][input.editedWeekStart] = parts[i] ?? 0;
   });
 
-  for (const w of editable) {
-    const newTotal = Math.max(0, Math.round(redistributedTotals[w] ?? 0));
-    const oldWeekTotal = totalByWeek[w] ?? 0;
-    if (newTotal === oldWeekTotal && w !== input.editedWeekStart) continue;
+  return { hoursByRow: result, reserveHours: reserve };
+}
 
-    const shares = input.rowKeys.map((key) =>
-      Math.max(0, Math.round(result[key][w] ?? 0)),
-    );
-    const parts = allocateByLargestRemainder(newTotal, shares);
-    input.rowKeys.forEach((key, i) => {
-      result[key][w] = parts[i] ?? 0;
-    });
-  }
-
-  return result;
+/**
+ * @deprecated Prefer applyForecastProjectTotalEdit.
+ */
+export function redistributeProjectTotalAfterEdit(input: {
+  hoursByRow: Record<string, Record<string, number>>;
+  rowKeys: string[];
+  editedWeekStart: string;
+  nextTotalHours: number;
+  currentSundayWeek: string;
+  weekStarts: string[];
+  bankWeekStarts?: string[];
+}): Record<string, Record<string, number>> {
+  return applyForecastProjectTotalEdit({
+    hoursByRow: input.hoursByRow,
+    rowKeys: input.rowKeys,
+    editedWeekStart: input.editedWeekStart,
+    nextTotalHours: input.nextTotalHours,
+    currentSundayWeek: input.currentSundayWeek,
+    weekStarts: input.weekStarts,
+    reserveHours: 0,
+    estimated: 0,
+    actuals: 0,
+  }).hoursByRow;
 }
 
 export function diffForecastCells(

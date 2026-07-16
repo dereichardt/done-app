@@ -37,6 +37,7 @@ export async function generateProjectForecast(
     startMode: ForecastStartMode;
     pmPercent: number;
     spreadMode: ForecastSpreadMode;
+    includePastPhaseHours?: boolean;
     todayIso: string;
   },
 ): Promise<{ error?: string; project?: NonNullable<Awaited<ReturnType<typeof loadForecastProjectDTO>>> }> {
@@ -50,6 +51,7 @@ export async function generateProjectForecast(
   const pmPercent = Number(input.pmPercent);
   const startMode = input.startMode;
   const spreadMode = input.spreadMode;
+  const includePastPhaseHours = Boolean(input.includePastPhaseHours);
 
   if (!isValidYmd(todayIso)) return { error: "Invalid today date." };
   if (!isValidStartMode(startMode)) {
@@ -76,6 +78,7 @@ export async function generateProjectForecast(
     pmPercent,
     startMode,
     spreadMode,
+    includePastPhaseHours,
     todayIso,
     actualsByRowKey: dto.actualsByRowKey,
   });
@@ -89,6 +92,8 @@ export async function generateProjectForecast(
       start_date: startDate,
       pm_percent: pmPercent,
       spread_mode: spreadMode,
+      reserve_hours: generated.reserveHours,
+      include_past_phases_in_spread: includePastPhaseHours,
       generated_at: now,
       updated_at: now,
     },
@@ -147,6 +152,7 @@ export async function saveProjectForecastDraft(
   input: {
     todayIso: string;
     cells: Array<{ rowKey: string; weekStartDate: string; hours: number }>;
+    reserveHours?: number;
   },
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -227,9 +233,18 @@ export async function saveProjectForecastDraft(
     if (error) return { error: error.message };
   }
 
+  const headerUpdate: { updated_at: string; reserve_hours?: number } = { updated_at: now };
+  if (input.reserveHours != null) {
+    const reserve = Math.round(Number(input.reserveHours));
+    if (!Number.isFinite(reserve) || reserve < 0) {
+      return { error: "Reserve hours must be a non-negative integer." };
+    }
+    headerUpdate.reserve_hours = reserve;
+  }
+
   await supabase
     .from("project_forecasts")
-    .update({ updated_at: now })
+    .update(headerUpdate)
     .eq("project_id", projectId);
 
   revalidatePath(`/projects/${projectId}`);

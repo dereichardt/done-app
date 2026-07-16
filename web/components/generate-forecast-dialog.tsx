@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DialogCloseButton } from "@/components/dialog-close-button";
-import { ForecastBankedSummaryPanel } from "@/components/forecast-banked-summary";
+import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
 import { generateProjectForecast } from "@/lib/actions/project-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
-  computeForecastBankedSummary,
+  computeForecastPastPhaseSummary,
   DEFAULT_FORECAST_PM_PERCENT,
   DEFAULT_FORECAST_SPREAD_MODE,
   forecastStartSundayYmd,
@@ -30,6 +30,7 @@ export function GenerateForecastDialog({
   defaultPmPercent = DEFAULT_FORECAST_PM_PERCENT,
   defaultSpreadMode = DEFAULT_FORECAST_SPREAD_MODE,
   defaultStartMode = "this_week",
+  defaultIncludePastPhaseHours = false,
   hasExistingForecast = false,
   todayIso,
   onClose,
@@ -44,6 +45,8 @@ export function GenerateForecastDialog({
   defaultPmPercent?: number;
   defaultSpreadMode?: ForecastSpreadMode;
   defaultStartMode?: ForecastStartMode;
+  /** When regenerating, prefer the project's last choice. */
+  defaultIncludePastPhaseHours?: boolean;
   /** When true, require an explicit confirm before replacing future weeks. */
   hasExistingForecast?: boolean;
   todayIso: string;
@@ -54,6 +57,9 @@ export function GenerateForecastDialog({
   const [startMode, setStartMode] = useState<ForecastStartMode>(defaultStartMode);
   const [pmPercent, setPmPercent] = useState(defaultPmPercent);
   const [spreadMode, setSpreadMode] = useState<ForecastSpreadMode>(defaultSpreadMode);
+  const [includePastPhaseHours, setIncludePastPhaseHours] = useState(
+    defaultIncludePastPhaseHours,
+  );
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -69,9 +75,9 @@ export function GenerateForecastDialog({
   const selectedSunday =
     startMode === "this_week" ? thisWeekSunday : nextWeekSunday;
 
-  const bankedSummary = useMemo(
+  const pastPhaseSummary = useMemo(
     () =>
-      computeForecastBankedSummary({
+      computeForecastPastPhaseSummary({
         phases,
         integrations,
         deploymentEffortByPhase,
@@ -91,6 +97,8 @@ export function GenerateForecastDialog({
     ],
   );
 
+  const hasPastPhaseHours = (pastPhaseSummary?.pastPhaseHours ?? 0) > 0;
+
   useEffect(() => {
     dialogRef.current?.showModal();
   }, []);
@@ -107,6 +115,7 @@ export function GenerateForecastDialog({
         startMode,
         pmPercent,
         spreadMode,
+        includePastPhaseHours: hasPastPhaseHours ? includePastPhaseHours : false,
         todayIso,
       });
       if (res.error) {
@@ -253,7 +262,54 @@ export function GenerateForecastDialog({
             </label>
           </fieldset>
 
-          <ForecastBankedSummaryPanel summary={bankedSummary} />
+          {hasPastPhaseHours ? (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-sm font-medium text-[var(--app-text)]">
+                Past stage hours
+              </legend>
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--app-border)] px-3 py-2.5 has-[:checked]:border-[var(--app-action)] has-[:checked]:bg-[var(--app-info-surface)]">
+                <input
+                  type="radio"
+                  name="forecast-past-phase-mode"
+                  className="mt-1"
+                  checked={!includePastPhaseHours}
+                  onChange={() => setIncludePastPhaseHours(false)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-[var(--app-text)]">
+                    Hold as under estimate
+                  </span>
+                  <span className="block text-xs text-[var(--app-text-muted)]">
+                    Keep prior-stage hours off the grid. Raising weeks later draws from
+                    this reserve first.
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--app-border)] px-3 py-2.5 has-[:checked]:border-[var(--app-action)] has-[:checked]:bg-[var(--app-info-surface)]">
+                <input
+                  type="radio"
+                  name="forecast-past-phase-mode"
+                  className="mt-1"
+                  checked={includePastPhaseHours}
+                  onChange={() => setIncludePastPhaseHours(true)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-[var(--app-text)]">
+                    Include in forecast spread
+                  </span>
+                  <span className="block text-xs text-[var(--app-text-muted)]">
+                    Spread prior-stage hours evenly across the remaining forecast weeks so
+                    the forecast stays on estimate.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+          ) : null}
+
+          <ForecastEstimateVariancePanel
+            summary={pastPhaseSummary}
+            includePastPhaseHours={hasPastPhaseHours ? includePastPhaseHours : false}
+          />
 
           {error ? (
             <p className="text-sm text-[var(--app-danger)]" role="alert">

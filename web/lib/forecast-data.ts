@@ -11,6 +11,10 @@ export type ForecastHeaderDTO = {
   start_date: string;
   pm_percent: number;
   spread_mode: "even" | "bell";
+  /** Hours held off the grid (under estimate / past-phase reserve). */
+  reserve_hours: number;
+  /** When true, past-phase hours were included in the generate spread. */
+  include_past_phases_in_spread: boolean;
   generated_at: string;
 };
 
@@ -181,7 +185,9 @@ export async function loadForecastProjectDTO(
         .order("created_at", { ascending: true }),
       supabase
         .from("project_forecasts")
-        .select("start_date, pm_percent, spread_mode, generated_at")
+        .select(
+          "start_date, pm_percent, spread_mode, reserve_hours, include_past_phases_in_spread, generated_at",
+        )
         .eq("project_id", projectId)
         .maybeSingle(),
       supabase
@@ -231,6 +237,8 @@ export async function loadForecastProjectDTO(
             forecast.spread_mode === "bell" || forecast.spread_mode === "even"
               ? forecast.spread_mode
               : "even",
+          reserve_hours: Math.max(0, Math.round(Number(forecast.reserve_hours) || 0)),
+          include_past_phases_in_spread: Boolean(forecast.include_past_phases_in_spread),
           generated_at: forecast.generated_at,
         }
       : null,
