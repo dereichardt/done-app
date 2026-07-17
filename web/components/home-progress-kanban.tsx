@@ -14,7 +14,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { patchProjectIntegrationDeliveryProgress } from "@/lib/actions/projects";
 import {
@@ -31,7 +31,6 @@ import {
   type ProjectDeliveryProgress,
 } from "@/lib/integration-metadata";
 
-const VISIBLE_CARDS = 3;
 const COLUMN_ID_PREFIX = "progress-col:";
 
 function columnDroppableId(progress: ProjectDeliveryProgress): string {
@@ -125,22 +124,24 @@ function KanbanColumn({
   progress,
   integrations,
   disabled,
+  columnRef,
 }: {
   progress: ProjectDeliveryProgress;
   integrations: HomeProjectStatusIntegration[];
   disabled?: boolean;
+  columnRef?: (node: HTMLDivElement | null) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const { setNodeRef, isOver } = useDroppable({
     id: columnDroppableId(progress),
     data: { progress },
   });
-  const visible = expanded ? integrations : integrations.slice(0, VISIBLE_CARDS);
-  const hiddenCount = Math.max(0, integrations.length - VISIBLE_CARDS);
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        columnRef?.(node);
+      }}
       className="flex w-[14rem] shrink-0 flex-col rounded-[var(--app-radius)] border"
       style={{
         borderColor: isOver ? "var(--app-action)" : "var(--app-border)",
@@ -163,24 +164,13 @@ function KanbanColumn({
           {integrations.length} {integrations.length === 1 ? "integration" : "integrations"}
         </p>
       </header>
-      <div className="flex min-h-[6.5rem] flex-col gap-2 p-2">
+      <div className="flex min-h-[6.5rem] max-h-[40rem] flex-col gap-2 overflow-y-auto p-2">
         {integrations.length === 0 ? (
           <p className="px-1 py-3 text-center text-xs text-muted-canvas">Drop here</p>
         ) : (
-          <>
-            {visible.map((integ) => (
-              <DraggableIntegrationCard key={integ.id} integ={integ} disabled={disabled} />
-            ))}
-            {hiddenCount > 0 ? (
-              <button
-                type="button"
-                className="cursor-pointer rounded-[var(--app-radius)] px-2 py-1.5 text-xs font-medium text-[var(--app-action)] transition-colors hover:bg-[var(--app-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? "See less" : `See more (${hiddenCount})`}
-              </button>
-            ) : null}
-          </>
+          integrations.map((integ) => (
+            <DraggableIntegrationCard key={integ.id} integ={integ} disabled={disabled} />
+          ))
         )}
       </div>
     </div>
@@ -198,6 +188,8 @@ export function HomeProgressKanban({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const columnElsRef = useRef<Partial<Record<ProjectDeliveryProgress, HTMLDivElement | null>>>({});
 
   useEffect(() => {
     setDndReady(true);
@@ -221,6 +213,28 @@ export function HomeProgressKanban({
     () => (activeId ? integrations.find((i) => i.id === activeId) ?? null : null),
     [activeId, integrations],
   );
+
+  useEffect(() => {
+    const grouped = groupIntegrationsByDeliveryProgress(initialIntegrations);
+    const firstFilled =
+      PROJECT_DELIVERY_PROGRESS_VALUES.find((progress) => grouped[progress].length > 0) ?? null;
+    if (!firstFilled) return;
+
+    const frame = requestAnimationFrame(() => {
+      const scroller = scrollRef.current;
+      const column = columnElsRef.current[firstFilled];
+      if (!scroller || !column) return;
+
+      // Position relative to the scrollport (offsetLeft can overshoot vs the scroller).
+      const nextLeft =
+        column.getBoundingClientRect().left -
+        scroller.getBoundingClientRect().left +
+        scroller.scrollLeft;
+      scroller.scrollLeft = Math.max(0, nextLeft);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [initialIntegrations]);
 
   function resolveTargetProgress(
     overId: string | number,
@@ -281,7 +295,7 @@ export function HomeProgressKanban({
   if (initialIntegrations.length === 0) {
     return (
       <div aria-label="Delivery progress by integration">
-        <h3 className="text-sm font-medium text-muted-canvas">Details by integration</h3>
+        <h3 className="text-sm font-medium text-muted-canvas">Delivery Progress by Integration</h3>
         <p className="mt-3 text-sm text-muted-canvas">No integrations on this project yet.</p>
       </div>
     );
@@ -289,8 +303,7 @@ export function HomeProgressKanban({
 
   return (
     <div aria-label="Delivery progress by integration">
-      <h3 className="text-sm font-medium text-muted-canvas">Details by integration</h3>
-      <p className="mt-1 text-xs text-muted-canvas">Drag cards between columns to update delivery progress.</p>
+      <h3 className="text-sm font-medium text-muted-canvas">Delivery Progress by Integration</h3>
       {saveError ? (
         <p className="mt-2 text-sm" style={{ color: "var(--app-danger)" }} role="alert">
           {saveError}
@@ -305,7 +318,7 @@ export function HomeProgressKanban({
         onDragEnd={handleDragEnd}
         onDragCancel={() => setActiveId(null)}
       >
-        <div className="mt-3 overflow-x-auto pb-2">
+        <div ref={scrollRef} className="mt-3 overflow-x-auto pb-2">
           <div className="flex min-w-min gap-3">
             {PROJECT_DELIVERY_PROGRESS_VALUES.map((progress) => (
               <KanbanColumn
@@ -313,6 +326,9 @@ export function HomeProgressKanban({
                 progress={progress}
                 integrations={byProgress[progress]}
                 disabled={!dndReady || pendingId != null}
+                columnRef={(node) => {
+                  columnElsRef.current[progress] = node;
+                }}
               />
             ))}
           </div>

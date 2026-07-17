@@ -38,7 +38,7 @@ export default async function HomePage() {
     <div>
       <HomeSummaryStrip summary={summary} />
 
-      <HomeActualsVsForecast data={actualsVsForecast} />
+      <HomeActualsVsForecast data={actualsVsForecast} todayYmd={todayIso} />
 
       <HomeInboxGate
         projects={projects}

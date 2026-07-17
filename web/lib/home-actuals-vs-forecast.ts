@@ -10,6 +10,13 @@ import { addDaysYmd } from "@/lib/zoned-datetime";
 
 export const HOME_VARIANCE_TREND_WEEKS = 12;
 
+/** Assumed hours available per weekday (Mon–Fri) for pace status. */
+export const WEEK_PACE_WORKDAY_HOURS = 8;
+export const WEEK_PACE_WORKDAYS = 5;
+export const WEEK_PACE_CAPACITY_HOURS = WEEK_PACE_WORKDAY_HOURS * WEEK_PACE_WORKDAYS;
+
+export type WeekPaceStatus = "behind" | "on_track" | "ahead";
+
 export type HomeWeekTotals = {
   forecast: number;
   actual: number;
@@ -73,6 +80,54 @@ export function makeWeekTotals(forecast: number, actual: number): HomeWeekTotals
 /** True when a week has a forecast to compare against. */
 export function hasForecastHours(forecast: number): boolean {
   return Number.isFinite(forecast) && forecast > 0;
+}
+
+/**
+ * Forecast is realistic for Mon–Fri 8h pacing when it fits in one work week
+ * (≤ {@link WEEK_PACE_CAPACITY_HOURS}).
+ */
+export function isRealisticWeekForecast(forecast: number): boolean {
+  return hasForecastHours(forecast) && forecast <= WEEK_PACE_CAPACITY_HOURS;
+}
+
+/** Mon=0 … Sun=6 for a `YYYY-MM-DD` calendar date (UTC date parts). */
+function weekdayMon0FromYmd(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return 0;
+  const js = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return (js + 6) % 7;
+}
+
+/**
+ * Workdays of the Mon–Fri week that should already be “done” by end of `todayYmd`.
+ * Sun → 0 (week not started), Mon → 1 … Fri/Sat → 5.
+ */
+export function workdaysElapsedInWeek(todayYmd: string): number {
+  const mon0 = weekdayMon0FromYmd(todayYmd);
+  if (mon0 === 6) return 0; // Sunday
+  if (mon0 === 5) return WEEK_PACE_WORKDAYS; // Saturday
+  return mon0 + 1;
+}
+
+/**
+ * Pace vs forecast for this week, using even Mon–Fri 8h-day progress.
+ * Returns null when the forecast is not realistic to pace against.
+ */
+export function weekPaceStatus(
+  totals: Pick<HomeWeekTotals, "forecast" | "actual">,
+  todayYmd: string,
+): WeekPaceStatus | null {
+  if (!isRealisticWeekForecast(totals.forecast)) return null;
+
+  const elapsed = workdaysElapsedInWeek(todayYmd);
+  const expected = totals.forecast * (elapsed / WEEK_PACE_WORKDAYS);
+  const actual = Number.isFinite(totals.actual) && totals.actual > 0 ? totals.actual : 0;
+  const tolerance = Math.max(WEEK_PACE_WORKDAY_HOURS / 2, totals.forecast * 0.1);
+  const delta = actual - expected;
+
+  if (delta < -tolerance) return "behind";
+  if (delta > tolerance) return "ahead";
+  return "on_track";
 }
 
 /** Sum forecast/actual across weeks that have a forecast (skips weeks with no forecast). */

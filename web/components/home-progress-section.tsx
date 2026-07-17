@@ -129,15 +129,17 @@ export function HomeProgressSection({
         <p className="mt-4 text-sm text-muted-canvas">Loading progress…</p>
       ) : payload ? (
         <div className="mt-6 space-y-8">
-          <HomeProgressTimeline phases={payload.phases} todayYmd={payload.todayYmd} />
-
           <ProjectSummaryStrip
             embedded
             completedAt={null}
             phaseStatus={phaseStatus}
             integrationCount={payload.integrations.length}
             actualsVsForecast={payload.actualsVsForecast ?? makeWeekTotals(0, 0)}
+            projectForecastStats={payload.projectForecastStats}
+            todayYmd={payload.todayYmd}
           />
+
+          <HomeProgressTimeline phases={payload.phases} todayYmd={payload.todayYmd} />
 
           <HomeProgressKanban integrations={payload.integrations} />
         </div>

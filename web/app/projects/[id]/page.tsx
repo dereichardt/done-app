@@ -360,6 +360,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
         phaseStatus={phaseStatus}
         integrationCount={integrationRowsSerialized.length}
         actualsVsForecast={actualsVsForecast.thisWeek}
+        todayYmd={userTodayIso}
       />
 
       <section className="mt-10">

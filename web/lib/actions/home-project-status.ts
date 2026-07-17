@@ -4,10 +4,18 @@ import { createClient } from "@/lib/supabase/server";
 import {
   deliveryProgressIndex,
   type HomeProjectStatusIntegration,
+  type HomeProjectForecastStats,
   type HomeProjectStatusPayload,
   type HomeProjectStatusPhase,
 } from "@/lib/home-project-status";
 import { loadHomeActualsVsForecast, makeWeekTotals } from "@/lib/home-actuals-vs-forecast";
+import { loadForecastProjectDTO } from "@/lib/forecast-data";
+import {
+  computeEstimateVariance,
+  currentSundayWeekYmd,
+  sumActualsConsumedHours,
+  sumEstimatedRoundedHours,
+} from "@/lib/project-forecast";
 import { serializeProjectIntegrationRow } from "@/lib/project-integration-row";
 import { getUserTodayIso } from "@/lib/user-preferences";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
@@ -39,6 +47,7 @@ export async function loadHomeProjectStatus(
     { data: trackRows, error: trackErr },
     { data: piRows, error: piErr },
     actualsVsForecast,
+    forecastProject,
   ] = await Promise.all([
     supabase
       .from("project_phases")
@@ -74,6 +83,7 @@ export async function loadHomeProjectStatus(
       .eq("project_id", projectId)
       .order("created_at", { ascending: true }),
     loadHomeActualsVsForecast(supabase, user.id, todayYmd, { projectId }),
+    loadForecastProjectDTO(supabase, projectId, user.id),
   ]);
 
   if (phaseErr) return { error: phaseErr.message };
@@ -155,6 +165,60 @@ export async function loadHomeProjectStatus(
     };
   });
 
+  const projectForecastStats: HomeProjectForecastStats = (() => {
+    if (!forecastProject) {
+      return {
+        estimatedHours: Math.round(estimatedSum),
+        actualHours: Math.round(projectActualTotal),
+        forecastedHours: null,
+        varianceKind: "unavailable",
+        varianceHours: null,
+        varianceLabel: "No forecast",
+      };
+    }
+
+    const currentSunday = currentSundayWeekYmd(todayYmd);
+    const estimatedHours = sumEstimatedRoundedHours(forecastProject.integrations);
+    const actualHours = sumActualsConsumedHours(
+      forecastProject.integrations,
+      forecastProject.actualsByRowKey,
+    );
+    let forecastedHours = 0;
+    for (const row of Object.values(forecastProject.hoursByRow)) {
+      for (const [week, hours] of Object.entries(row)) {
+        if (week < currentSunday) continue;
+        if (Number.isFinite(hours) && hours > 0) forecastedHours += hours;
+      }
+    }
+    forecastedHours = Math.round(forecastedHours);
+
+    if (!forecastProject.forecast) {
+      return {
+        estimatedHours,
+        actualHours,
+        forecastedHours: null,
+        varianceKind: "unavailable",
+        varianceHours: null,
+        varianceLabel: "No forecast",
+      };
+    }
+
+    const variance = computeEstimateVariance({
+      estimated: estimatedHours,
+      actuals: actualHours,
+      forecastTotal: forecastedHours,
+    });
+
+    return {
+      estimatedHours,
+      actualHours,
+      forecastedHours,
+      varianceKind: variance.kind,
+      varianceHours: variance.absHours,
+      varianceLabel: variance.label,
+    };
+  })();
+
   const payload: HomeProjectStatusPayload = {
     todayYmd,
     phases,
@@ -164,6 +228,7 @@ export async function loadHomeProjectStatus(
     },
     integrations,
     actualsVsForecast: actualsVsForecast.thisWeek ?? makeWeekTotals(0, 0),
+    projectForecastStats,
   };
 
   return { payload };

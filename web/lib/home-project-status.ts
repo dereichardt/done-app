@@ -24,6 +24,15 @@ export type HomeProjectStatusIntegration = {
   actualHours: number;
 };
 
+export type HomeProjectForecastStats = {
+  estimatedHours: number;
+  actualHours: number;
+  forecastedHours: number | null;
+  varianceKind: "under" | "over" | "on" | "unavailable";
+  varianceHours: number | null;
+  varianceLabel: string;
+};
+
 export type HomeProjectStatusPayload = {
   todayYmd: string;
   phases: HomeProjectStatusPhase[];
@@ -34,6 +43,7 @@ export type HomeProjectStatusPayload = {
   integrations: HomeProjectStatusIntegration[];
   /** This-week actuals vs forecast for the selected project. */
   actualsVsForecast: HomeWeekTotals;
+  projectForecastStats: HomeProjectForecastStats;
 };
 
 export type TimelineModel =

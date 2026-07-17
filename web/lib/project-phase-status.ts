@@ -24,6 +24,13 @@ export function formatPhaseDate(iso: string): string {
   return d.toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+/** Month + day only (e.g. "Mar 31") for compact timeline labels. */
+export function formatPhaseDateShort(iso: string): string {
+  const d = new Date(`${iso}T12:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 /** Days-until-end label used by project summary and list row metrics. */
 export function formatPhaseDaysRemainingLabel(n: number): string {
   if (n === 0) return "0 days left";

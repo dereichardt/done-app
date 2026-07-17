@@ -6,9 +6,11 @@ import { HomeVarianceTrendsDialog } from "@/components/home-variance-trends-dial
 import {
   type HomeActualsVsForecastDTO,
   type HomeWeekTotals,
+  type WeekPaceStatus,
   hasForecastHours,
   makeWeekTotals,
   variancePercentLabel,
+  weekPaceStatus,
 } from "@/lib/home-actuals-vs-forecast";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
 
@@ -17,6 +19,28 @@ type WeekMode = "this" | "prior";
 const SEG_WIDTH = 96;
 /** Matches Tailwind `gap-3` (0.75rem); four slots → three gaps across the full row. */
 const SLOT_GAP = "0.75rem";
+
+function formatBarHours(hours: number): string {
+  if (!Number.isFinite(hours) || hours === 0) return "0h";
+  const q = Math.round(hours * 4) / 4;
+  const s = Number.isInteger(q) ? String(q) : String(parseFloat(q.toFixed(2)));
+  return `${s}h`;
+}
+
+const PACE_PILL: Record<WeekPaceStatus, { label: string; className: string }> = {
+  behind: {
+    label: "Behind",
+    className: "integration-state-pill integration-state-pill--on_hold",
+  },
+  on_track: {
+    label: "On Track",
+    className: "task-priority-pill task-priority-pill--low",
+  },
+  ahead: {
+    label: "Ahead",
+    className: "task-priority-pill task-priority-pill--medium",
+  },
+};
 
 function WeekModeToggle({
   mode,
@@ -77,91 +101,95 @@ function WeekModeToggle({
   );
 }
 
-function MetricPair({
-  label,
-  value,
-  align,
+export function VarianceCard({
+  title,
+  totals,
+  paceStatus = null,
 }: {
-  label: string;
-  value: string;
-  align: "start" | "end";
+  title: string;
+  totals: HomeWeekTotals;
+  /** This-week Mon–Fri pace pill; omit / null for prior week or unrealistic forecast. */
+  paceStatus?: WeekPaceStatus | null;
 }) {
-  return (
-    <div
-      className={`flex min-w-0 flex-1 flex-col ${
-        align === "start" ? "items-end text-right" : "items-start text-left"
-      }`}
-    >
-      <span className="text-xs font-medium text-muted-canvas">{label}</span>
-      <span className="mt-0.5 text-base font-medium tabular-nums text-[var(--app-text)]">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-export function VarianceCard({ title, totals }: { title: string; totals: HomeWeekTotals }) {
   const hasForecast = hasForecastHours(totals.forecast);
   const pct = hasForecast ? variancePercentLabel(totals.forecast, totals.variance) : null;
+  const fillPct =
+    hasForecast && totals.actual > 0
+      ? Math.min(100, (totals.actual / totals.forecast) * 100)
+      : 0;
+  const showActualInBar = totals.actual > 0 && fillPct > 0;
+  const pill = paceStatus ? PACE_PILL[paceStatus] : null;
 
   return (
     <article
       className="card-canvas flex min-h-[10.5rem] w-full flex-col px-4 py-4"
       aria-label={
         hasForecast
-          ? `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, variance ${formatEffortHoursLabel(totals.variance)}${pct ? ` (${pct})` : ""}`
-          : `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, variance not available`
+          ? `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, remaining ${formatEffortHoursLabel(totals.variance)}${pct ? ` (${pct})` : ""}${pill ? `, ${pill.label}` : ""}`
+          : `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, remaining not available`
       }
     >
-      <h3
-        className="shrink-0 text-sm font-medium leading-snug text-[var(--app-text)]"
-        title={title}
-      >
-        <span className="line-clamp-2">{title}</span>
-      </h3>
-
-      <div className="flex min-h-0 flex-1 items-center justify-center py-3">
-        <div className="flex w-full max-w-[18rem] items-center gap-8">
-          <MetricPair
-            label="Forecast"
-            value={formatEffortHoursLabel(totals.forecast)}
-            align="start"
-          />
-          <div
-            className="h-9 w-px shrink-0"
-            style={{ background: "var(--app-border)" }}
-            aria-hidden
-          />
-          <MetricPair
-            label="Actuals"
-            value={formatEffortHoursLabel(totals.actual)}
-            align="end"
-          />
-        </div>
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <h3
+          className="min-w-0 text-sm font-medium leading-snug text-[var(--app-text)]"
+          title={title}
+        >
+          <span className="line-clamp-2">{title}</span>
+        </h3>
+        {pill ? <span className={`${pill.className} shrink-0`}>{pill.label}</span> : null}
       </div>
 
-      <div
-        className="shrink-0 border-t pt-3 text-center"
-        style={{ borderColor: "var(--app-border)" }}
-      >
-        {hasForecast ? (
-          <>
-            <p className="text-base font-medium tabular-nums text-[var(--app-text)]">
-              {formatEffortHoursLabel(totals.variance)}
-            </p>
-            {pct ? (
-              <p className="mt-0.5 text-xs font-normal text-muted-canvas">{pct}</p>
-            ) : null}
-          </>
-        ) : (
-          <p className="text-base font-medium text-muted-canvas">—</p>
-        )}
+      <div className="mt-1 flex min-h-0 flex-1 flex-col justify-center">
+        <span className="mb-1.5 self-end text-xs font-medium tabular-nums leading-none text-[var(--app-text)]">
+          {formatBarHours(totals.forecast)}
+        </span>
+        <div
+          className="relative h-8 w-full overflow-hidden rounded-full"
+          style={{ background: "var(--app-border)" }}
+          aria-hidden
+        >
+          {showActualInBar ? (
+            <div
+              className="absolute inset-y-0 left-0 flex items-center overflow-hidden rounded-full px-2.5"
+              style={{
+                width: `${fillPct}%`,
+                background: "var(--app-cta-dark-fill)",
+              }}
+            >
+              <span className="text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-cta-dark-fg)]">
+                {formatBarHours(totals.actual)}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        <p className="mt-4 text-xs font-medium tabular-nums text-[var(--app-text)]">
+          {hasForecast ? (
+            <>
+              <span>{formatEffortHoursLabel(totals.variance)} remaining</span>
+              {pct ? (
+                <span className="font-normal text-muted-canvas">
+                  {" · "}
+                  {pct}
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <span className="text-muted-canvas">—</span>
+          )}
+        </p>
       </div>
     </article>
   );
 }
 
-export function HomeActualsVsForecast({ data }: { data: HomeActualsVsForecastDTO }) {
+export function HomeActualsVsForecast({
+  data,
+  todayYmd,
+}: {
+  data: HomeActualsVsForecastDTO;
+  todayYmd: string;
+}) {
   const [mode, setMode] = useState<WeekMode>("this");
   const [trendsOpen, setTrendsOpen] = useState(false);
 
@@ -176,6 +204,9 @@ export function HomeActualsVsForecast({ data }: { data: HomeActualsVsForecastDTO
     name: p.name,
     totals: p.byWeek[weekKey] ?? makeWeekTotals(0, 0),
   }));
+
+  const showPace = mode === "this";
+  const totalPace = showPace ? weekPaceStatus(totals, todayYmd) : null;
 
   /** One of four equal slots across the row (accounting for three gaps). */
   const totalSlotWidth = `calc((100% - 3 * ${SLOT_GAP}) / 4)`;
@@ -204,7 +235,7 @@ export function HomeActualsVsForecast({ data }: { data: HomeActualsVsForecastDTO
           aria-label={mode === "this" ? "This week by project" : "Prior week by project"}
         >
           <div className="shrink-0 pb-2" style={{ width: totalSlotWidth }}>
-            <VarianceCard title="Total" totals={totals} />
+            <VarianceCard title="Total" totals={totals} paceStatus={totalPace} />
           </div>
 
           <div className="flex min-w-0 flex-1 items-start gap-3 overflow-x-auto pb-2">
@@ -214,7 +245,11 @@ export function HomeActualsVsForecast({ data }: { data: HomeActualsVsForecastDTO
                 className="min-w-0 shrink-0"
                 style={{ flex: `0 0 ${projectCardWidth}`, width: projectCardWidth }}
               >
-                <VarianceCard title={p.name} totals={p.totals} />
+                <VarianceCard
+                  title={p.name}
+                  totals={p.totals}
+                  paceStatus={showPace ? weekPaceStatus(p.totals, todayYmd) : null}
+                />
               </div>
             ))}
 
