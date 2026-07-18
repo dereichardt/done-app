@@ -20,7 +20,10 @@ export default async function ForecastPage({ searchParams }: PageProps) {
 
   const prefsRes = await loadUserPreferences();
   const todayIso = todayISO(prefsRes.preferences.timezone);
-  const projects = await loadAllActiveForecastProjects(supabase, user.id);
+  const projects = await loadAllActiveForecastProjects(supabase, user.id, {
+    todayIso,
+    timeZone: prefsRes.preferences.timezone,
+  });
 
   return (
     <ForecastStudio

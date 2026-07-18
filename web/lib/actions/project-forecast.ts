@@ -70,13 +70,17 @@ export async function generateProjectForecast(
     return { error: "Choose Even spread or Bell curve." };
   }
 
-  const dto = await loadForecastProjectDTO(supabase, projectId, user.id);
+  const prefsRes = await loadUserPreferences();
+  const actualsContext = {
+    todayIso,
+    timeZone: prefsRes.preferences.timezone,
+  };
+  const dto = await loadForecastProjectDTO(supabase, projectId, user.id, actualsContext);
   if (!dto) return { error: "Project not found" };
 
   const startDate = forecastStartSundayYmd(todayIso, startMode);
 
-  const prefsRes = await loadUserPreferences();
-  // Fresh actuals from DTO (per integration + PM / project tracks) always reduce remaining hours.
+  // Completed actuals from prior Sunday–Saturday weeks reduce remaining hours.
   const generated = generateForecastHours({
     phases: dto.phases as ForecastPhaseInput[],
     integrations: dto.integrations,
@@ -161,7 +165,7 @@ export async function generateProjectForecast(
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/forecast");
 
-  const project = await loadForecastProjectDTO(supabase, projectId, user.id);
+  const project = await loadForecastProjectDTO(supabase, projectId, user.id, actualsContext);
   return { project: project ?? undefined };
 }
 
@@ -419,6 +423,9 @@ export async function loadInboxForecastReviewProjects(): Promise<{
 
   const prefsRes = await loadUserPreferences();
   const todayIso = getUserTodayIso(prefsRes.preferences.timezone);
-  const projects = await loadAllActiveForecastProjects(supabase, user.id);
+  const projects = await loadAllActiveForecastProjects(supabase, user.id, {
+    todayIso,
+    timeZone: prefsRes.preferences.timezone,
+  });
   return { todayIso, projects };
 }

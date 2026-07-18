@@ -83,7 +83,10 @@ export async function loadHomeProjectStatus(
       .eq("project_id", projectId)
       .order("created_at", { ascending: true }),
     loadHomeActualsVsForecast(supabase, user.id, todayYmd, { projectId }),
-    loadForecastProjectDTO(supabase, projectId, user.id),
+    loadForecastProjectDTO(supabase, projectId, user.id, {
+      todayIso: todayYmd,
+      timeZone: prefsRes.preferences.timezone,
+    }),
   ]);
 
   if (phaseErr) return { error: phaseErr.message };

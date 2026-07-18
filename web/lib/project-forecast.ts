@@ -74,7 +74,7 @@ export type GenerateForecastInput = {
   includePastPhaseHours?: boolean;
   /** User-local today YYYY-MM-DD. */
   todayIso: string;
-  /** Actual hours logged to date, keyed by rowKey (integration id or PM). */
+  /** Actual hours from completed past weeks, keyed by rowKey (integration id or PM). */
   actualsByRowKey: Record<string, number>;
   /** Project weeks whose existing row values must be preserved during regeneration. */
   lockedWeekStarts?: string[];

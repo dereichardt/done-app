@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
 import {
+  currentSundayWeekYmd,
   PM_FORECAST_ROW_KEY,
   type ForecastPhaseInput,
 } from "@/lib/project-forecast";
 import type { ProjectEffortSessionInput } from "@/lib/project-weekly-effort";
 import { timelineSpanFromPhases } from "@/lib/project-weekly-effort";
+import { zonedLocalMidnightUtcMs } from "@/lib/zoned-datetime";
 
 export type ForecastHeaderDTO = {
   start_date: string;
@@ -38,6 +40,7 @@ export type ForecastProjectDTO = {
   pmLabel: string;
   timelineStartYmd: string | null;
   timelineEndYmd: string | null;
+  /** Completed effort from Sunday–Saturday weeks before the current week. */
   actualsByRowKey: Record<string, number>;
   forecast: ForecastHeaderDTO | null;
   hours: ForecastHoursCellDTO[];
@@ -46,6 +49,31 @@ export type ForecastProjectDTO = {
   /** Nested map rowKey → weekStart → hours for client convenience. */
   hoursByRow: Record<string, Record<string, number>>;
 };
+
+export type ForecastActualsContext = {
+  /** User-local calendar date. */
+  todayIso: string;
+  /** User's saved IANA timezone; UTC when unset. */
+  timeZone: string | null | undefined;
+};
+
+/** UTC cutoff at the start of the current Sunday–Saturday forecast week. */
+export function forecastActualsCutoffIso(context: ForecastActualsContext): string {
+  const currentSunday = currentSundayWeekYmd(context.todayIso);
+  const cutoffMs = zonedLocalMidnightUtcMs(currentSunday, context.timeZone ?? "UTC");
+  if (Number.isFinite(cutoffMs)) return new Date(cutoffMs).toISOString();
+  return new Date(`${currentSunday}T00:00:00.000Z`).toISOString();
+}
+
+export function isActualBeforeForecastCutoff(
+  finishedAt: string | null | undefined,
+  cutoffIso: string,
+): boolean {
+  if (!finishedAt) return false;
+  const finishedMs = new Date(finishedAt).getTime();
+  const cutoffMs = new Date(cutoffIso).getTime();
+  return Number.isFinite(finishedMs) && Number.isFinite(cutoffMs) && finishedMs < cutoffMs;
+}
 
 function integrationTitle(row: {
   integrations:
@@ -85,6 +113,7 @@ function hoursByRowFromCells(cells: ForecastHoursCellDTO[]): Record<string, Reco
 async function loadActualsByRowKey(
   supabase: SupabaseClient,
   projectId: string,
+  actualsContext: ForecastActualsContext,
 ): Promise<{ actuals: Record<string, number>; pmLabel: string }> {
   const { data: tracks } = await supabase
     .from("project_tracks")
@@ -106,6 +135,7 @@ async function loadActualsByRowKey(
 
   const actuals: Record<string, number> = {};
   if (trackIds.length === 0) return { actuals, pmLabel };
+  const cutoffIso = forecastActualsCutoffIso(actualsContext);
 
   const [wsRes, meRes] = await Promise.all([
     supabase
@@ -114,15 +144,18 @@ async function loadActualsByRowKey(
         "id, duration_hours, finished_at, integration_tasks!inner(project_track_id)",
       )
       .in("integration_tasks.project_track_id", trackIds)
-      .not("finished_at", "is", null),
+      .not("finished_at", "is", null)
+      .lt("finished_at", cutoffIso),
     supabase
       .from("integration_manual_effort_entries")
       .select("id, duration_hours, finished_at, project_track_id")
       .in("project_track_id", trackIds)
-      .not("finished_at", "is", null),
+      .not("finished_at", "is", null)
+      .lt("finished_at", cutoffIso),
   ]);
 
   for (const row of wsRes.data ?? []) {
+    if (!isActualBeforeForecastCutoff(row.finished_at, cutoffIso)) continue;
     const taskJoin = row.integration_tasks as
       | { project_track_id: string }
       | { project_track_id: string }[]
@@ -138,6 +171,7 @@ async function loadActualsByRowKey(
     actuals[rowKey] = (actuals[rowKey] ?? 0) + dh;
   }
   for (const row of meRes.data ?? []) {
+    if (!isActualBeforeForecastCutoff(row.finished_at, cutoffIso)) continue;
     const rowKey = rowKeyByTrackId.get(row.project_track_id);
     if (!rowKey) continue;
     const dh = Number(row.duration_hours);
@@ -152,6 +186,7 @@ export async function loadForecastProjectDTO(
   supabase: SupabaseClient,
   projectId: string,
   ownerId: string,
+  actualsContext: ForecastActualsContext,
 ): Promise<ForecastProjectDTO | null> {
   const { data: project } = await supabase
     .from("projects")
@@ -207,7 +242,7 @@ export async function loadForecastProjectDTO(
         .select("week_start_date")
         .eq("project_id", projectId)
         .order("week_start_date"),
-      loadActualsByRowKey(supabase, projectId),
+      loadActualsByRowKey(supabase, projectId, actualsContext),
     ]);
 
   const phaseInputs: ForecastPhaseInput[] = (phases ?? []).map((p) => ({
@@ -266,6 +301,7 @@ export async function loadForecastProjectDTO(
 export async function loadAllActiveForecastProjects(
   supabase: SupabaseClient,
   ownerId: string,
+  actualsContext: ForecastActualsContext,
 ): Promise<ForecastProjectDTO[]> {
   const { data: projects } = await supabase
     .from("projects")
@@ -284,7 +320,7 @@ export async function loadAllActiveForecastProjects(
   for (let i = 0; i < ids.length; i += chunkSize) {
     const chunk = ids.slice(i, i + chunkSize);
     const loaded = await Promise.all(
-      chunk.map((id) => loadForecastProjectDTO(supabase, id, ownerId)),
+      chunk.map((id) => loadForecastProjectDTO(supabase, id, ownerId, actualsContext)),
     );
     for (const dto of loaded) {
       if (dto) results.push(dto);

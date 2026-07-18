@@ -280,7 +280,10 @@ export default async function ProjectDetailPage({ params }: PageProps) {
             )
             .in("project_track_id", trackIds)
             .not("finished_at", "is", null),
-      loadForecastProjectDTO(supabase, id, user.id),
+      loadForecastProjectDTO(supabase, id, user.id, {
+        todayIso: userTodayIso,
+        timeZone: prefsRes.preferences.timezone,
+      }),
       loadHomeActualsVsForecast(supabase, user.id, userTodayIso, { projectId: id }),
     ]);
   const initialActiveSessionIndicator =
