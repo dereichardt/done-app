@@ -1,20 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
-import { GenerateForecastDialog } from "@/components/generate-forecast-dialog";
 import {
   formatLocalYmd,
   formatEffortHoursLabel,
   parseLocalYmd,
 } from "@/lib/integration-effort-buckets";
 import {
+  actualsWithLockedForecastHours,
   computeEstimateVariance,
   computeForecastPastPhaseSummary,
   currentSundayWeekYmd,
-  forecastPrerequisites,
   projectTotalsByWeek,
   sumActualsConsumedHours,
   sumEstimatedRoundedHours,
@@ -52,18 +50,6 @@ export function ProjectForecastCard({
   todayIso: string;
   deploymentEffortByPhase: DeploymentEffortByPhase;
 }) {
-  const router = useRouter();
-  const [showGenerate, setShowGenerate] = useState(false);
-
-  const prereq = useMemo(
-    () =>
-      forecastPrerequisites({
-        phases: project.phases,
-        integrations: project.integrations,
-      }),
-    [project.phases, project.integrations],
-  );
-
   const hasForecast = project.forecast != null;
   const currentSunday = useMemo(() => currentSundayWeekYmd(todayIso), [todayIso]);
 
@@ -117,7 +103,12 @@ export function ProjectForecastCard({
       pmPercent: project.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT,
       startMode: "this_week",
       todayIso,
-      actualsByRowKey: project.actualsByRowKey,
+      actualsByRowKey: actualsWithLockedForecastHours({
+        actualsByRowKey: project.actualsByRowKey,
+        lockedWeekStarts: project.lockedWeekStarts,
+        lockedHoursByRow: project.hoursByRow,
+        currentSunday,
+      }),
     });
   }, [
     hasForecast,
@@ -125,7 +116,10 @@ export function ProjectForecastCard({
     project.integrations,
     project.forecast?.pm_percent,
     project.actualsByRowKey,
+    project.lockedWeekStarts,
+    project.hoursByRow,
     deploymentEffortByPhase,
+    currentSunday,
     todayIso,
   ]);
 
@@ -133,33 +127,16 @@ export function ProjectForecastCard({
     <section className="mt-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="section-heading">Forecast</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          {hasForecast ? (
-            <Link href={`/forecast?project=${project.id}`} className="btn-cta-tertiary">
-              Open Forecast Studio
-            </Link>
-          ) : null}
-          <button
-            type="button"
-            className="btn-cta-dark"
-            disabled={!prereq.ok}
-            title={!prereq.ok ? prereq.reason : undefined}
-            onClick={() => setShowGenerate(true)}
-          >
-            {hasForecast ? "Regenerate Forecast" : "Generate Forecast"}
-          </button>
-        </div>
+        <Link href={`/forecast?project=${project.id}`} className="btn-cta-tertiary">
+          Open Forecast Studio
+        </Link>
       </div>
-
-      {!prereq.ok ? (
-        <p className="mt-3 text-sm text-[var(--app-text-muted)]">{prereq.reason}</p>
-      ) : null}
 
       <div className="card-canvas mt-3 p-4">
         {!hasForecast ? (
           <p className="text-sm text-[var(--app-text-muted)]">
-            No forecast yet. Generate one from the timeline and integration estimates, then refine
-            hours in Forecast Studio.
+            No forecast yet. Open Forecast Studio to generate one from the timeline and integration
+            estimates.
           </p>
         ) : (
           <div className="flex flex-col gap-4">
@@ -248,28 +225,6 @@ export function ProjectForecastCard({
         )}
       </div>
 
-      {showGenerate ? (
-        <GenerateForecastDialog
-          projectId={project.id}
-          projectLabel={project.customer_name}
-          phases={project.phases}
-          integrations={project.integrations}
-          actualsByRowKey={project.actualsByRowKey}
-          deploymentEffortByPhase={deploymentEffortByPhase}
-          defaultPmPercent={project.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT}
-          defaultSpreadMode={project.forecast?.spread_mode ?? "even"}
-          defaultIncludePastPhaseHours={
-            project.forecast?.include_past_phases_in_spread ?? false
-          }
-          hasExistingForecast={project.forecast != null}
-          todayIso={todayIso}
-          onClose={() => setShowGenerate(false)}
-          onGenerated={() => {
-            setShowGenerate(false);
-            router.refresh();
-          }}
-        />
-      ) : null}
     </section>
   );
 }

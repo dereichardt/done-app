@@ -370,6 +370,122 @@ describe("project-level remaining (Forecast + Actuals = Estimated)", () => {
   });
 });
 
+describe("locked project weeks", () => {
+  const phases = [
+    { phase_key: "test", start_date: "2025-01-05", end_date: "2025-02-01" },
+  ];
+  const integrations = [{ key: "int-a", label: "A", estimatedEffortHours: 40 }];
+  const weeks = sundayWeeks("2025-01-05", 4);
+
+  for (const spreadMode of ["even", "bell"] as const) {
+    it(`preserves locked values and spreads only the residual in ${spreadMode} mode`, () => {
+      const result = generateForecastHours({
+        phases,
+        integrations,
+        deploymentEffortByPhase: {
+          ...DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
+          plan: 0,
+          architect_configure: 0,
+          test: 100,
+          deploy: 0,
+          hypercare: 0,
+        },
+        pmPercent: 0,
+        startMode: "this_week",
+        spreadMode,
+        includePastPhaseHours: true,
+        todayIso: "2025-01-08",
+        actualsByRowKey: { "int-a": 5 },
+        lockedWeekStarts: [weeks[1]],
+        lockedHoursByRow: { "int-a": { [weeks[1]]: 10 } },
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(result.rows[0].hoursByWeekYmd[weeks[1]]).toBe(10);
+      expect(sumPlacedHours(result.rows)).toBe(35);
+    });
+  }
+
+  it("keeps a zero-hour locked week empty", () => {
+    const result = generateForecastHours({
+      phases,
+      integrations,
+      deploymentEffortByPhase: DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
+      pmPercent: 0,
+      startMode: "this_week",
+      spreadMode: "even",
+      includePastPhaseHours: true,
+      todayIso: "2025-01-08",
+      actualsByRowKey: {},
+      lockedWeekStarts: [weeks[1]],
+      lockedHoursByRow: { "int-a": { [weeks[1]]: 0 } },
+    });
+
+    expect(result.rows[0].hoursByWeekYmd[weeks[1]]).toBe(0);
+    expect(sumPlacedHours(result.rows)).toBe(40);
+  });
+
+  it("counts a locked current week when regeneration starts next week", () => {
+    const result = generateForecastHours({
+      phases,
+      integrations,
+      deploymentEffortByPhase: DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
+      pmPercent: 0,
+      startMode: "next_week",
+      spreadMode: "even",
+      includePastPhaseHours: true,
+      todayIso: "2025-01-08",
+      actualsByRowKey: {},
+      lockedWeekStarts: [weeks[0]],
+      lockedHoursByRow: { "int-a": { [weeks[0]]: 10 } },
+    });
+
+    expect(result.rows[0].hoursByWeekYmd[weeks[0]]).toBeUndefined();
+    expect(sumPlacedHours(result.rows)).toBe(30);
+  });
+
+  it("preserves locked overages instead of generating negative hours", () => {
+    const result = generateForecastHours({
+      phases,
+      integrations: [{ key: "int-a", label: "A", estimatedEffortHours: 20 }],
+      deploymentEffortByPhase: DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
+      pmPercent: 0,
+      startMode: "this_week",
+      spreadMode: "even",
+      includePastPhaseHours: true,
+      todayIso: "2025-01-08",
+      actualsByRowKey: { "int-a": 5 },
+      lockedWeekStarts: [weeks[1]],
+      lockedHoursByRow: { "int-a": { [weeks[1]]: 20 } },
+    });
+
+    expect(result.rows[0].hoursByWeekYmd[weeks[1]]).toBe(20);
+    expect(sumPlacedHours(result.rows)).toBe(20);
+    expect(
+      computeEstimateVariance({ estimated: 20, actuals: 5, forecastTotal: 20 }).kind,
+    ).toBe("over");
+  });
+
+  it("moves residual hours to reserve when every writable week is locked", () => {
+    const result = generateForecastHours({
+      phases,
+      integrations,
+      deploymentEffortByPhase: DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
+      pmPercent: 0,
+      startMode: "this_week",
+      spreadMode: "even",
+      includePastPhaseHours: true,
+      todayIso: "2025-01-08",
+      actualsByRowKey: {},
+      lockedWeekStarts: weeks,
+      lockedHoursByRow: { "int-a": { [weeks[0]]: 10 } },
+    });
+
+    expect(sumPlacedHours(result.rows)).toBe(10);
+    expect(result.reserveHours).toBe(30);
+  });
+});
+
 describe("computeEstimateVariance", () => {
   it("reports under, over, and on estimate", () => {
     expect(computeEstimateVariance({ estimated: 100, actuals: 20, forecastTotal: 70 })).toEqual({

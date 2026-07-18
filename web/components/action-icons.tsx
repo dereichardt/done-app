@@ -72,6 +72,41 @@ export function UndoIcon({ size = 16, className = "shrink-0" }: ActionIconProps)
   );
 }
 
+export function LockIcon({
+  size = 16,
+  className = "shrink-0",
+  open = false,
+}: ActionIconProps & { open?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>
+      <rect
+        x="5"
+        y="10"
+        width="14"
+        height="11"
+        rx="2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d={open ? "M9 10V7a4 4 0 0 1 7-2.65" : "M8 10V7a4 4 0 0 1 8 0v3"}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 14v3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** Three dots vertically (⋯), for overflow / “more actions” menus. */
 export function EllipsisVerticalIcon({ size = 20, className = "shrink-0" }: ActionIconProps) {
   return (

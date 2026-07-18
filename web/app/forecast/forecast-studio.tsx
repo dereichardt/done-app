@@ -14,11 +14,16 @@ import { useRouter } from "next/navigation";
 import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
 import { GenerateForecastDialog } from "@/components/generate-forecast-dialog";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
-import { saveProjectForecastDraft } from "@/lib/actions/project-forecast";
+import {
+  saveProjectForecastDraft,
+  setAllActiveForecastWeekLocks,
+  setProjectForecastWeekLock,
+} from "@/lib/actions/project-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
   applyForecastProjectTotalEdit,
   applyForecastRowEdit,
+  actualsWithLockedForecastHours,
   buildForecastPhaseWeekSegments,
   computeEstimateVariance,
   computeForecastPastPhaseSummary,
@@ -212,6 +217,7 @@ export function ForecastStudio({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastEditedCellKey, setLastEditedCellKey] = useState<string | null>(null);
   const [generateFor, setGenerateFor] = useState<ForecastProjectDTO | null>(null);
+  const [pendingLockKeys, setPendingLockKeys] = useState<Set<string>>(() => new Set());
   const [pending, startTransition] = useTransition();
 
   const focusRef = useRef<HTMLDivElement | null>(null);
@@ -535,6 +541,121 @@ export function ForecastStudio({
     }, AUTOSAVE_MS);
   }, [clearAutosaveTimer, flushSave]);
 
+  const updateProjectLockState = useCallback(
+    (projectIds: string[], weekStart: string, locked: boolean) => {
+      const ids = new Set(projectIds);
+      setProjects((prev) =>
+        prev.map((project) => {
+          if (!ids.has(project.id)) return project;
+          const next = new Set(project.lockedWeekStarts);
+          if (locked) next.add(weekStart);
+          else next.delete(weekStart);
+          return { ...project, lockedWeekStarts: Array.from(next).sort() };
+        }),
+      );
+    },
+    [],
+  );
+
+  const performProjectWeekLock = useCallback(
+    (project: ForecastProjectDTO, weekStart: string, locked: boolean) => {
+      const lockKey = `${project.id}:${weekStart}`;
+      setPendingLockKeys((prev) => new Set(prev).add(lockKey));
+      setSaveError(null);
+      startTransition(async () => {
+        const res = await setProjectForecastWeekLock(project.id, {
+          todayIso,
+          weekStartDate: weekStart,
+          locked,
+        });
+        setPendingLockKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(lockKey);
+          return next;
+        });
+        if (res.error) {
+          setSaveError(res.error);
+          return;
+        }
+        setProjects((prev) =>
+          prev.map((item) =>
+            item.id === project.id
+              ? { ...item, lockedWeekStarts: res.lockedWeekStarts ?? [] }
+              : item,
+          ),
+        );
+        router.refresh();
+      });
+    },
+    [router, todayIso],
+  );
+
+  const toggleProjectWeekLock = useCallback(
+    (project: ForecastProjectDTO, weekStart: string) => {
+      const nextLocked = !project.lockedWeekStarts.includes(weekStart);
+      const applyLock = () => performProjectWeekLock(project, weekStart, nextLocked);
+      const edit = projectEdits[project.id];
+      const dirty =
+        edit &&
+        (diffForecastCells(edit.persisted, edit.draft).length > 0 ||
+          Math.round(edit.persistedReserveHours) !== Math.round(edit.reserveHours));
+      if (
+        activeProjectId === project.id &&
+        (dirty || autosaveTimerRef.current != null || saveStatus === "saving")
+      ) {
+        flushSave({ projectId: project.id, after: applyLock });
+        return;
+      }
+      applyLock();
+    },
+    [
+      activeProjectId,
+      flushSave,
+      performProjectWeekLock,
+      projectEdits,
+      saveStatus,
+    ],
+  );
+
+  const performAllProjectsWeekLock = useCallback(
+    (weekStart: string, locked: boolean) => {
+      const lockKey = `portfolio:${weekStart}`;
+      setPendingLockKeys((prev) => new Set(prev).add(lockKey));
+      setSaveError(null);
+      startTransition(async () => {
+        const res = await setAllActiveForecastWeekLocks({
+          todayIso,
+          weekStartDate: weekStart,
+          locked,
+        });
+        setPendingLockKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(lockKey);
+          return next;
+        });
+        if (res.error) {
+          setSaveError(res.error);
+          return;
+        }
+        updateProjectLockState(res.projectIds ?? [], weekStart, locked);
+        router.refresh();
+      });
+    },
+    [router, todayIso, updateProjectLockState],
+  );
+
+  const toggleAllProjectsWeekLock = useCallback(
+    (weekStart: string, locked: boolean) => {
+      const applyLock = () => performAllProjectsWeekLock(weekStart, locked);
+      if (activeDirty || autosaveTimerRef.current != null || saveStatus === "saving") {
+        flushSave({ after: applyLock });
+        return;
+      }
+      applyLock();
+    },
+    [activeDirty, flushSave, performAllProjectsWeekLock, saveStatus],
+  );
+
   useEffect(() => {
     return () => clearAutosaveTimer();
   }, [clearAutosaveTimer]);
@@ -571,20 +692,6 @@ export function ForecastStudio({
 
   function collapseAll() {
     setExpanded(new Set());
-  }
-
-  function endStudioSession() {
-    clearAutosaveTimer();
-    editingIdRef.current = null;
-    persistedRef.current = null;
-    draftRef.current = null;
-    reserveHoursRef.current = null;
-    setActiveProjectId(null);
-    setActiveRowKey(null);
-    setProjectEdits({});
-    setSaveStatus("idle");
-    setSaveError(null);
-    setLastEditedCellKey(null);
   }
 
   function activateProject(project: ForecastProjectDTO, rowKey: "project" | string) {
@@ -1013,6 +1120,15 @@ export function ForecastStudio({
                 {sharedWeeks.map((w) => {
                   const h = portfolioTotalsByWeek[w] ?? 0;
                   const past = w < currentSunday;
+                  const lockedProjectCount = projects.filter((project) =>
+                    project.lockedWeekStarts.includes(w),
+                  ).length;
+                  const portfolioLockState =
+                    lockedProjectCount === projects.length && projects.length > 0
+                      ? "locked"
+                      : lockedProjectCount > 0
+                        ? "mixed"
+                        : "unlocked";
                   return (
                     <div
                       key={w}
@@ -1026,10 +1142,21 @@ export function ForecastStudio({
                         hours={h}
                         editable={false}
                         locked={past}
+                        lockState={portfolioLockState}
+                        lockable={!past}
+                        lockPending={pendingLockKeys.has(`portfolio:${w}`)}
+                        lockLabel={
+                          portfolioLockState === "locked"
+                            ? `Unlock ${formatSundayWeekLabel(w)} for all active projects`
+                            : `Lock ${formatSundayWeekLabel(w)} for all active projects`
+                        }
                         capacityTint
                         barScaleHours={PORTFOLIO_BAR_MAX_HOURS}
                         cellId={`portfolio:total:${w}`}
                         onCommitHours={() => {}}
+                        onToggleLock={() =>
+                          toggleAllProjectsWeekLock(w, portfolioLockState !== "locked")
+                        }
                       />
                     </div>
                   );
@@ -1117,7 +1244,12 @@ export function ForecastStudio({
                 pmPercent: project.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT,
                 startMode,
                 todayIso,
-                actualsByRowKey: project.actualsByRowKey,
+                actualsByRowKey: actualsWithLockedForecastHours({
+                  actualsByRowKey: project.actualsByRowKey,
+                  lockedWeekStarts: project.lockedWeekStarts,
+                  lockedHoursByRow: displayHours,
+                  currentSunday,
+                }),
               })
             : null;
 
@@ -1334,7 +1466,8 @@ export function ForecastStudio({
                         project.timelineEndYmd,
                       );
                       const past = w < currentSunday;
-                      const canEdit = hasForecast && !past && inTimeline;
+                      const projectLocked = project.lockedWeekStarts.includes(w);
+                      const canEdit = hasForecast && !past && inTimeline && !projectLocked;
                       const isPhaseBoundary = phaseBoundaries.has(w);
                       const editProps = cellEditProps("project", w);
                       return (
@@ -1353,6 +1486,14 @@ export function ForecastStudio({
                               hours={h}
                               editable={canEdit}
                               locked={past}
+                              lockState={projectLocked ? "locked" : "unlocked"}
+                              lockable={hasForecast && !past}
+                              lockPending={pendingLockKeys.has(`${project.id}:${w}`)}
+                              lockLabel={
+                                projectLocked
+                                  ? `Unlock ${formatSundayWeekLabel(w)} for ${project.customer_name}`
+                                  : `Lock ${formatSundayWeekLabel(w)} for ${project.customer_name}`
+                              }
                               cellId={`${project.id}:project:${w}`}
                               {...editProps}
                               onCommitHours={(next) =>
@@ -1361,6 +1502,7 @@ export function ForecastStudio({
                               onNavigateWeek={(dir) =>
                                 navigateWeek(project.id, "project", w, dir)
                               }
+                              onToggleLock={() => toggleProjectWeekLock(project, w)}
                             />
                           ) : (
                             <span className="text-xs text-[var(--app-text-muted)]">·</span>
@@ -1444,7 +1586,9 @@ export function ForecastStudio({
                                 project.timelineEndYmd,
                               );
                               const past = w < currentSunday;
-                              const canEdit = hasForecast && !past && inTimeline;
+                              const projectLocked = project.lockedWeekStarts.includes(w);
+                              const canEdit =
+                                hasForecast && !past && inTimeline && !projectLocked;
                               const isPhaseBoundary = phaseBoundaries.has(w);
                               const editProps = cellEditProps(rowKey, w);
                               return (
@@ -1463,6 +1607,7 @@ export function ForecastStudio({
                                       hours={h}
                                       editable={canEdit}
                                       locked={past}
+                                      lockState={projectLocked ? "locked" : "unlocked"}
                                       cellId={`${project.id}:${rowKey}:${w}`}
                                       {...editProps}
                                       onCommitHours={(next) =>
@@ -1496,6 +1641,8 @@ export function ForecastStudio({
           phases={generateFor.phases}
           integrations={generateFor.integrations}
           actualsByRowKey={generateFor.actualsByRowKey}
+          lockedWeekStarts={generateFor.lockedWeekStarts}
+          lockedHoursByRow={hoursForDisplay(generateFor)}
           deploymentEffortByPhase={deploymentEffortByPhase}
           defaultPmPercent={generateFor.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT}
           defaultSpreadMode={generateFor.forecast?.spread_mode ?? "even"}

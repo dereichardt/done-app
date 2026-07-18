@@ -41,6 +41,8 @@ export type ForecastProjectDTO = {
   actualsByRowKey: Record<string, number>;
   forecast: ForecastHeaderDTO | null;
   hours: ForecastHoursCellDTO[];
+  /** Sunday week starts whose complete project column is protected. */
+  lockedWeekStarts: string[];
   /** Nested map rowKey → weekStart → hours for client convenience. */
   hoursByRow: Record<string, Record<string, number>>;
 };
@@ -160,8 +162,14 @@ export async function loadForecastProjectDTO(
 
   if (!project) return null;
 
-  const [{ data: phases }, { data: piRows }, { data: forecast }, { data: hoursRows }, actualsBundle] =
-    await Promise.all([
+  const [
+    { data: phases },
+    { data: piRows },
+    { data: forecast },
+    { data: hoursRows },
+    { data: lockRows },
+    actualsBundle,
+  ] = await Promise.all([
       supabase
         .from("project_phases")
         .select("phase_key, start_date, end_date, sort_order")
@@ -194,6 +202,11 @@ export async function loadForecastProjectDTO(
         .from("project_forecast_hours")
         .select("row_key, week_start_date, hours")
         .eq("project_id", projectId),
+      supabase
+        .from("project_forecast_week_locks")
+        .select("week_start_date")
+        .eq("project_id", projectId)
+        .order("week_start_date"),
       loadActualsByRowKey(supabase, projectId),
     ]);
 
@@ -243,6 +256,9 @@ export async function loadForecastProjectDTO(
         }
       : null,
     hours,
+    lockedWeekStarts: (lockRows ?? []).map((row) =>
+      String(row.week_start_date).slice(0, 10),
+    ),
     hoursByRow: hoursByRowFromCells(hours),
   };
 }

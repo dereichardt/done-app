@@ -23,6 +23,12 @@ function isValidYmd(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+function isSundayYmd(value: string): boolean {
+  if (!isValidYmd(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.getUTCDay() === 0;
+}
+
 function isValidPmPercent(n: number): boolean {
   return Number.isInteger(n) && n >= 0 && n <= 100 && n % 5 === 0;
 }
@@ -81,6 +87,8 @@ export async function generateProjectForecast(
     includePastPhaseHours,
     todayIso,
     actualsByRowKey: dto.actualsByRowKey,
+    lockedWeekStarts: dto.lockedWeekStarts,
+    lockedHoursByRow: dto.hoursByRow,
   });
 
   if (generated.error) return { error: generated.error };
@@ -101,14 +109,23 @@ export async function generateProjectForecast(
   );
   if (upsertHeaderError) return { error: upsertHeaderError.message };
 
-  // Replace only from the chosen start Sunday forward (keeps earlier weeks, including
-  // “this week” when regenerating for “next week”).
-  const { error: deleteError } = await supabase
-    .from("project_forecast_hours")
-    .delete()
-    .eq("project_id", projectId)
-    .gte("week_start_date", startDate);
-  if (deleteError) return { error: deleteError.message };
+  // Replace only unlocked weeks from the chosen start Sunday forward. Include
+  // existing dates so stale values outside the newly generated timeline are removed.
+  const lockedWeeks = new Set(dto.lockedWeekStarts);
+  const replaceWeeks = Array.from(
+    new Set([
+      ...generated.weeks.map((week) => week.startYmd),
+      ...dto.hours.map((cell) => cell.week_start_date),
+    ]),
+  ).filter((week) => week >= startDate && !lockedWeeks.has(week));
+  if (replaceWeeks.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("project_forecast_hours")
+      .delete()
+      .eq("project_id", projectId)
+      .in("week_start_date", replaceWeeks);
+    if (deleteError) return { error: deleteError.message };
+  }
 
   const cells: Array<{
     project_id: string;
@@ -121,6 +138,7 @@ export async function generateProjectForecast(
   for (const row of generated.rows) {
     for (const [week, hours] of Object.entries(row.hoursByWeekYmd)) {
       if (week < startDate) continue;
+      if (lockedWeeks.has(week)) continue;
       const h = Math.max(0, Math.round(hours));
       if (h === 0) continue;
       cells.push({
@@ -145,6 +163,125 @@ export async function generateProjectForecast(
 
   const project = await loadForecastProjectDTO(supabase, projectId, user.id);
   return { project: project ?? undefined };
+}
+
+export async function setProjectForecastWeekLock(
+  projectId: string,
+  input: { todayIso: string; weekStartDate: string; locked: boolean },
+): Promise<{ error?: string; lockedWeekStarts?: string[] }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const todayIso = String(input.todayIso ?? "").trim();
+  const weekStartDate = String(input.weekStartDate ?? "").trim();
+  if (!isValidYmd(todayIso) || !isSundayYmd(weekStartDate)) {
+    return { error: "Invalid forecast week." };
+  }
+  if (weekStartDate < currentSundayWeekYmd(todayIso)) {
+    return { error: "Past weeks cannot be locked or unlocked." };
+  }
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+  if (!project) return { error: "Project not found" };
+
+  if (input.locked) {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("project_forecast_week_locks").upsert(
+      {
+        project_id: projectId,
+        week_start_date: weekStartDate,
+        updated_at: now,
+      },
+      { onConflict: "project_id,week_start_date" },
+    );
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("project_forecast_week_locks")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("week_start_date", weekStartDate);
+    if (error) return { error: error.message };
+  }
+
+  const { data: locks, error: locksError } = await supabase
+    .from("project_forecast_week_locks")
+    .select("week_start_date")
+    .eq("project_id", projectId)
+    .order("week_start_date");
+  if (locksError) return { error: locksError.message };
+
+  revalidatePath("/forecast");
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/home");
+  return {
+    lockedWeekStarts: (locks ?? []).map((row) =>
+      String(row.week_start_date).slice(0, 10),
+    ),
+  };
+}
+
+export async function setAllActiveForecastWeekLocks(input: {
+  todayIso: string;
+  weekStartDate: string;
+  locked: boolean;
+}): Promise<{ error?: string; projectIds?: string[] }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const todayIso = String(input.todayIso ?? "").trim();
+  const weekStartDate = String(input.weekStartDate ?? "").trim();
+  if (!isValidYmd(todayIso) || !isSundayYmd(weekStartDate)) {
+    return { error: "Invalid forecast week." };
+  }
+  if (weekStartDate < currentSundayWeekYmd(todayIso)) {
+    return { error: "Past weeks cannot be locked or unlocked." };
+  }
+
+  const { data: activeProjects, error: projectsError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("owner_id", user.id)
+    .is("completed_at", null);
+  if (projectsError) return { error: projectsError.message };
+
+  const projectIds = (activeProjects ?? []).map((project) => project.id);
+  if (projectIds.length === 0) return { projectIds: [] };
+
+  if (input.locked) {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("project_forecast_week_locks").upsert(
+      projectIds.map((projectId) => ({
+        project_id: projectId,
+        week_start_date: weekStartDate,
+        updated_at: now,
+      })),
+      { onConflict: "project_id,week_start_date" },
+    );
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("project_forecast_week_locks")
+      .delete()
+      .in("project_id", projectIds)
+      .eq("week_start_date", weekStartDate);
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/forecast");
+  revalidatePath("/home");
+  return { projectIds };
 }
 
 export async function saveProjectForecastDraft(
@@ -213,6 +350,21 @@ export async function saveProjectForecastDraft(
         hours,
         updated_at: now,
       });
+    }
+  }
+
+  const editedWeeks = Array.from(
+    new Set((input.cells ?? []).map((cell) => String(cell.weekStartDate ?? "").trim())),
+  );
+  if (editedWeeks.length > 0) {
+    const { data: locks, error: locksError } = await supabase
+      .from("project_forecast_week_locks")
+      .select("week_start_date")
+      .eq("project_id", projectId)
+      .in("week_start_date", editedWeeks);
+    if (locksError) return { error: locksError.message };
+    if ((locks ?? []).length > 0) {
+      return { error: "Locked forecast weeks cannot be edited." };
     }
   }
 

@@ -76,6 +76,10 @@ export type GenerateForecastInput = {
   todayIso: string;
   /** Actual hours logged to date, keyed by rowKey (integration id or PM). */
   actualsByRowKey: Record<string, number>;
+  /** Project weeks whose existing row values must be preserved during regeneration. */
+  lockedWeekStarts?: string[];
+  /** Existing forecast values used as actual-like consumption for locked weeks. */
+  lockedHoursByRow?: Record<string, Record<string, number>>;
 };
 
 export type GenerateForecastResult = {
@@ -162,6 +166,29 @@ export function sumActualsConsumedHours(
   }
   sum += actualsHoursConsumed(Number(actualsByRowKey[PM_FORECAST_ROW_KEY] ?? 0));
   return sum;
+}
+
+/** Actuals plus protected current/future forecast hours, keyed by forecast row. */
+export function actualsWithLockedForecastHours(input: {
+  actualsByRowKey: Record<string, number>;
+  lockedWeekStarts: string[];
+  lockedHoursByRow: Record<string, Record<string, number>>;
+  currentSunday: string;
+}): Record<string, number> {
+  const combined = { ...input.actualsByRowKey };
+  const lockedWeeks = new Set(input.lockedWeekStarts);
+  for (const [rowKey, hoursByWeek] of Object.entries(input.lockedHoursByRow)) {
+    let lockedHours = 0;
+    for (const [week, hours] of Object.entries(hoursByWeek)) {
+      if (week >= input.currentSunday && lockedWeeks.has(week)) {
+        lockedHours += Math.max(0, Math.round(hours));
+      }
+    }
+    if (lockedHours > 0) {
+      combined[rowKey] = Number(combined[rowKey] ?? 0) + lockedHours;
+    }
+  }
+  return combined;
 }
 
 /** Largest-remainder allocation of `total` across `weights` (non-negative). */
@@ -852,6 +879,15 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
 
   const spreadMode = input.spreadMode ?? DEFAULT_FORECAST_SPREAD_MODE;
   const includePastPhaseHours = input.includePastPhaseHours ?? false;
+  const currentSunday = currentSundayWeekYmd(input.todayIso);
+  const lockedWeeks = new Set(input.lockedWeekStarts ?? []);
+  const allocationWeeks = writableWeeks.filter((week) => !lockedWeeks.has(week));
+  const effectiveActualsByRowKey = actualsWithLockedForecastHours({
+    actualsByRowKey: input.actualsByRowKey,
+    lockedWeekStarts: input.lockedWeekStarts ?? [],
+    lockedHoursByRow: input.lockedHoursByRow ?? {},
+    currentSunday,
+  });
   const rows: ForecastRowHours[] = [];
   let reserveHours = 0;
 
@@ -859,8 +895,37 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
   const { trackKeys, trackRemaining } = allocateTrackRemainingHours({
     integrations: input.integrations,
     pmPercent: input.pmPercent,
-    actualsByRowKey: input.actualsByRowKey,
+    actualsByRowKey: effectiveActualsByRowKey,
   });
+
+  const lockedMapForRow = (rowKey: string): Record<string, number> => {
+    const map: Record<string, number> = {};
+    for (const week of writableWeeks) {
+      if (!lockedWeeks.has(week)) continue;
+      map[week] = Math.max(
+        0,
+        Math.round(input.lockedHoursByRow?.[rowKey]?.[week] ?? 0),
+      );
+    }
+    return map;
+  };
+
+  if (allocationWeeks.length === 0) {
+    for (let i = 0; i < trackKeys.length; i++) {
+      rows.push({ rowKey: trackKeys[i], hoursByWeekYmd: lockedMapForRow(trackKeys[i]) });
+    }
+    reserveHours = trackRemaining.reduce((sum, hours) => sum + hours, 0);
+    return {
+      weeks: writableWeeks.map((startYmd) => ({
+        startYmd,
+        label: formatSundayWeekLabel(startYmd),
+      })),
+      rows,
+      integrationTargets,
+      pmTarget,
+      reserveHours,
+    };
+  }
 
   if (spreadMode === "even") {
     // Peanut-butter week totals first, then carve each week across tracks by
@@ -869,23 +934,23 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
     const totalRemaining = trackRemaining.reduce((a, b) => a + b, 0);
     const spread = spreadRemainingAcrossWeeks({
       remaining: totalRemaining,
-      writableWeeks,
+      writableWeeks: allocationWeeks,
       phases: input.phases,
       deploymentEffortByPhase: input.deploymentEffortByPhase,
       spreadMode: "even",
       includePastPhaseHours,
     });
     const budgets = [...trackRemaining];
-    const maps = trackKeys.map(() => {
-      const m: Record<string, number> = {};
-      for (const w of writableWeeks) m[w] = 0;
+    const maps = trackKeys.map((rowKey) => {
+      const m = lockedMapForRow(rowKey);
+      for (const w of allocationWeeks) m[w] = 0;
       return m;
     });
     const dumpWeek =
       spread.bankWeekStarts[spread.bankWeekStarts.length - 1] ??
-      writableWeeks[writableWeeks.length - 1];
+      allocationWeeks[allocationWeeks.length - 1];
 
-    for (const week of writableWeeks) {
+    for (const week of allocationWeeks) {
       const H = spread.hoursByWeekYmd[week] ?? 0;
       if (H <= 0) continue;
       const weightSum = budgets.reduce((a, b) => a + Math.max(0, b), 0);
@@ -919,14 +984,20 @@ export function generateForecastHours(input: GenerateForecastInput): GenerateFor
     for (let i = 0; i < trackKeys.length; i++) {
       const spread = spreadRemainingAcrossWeeks({
         remaining: trackRemaining[i],
-        writableWeeks,
+        writableWeeks: allocationWeeks,
         phases: input.phases,
         deploymentEffortByPhase: input.deploymentEffortByPhase,
         spreadMode: "bell",
         includePastPhaseHours,
       });
       reserveHours += spread.unallocatedHours;
-      rows.push({ rowKey: trackKeys[i], hoursByWeekYmd: spread.hoursByWeekYmd });
+      rows.push({
+        rowKey: trackKeys[i],
+        hoursByWeekYmd: {
+          ...lockedMapForRow(trackKeys[i]),
+          ...spread.hoursByWeekYmd,
+        },
+      });
     }
   }
 

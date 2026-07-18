@@ -6,6 +6,7 @@ import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-va
 import { generateProjectForecast } from "@/lib/actions/project-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
+  actualsWithLockedForecastHours,
   computeForecastPastPhaseSummary,
   DEFAULT_FORECAST_PM_PERCENT,
   DEFAULT_FORECAST_SPREAD_MODE,
@@ -26,6 +27,8 @@ export function GenerateForecastDialog({
   phases,
   integrations,
   actualsByRowKey,
+  lockedWeekStarts = [],
+  lockedHoursByRow = {},
   deploymentEffortByPhase,
   defaultPmPercent = DEFAULT_FORECAST_PM_PERCENT,
   defaultSpreadMode = DEFAULT_FORECAST_SPREAD_MODE,
@@ -41,6 +44,8 @@ export function GenerateForecastDialog({
   phases: ForecastPhaseInput[];
   integrations: ForecastIntegrationInput[];
   actualsByRowKey: Record<string, number>;
+  lockedWeekStarts?: string[];
+  lockedHoursByRow?: Record<string, Record<string, number>>;
   deploymentEffortByPhase: DeploymentEffortByPhase;
   defaultPmPercent?: number;
   defaultSpreadMode?: ForecastSpreadMode;
@@ -84,7 +89,12 @@ export function GenerateForecastDialog({
         pmPercent,
         startMode,
         todayIso,
-        actualsByRowKey,
+        actualsByRowKey: actualsWithLockedForecastHours({
+          actualsByRowKey,
+          lockedWeekStarts,
+          lockedHoursByRow,
+          currentSunday: thisWeekSunday,
+        }),
       }),
     [
       phases,
@@ -94,6 +104,9 @@ export function GenerateForecastDialog({
       startMode,
       todayIso,
       actualsByRowKey,
+      lockedWeekStarts,
+      lockedHoursByRow,
+      thisWeekSunday,
     ],
   );
 

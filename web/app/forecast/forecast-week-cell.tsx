@@ -2,13 +2,12 @@
 
 import {
   useCallback,
-  useEffect,
   useRef,
   useState,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { UndoIcon } from "@/components/action-icons";
+import { LockIcon, UndoIcon } from "@/components/action-icons";
 
 const BAR_MAX_PX = 100;
 /**
@@ -21,10 +20,10 @@ export const PORTFOLIO_BAR_MAX_HOURS = 42;
 /** Portfolio load above this uses warning (pale yellow) instead of success green. */
 export const PORTFOLIO_OVERLOAD_HOURS = 40;
 
-function barHeightPx(hours: number, scaleHours: number): number {
+function barHeightPx(hours: number, scaleHours: number, maxPx = BAR_MAX_PX): number {
   const scale = Math.max(1, scaleHours);
   if (hours <= 0) return 4;
-  return Math.min(BAR_MAX_PX, Math.max(8, Math.round((hours / scale) * BAR_MAX_PX)));
+  return Math.min(maxPx, Math.max(8, Math.round((hours / scale) * maxPx)));
 }
 
 function capacityBarFillClass(hours: number): string {
@@ -55,6 +54,10 @@ export function ForecastWeekCell({
   hours,
   editable,
   locked = false,
+  lockState = "unlocked",
+  lockable = false,
+  lockPending = false,
+  lockLabel,
   cellId,
   barScaleHours = TARGET_WEEKLY_FORECAST_HOURS,
   /**
@@ -69,11 +72,17 @@ export function ForecastWeekCell({
   saveError = null,
   onCommitHours,
   onNavigateWeek,
+  onToggleLock,
 }: {
   hours: number;
   editable: boolean;
   /** Past / out-of-window weeks that cannot be edited. */
   locked?: boolean;
+  /** User-controlled project-week state; mixed is used by the portfolio total. */
+  lockState?: "unlocked" | "locked" | "mixed";
+  lockable?: boolean;
+  lockPending?: boolean;
+  lockLabel?: string;
   /** Stable id for cross-cell focus (`projectId:rowKey:week`). */
   cellId?: string;
   /** Hours that fill the bar to max height (defaults to {@link TARGET_WEEKLY_FORECAST_HOURS}). */
@@ -85,21 +94,25 @@ export function ForecastWeekCell({
   saveError?: string | null;
   onCommitHours: (next: number) => void;
   onNavigateWeek?: (direction: -1 | 1) => void;
+  onToggleLock?: () => void;
 }) {
   const [text, setText] = useState(String(hours));
   const [previewHours, setPreviewHours] = useState<number | null>(null);
+  const [sourceHours, setSourceHours] = useState(hours);
   const dragRef = useRef<{ startY: number; startHours: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const draggedRef = useRef(false);
 
-  useEffect(() => {
+  if (hours !== sourceHours) {
+    setSourceHours(hours);
     setText(String(hours));
     setPreviewHours(null);
-  }, [hours]);
+  }
 
   const displayHours = previewHours ?? hours;
   const scaleHours = capacityTint ? PORTFOLIO_BAR_MAX_HOURS : barScaleHours;
-  const fillPx = barHeightPx(displayHours, scaleHours);
+  const visualBarMaxPx = lockable && !capacityTint ? 84 : BAR_MAX_PX;
+  const fillPx = barHeightPx(displayHours, scaleHours, visualBarMaxPx);
   const targetLineBottomPx = Math.round(
     (TARGET_WEEKLY_FORECAST_HOURS / PORTFOLIO_BAR_MAX_HOURS) * BAR_MAX_PX,
   );
@@ -207,14 +220,22 @@ export function ForecastWeekCell({
   }
 
   const originalHours = sessionBaselineHours ?? hours;
+  const userLocked = lockState === "locked";
+  const hasUserLock = lockState !== "unlocked";
   const sessionChanged =
-    sessionBaselineHours != null && Math.round(displayHours) !== Math.round(sessionBaselineHours);
+    !hasUserLock &&
+    sessionBaselineHours != null &&
+    Math.round(displayHours) !== Math.round(sessionBaselineHours);
   const inputInvalid =
     text.length === 0 || (text.length > 0 && parseWholeHoursInput(text) === null);
 
   const shellClass = sessionChanged
     ? "rounded-md border border-[color-mix(in_oklab,var(--app-info)_50%,var(--app-border))] bg-[color-mix(in_oklab,var(--app-info-surface)_65%,var(--app-surface))] px-1.5 py-1"
-    : locked
+    : userLocked
+      ? "rounded-md border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-1.5 py-1"
+      : lockState === "mixed"
+        ? "rounded-md border border-dashed border-[var(--app-border)] bg-[color-mix(in_oklab,var(--app-surface-alt)_65%,var(--app-surface))] px-1.5 py-1"
+        : locked
       ? "rounded-md border border-transparent px-1.5 py-1 opacity-60"
       : "rounded-md border border-transparent px-1.5 py-1";
 
@@ -222,7 +243,7 @@ export function ForecastWeekCell({
     ? "bg-[var(--app-info)] hover:bg-[color-mix(in_oklab,var(--app-info)_88%,var(--app-action))]"
     : editable
       ? "bg-[color-mix(in_oklab,var(--app-action)_75%,transparent)] hover:bg-[var(--app-action)]"
-      : locked
+      : locked || hasUserLock
         ? "bg-[color-mix(in_oklab,var(--app-text)_12%,transparent)]"
         : "bg-[color-mix(in_oklab,var(--app-text)_18%,transparent)]";
 
@@ -235,7 +256,7 @@ export function ForecastWeekCell({
 
   return (
     <div
-      className={`flex h-[168px] min-w-[4.5rem] flex-col items-center justify-end gap-0.5 ${shellClass}`}
+      className={`group relative flex h-[168px] min-w-[4.5rem] flex-col items-center justify-end gap-0.5 ${shellClass}`}
       data-forecast-cell={cellId}
       onClick={() => {
         if (!editable) return;
@@ -243,6 +264,38 @@ export function ForecastWeekCell({
         inputRef.current?.select();
       }}
     >
+      {lockable && !locked && onToggleLock ? (
+        <button
+          type="button"
+          aria-label={lockLabel ?? (userLocked ? "Unlock forecast week" : "Lock forecast week")}
+          aria-pressed={lockState === "mixed" ? "mixed" : userLocked}
+          disabled={lockPending}
+          title={lockLabel}
+          className={`absolute left-1/2 top-1 z-[2] inline-flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full text-[var(--app-text-muted)] transition-opacity hover:bg-[var(--app-surface-muted-solid)] hover:text-[var(--app-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[color-mix(in_oklab,var(--app-text)_35%,transparent)] disabled:cursor-wait disabled:opacity-60 ${
+            hasUserLock
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+          }`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleLock();
+          }}
+        >
+          {userLocked ? (
+            <>
+              <span className="inline-flex group-hover:hidden group-focus-within:hidden">
+                <LockIcon size={16} />
+              </span>
+              <span className="hidden group-hover:inline-flex group-focus-within:inline-flex">
+                <LockIcon size={16} open />
+              </span>
+            </>
+          ) : (
+            <LockIcon size={16} />
+          )}
+        </button>
+      ) : null}
+
       {capacityTint ? (
         <div
           className="relative w-7 shrink-0"
@@ -273,12 +326,15 @@ export function ForecastWeekCell({
           />
         </div>
       ) : (
-        <div className="flex h-[108px] flex-col items-center justify-end">
+        <div
+          className="flex flex-col items-center justify-end"
+          style={{ height: visualBarMaxPx + 8 }}
+        >
           <button
             type="button"
             disabled={!editable}
             aria-label={
-              locked
+              locked || userLocked
                 ? `Forecast ${displayHours} hours (locked)`
                 : `Forecast ${displayHours} hours. Drag to adjust, or click to type.`
             }
@@ -286,7 +342,13 @@ export function ForecastWeekCell({
             aria-valuemin={0}
             role="slider"
             tabIndex={editable ? 0 : -1}
-            title={locked ? "Past weeks are locked" : undefined}
+            title={
+              userLocked
+                ? "This project week is locked"
+                : locked
+                  ? "Past weeks are locked"
+                  : undefined
+            }
             className={`relative w-7 cursor-ns-resize rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)] disabled:cursor-default ${editableBarFillClass}`}
             style={{ height: fillPx }}
             onPointerDown={onPointerDown}
@@ -330,17 +392,24 @@ export function ForecastWeekCell({
       ) : (
         <span
           className="text-xs tabular-nums text-[var(--app-text)]"
-          title={locked ? "Past weeks are locked" : undefined}
+          title={
+            userLocked
+              ? "This project week is locked"
+              : locked
+                ? "Past weeks are locked"
+                : undefined
+          }
         >
           {hours}
         </span>
       )}
 
-      <div
-        className="flex h-[22px] w-full items-center justify-center"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {saving ? (
+      {capacityTint ? null : (
+        <div
+          className="flex h-[22px] w-full items-center justify-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {saving ? (
           <span className="text-[10px] font-medium text-[var(--app-text-muted)]" role="status">
             Saving…
           </span>
@@ -373,8 +442,9 @@ export function ForecastWeekCell({
           <span className="invisible text-[10px]" aria-hidden>
             —
           </span>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
