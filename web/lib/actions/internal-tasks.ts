@@ -10,12 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-const TASK_STATUSES = ["open", "done", "cancelled"] as const;
-type TaskStatus = (typeof TASK_STATUSES)[number];
-
-function isTaskStatus(v: string): v is TaskStatus {
-  return (TASK_STATUSES as readonly string[]).includes(v);
-}
+type TaskStatus = "open" | "done" | "cancelled";
 
 const TASK_PRIORITIES = ["low", "medium", "high"] as const;
 type TaskPriority = (typeof TASK_PRIORITIES)[number];
@@ -40,6 +35,9 @@ function revalidateInternalAll(initiativeId?: string | null) {
   revalidatePath("/internal");
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
+  revalidatePath("/home");
+  revalidatePath("/forecast");
   if (initiativeId) revalidatePath(`/internal/initiatives/${initiativeId}`);
 }
 
@@ -363,6 +361,8 @@ export async function createInternalInitiative(payload: {
   ends_on: string;
   /** Raw form text; empty omits effort. */
   estimated_effort_hours?: string;
+  include_in_forecast?: boolean;
+  icp?: boolean;
 }): Promise<{ error?: string; id?: string }> {
   const supabase = await createClient();
   const {
@@ -384,6 +384,11 @@ export async function createInternalInitiative(payload: {
     if (parsed.error) return { error: parsed.error };
     estimated_effort_hours = parsed.hours;
   }
+  const include_in_forecast = payload.include_in_forecast === true;
+  const icp = payload.icp === true;
+  if (include_in_forecast && (!estimated_effort_hours || estimated_effort_hours <= 0)) {
+    return { error: "A positive estimated effort is required for forecasting" };
+  }
 
   const { data: inserted, error } = await supabase
     .from("internal_initiatives")
@@ -393,6 +398,8 @@ export async function createInternalInitiative(payload: {
       starts_on,
       ends_on,
       estimated_effort_hours,
+      include_in_forecast,
+      icp,
     })
     .select("id")
     .maybeSingle();
@@ -405,7 +412,14 @@ export async function createInternalInitiative(payload: {
 
 export async function updateInternalInitiativeDetails(
   initiativeId: string,
-  data: { title: string; starts_on: string; ends_on: string; estimated_effort_hours?: string },
+  data: {
+    title: string;
+    starts_on: string;
+    ends_on: string;
+    estimated_effort_hours?: string;
+    include_in_forecast?: boolean;
+    icp?: boolean;
+  },
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -423,6 +437,11 @@ export async function updateInternalInitiativeDetails(
   const effortParsed = parseInternalInitiativeEstimatedEffortHours(data.estimated_effort_hours ?? "");
   if (effortParsed.error) return { error: effortParsed.error };
   const estimated_effort_hours = effortParsed.hours;
+  const include_in_forecast = data.include_in_forecast === true;
+  const icp = data.icp === true;
+  if (include_in_forecast && (!estimated_effort_hours || estimated_effort_hours <= 0)) {
+    return { error: "A positive estimated effort is required for forecasting" };
+  }
 
   const { data: row } = await supabase
     .from("internal_initiatives")
@@ -434,7 +453,7 @@ export async function updateInternalInitiativeDetails(
 
   const { error } = await supabase
     .from("internal_initiatives")
-    .update({ title, starts_on, ends_on, estimated_effort_hours })
+    .update({ title, starts_on, ends_on, estimated_effort_hours, include_in_forecast, icp })
     .eq("id", initiativeId)
     .eq("owner_id", user.id);
 
@@ -573,6 +592,7 @@ export async function deleteInternalInitiative(initiativeId: string): Promise<{ 
   revalidatePath("/internal");
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
   redirect("/internal");
 }
 

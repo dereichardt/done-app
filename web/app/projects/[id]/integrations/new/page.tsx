@@ -1,8 +1,7 @@
-import { ensureDefaultLookups } from "@/lib/actions/ensure-lookups";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { buildFunctionalAreaLookupData } from "@/lib/functional-area-grouping";
 import { buildIntegrationTypeSelectOptions } from "@/lib/integration-metadata";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import type { IntegrationLookupOptions } from "../../integration-definition-fields";
 import { AddIntegrationClient, type CatalogIntegrationOption } from "./add-integration-client";
 
@@ -12,21 +11,21 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function AddIntegrationPage({ params }: PageProps) {
   const { id: projectId } = await params;
-  await ensureDefaultLookups();
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const { data: project } = await supabase
     .from("projects")
-    .select("id")
+    .select("id, integrations_enabled")
     .eq("id", projectId)
     .eq("owner_id", user.id)
     .maybeSingle();
 
   if (!project) notFound();
+  if (project.integrations_enabled === false) {
+    redirect(`/projects/${projectId}`);
+  }
 
   const [
     { data: integrationTypes },

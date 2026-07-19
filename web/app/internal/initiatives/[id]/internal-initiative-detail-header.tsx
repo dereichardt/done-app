@@ -1,6 +1,9 @@
 "use client";
 
 import { CanvasArrowLeftIcon } from "@/components/canvas-arrow-icons";
+import { FormSwitch } from "@/components/form-switch";
+import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
+import { generateInitiativeForecast } from "@/lib/actions/initiative-forecast";
 import {
   reopenInternalInitiative,
   updateInternalInitiativeDetails,
@@ -23,6 +26,8 @@ export function InternalInitiativeDetailHeader({
   endsOn,
   completedAt,
   initialEstimatedEffortHours,
+  initialIncludeInForecast,
+  initialIcp,
 }: {
   initiativeId: string;
   title: string;
@@ -30,6 +35,8 @@ export function InternalInitiativeDetailHeader({
   endsOn: string;
   completedAt: string | null;
   initialEstimatedEffortHours: number | null;
+  initialIncludeInForecast: boolean;
+  initialIcp: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -73,6 +80,8 @@ export function InternalInitiativeDetailHeader({
     const starts_on = String(fd.get("starts_on") ?? "").trim();
     const ends_on = String(fd.get("ends_on") ?? "").trim();
     const estimated_effort_hours = String(fd.get("estimated_effort_hours") ?? "");
+    const include_in_forecast = fd.has("include_in_forecast");
+    const icp = fd.has("icp");
 
     setSaving(true);
     try {
@@ -81,10 +90,19 @@ export function InternalInitiativeDetailHeader({
         starts_on,
         ends_on,
         estimated_effort_hours,
+        include_in_forecast,
+        icp,
       });
       if (result.error) {
         setError(result.error);
         return;
+      }
+      if (include_in_forecast && !initialIncludeInForecast) {
+        const forecastResult = await generateInitiativeForecast(initiativeId);
+        if (forecastResult.error) {
+          setError(forecastResult.error);
+          return;
+        }
       }
       setEditing(false);
       router.refresh();
@@ -116,6 +134,7 @@ export function InternalInitiativeDetailHeader({
               <h1 id="initiative-title-sentinel" className="heading-page min-w-0 shrink truncate">
                 {displayTitle}
               </h1>
+              {initialIcp ? <InitiativeIcpPill /> : null}
               <div className="relative shrink-0" ref={menuRef}>
                 <button
                   type="button"
@@ -235,6 +254,20 @@ export function InternalInitiativeDetailHeader({
                 defaultValue={formatEffortInputDefault(initialEstimatedEffortHours)}
               />
             </label>
+            <div className="card-canvas flex flex-col gap-4 p-4">
+              <FormSwitch
+                name="include_in_forecast"
+                label="Include in forecast"
+                description="Add this initiative to Forecast Studio and Home variance reporting."
+                defaultChecked={initialIncludeInForecast}
+              />
+              <FormSwitch
+                name="icp"
+                label="ICP"
+                description="Identify this as an ICP initiative wherever initiative titles are shown."
+                defaultChecked={initialIcp}
+              />
+            </div>
             {error ? (
               <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
                 {error}

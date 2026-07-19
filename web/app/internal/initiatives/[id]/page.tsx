@@ -2,7 +2,7 @@ import { fetchInternalInitiativeTaskSnapshot } from "@/lib/actions/internal-task
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
 import { IntegrationEffortSection } from "@/components/integration-effort-section";
 import type { EffortSessionInput } from "@/lib/integration-effort-buckets";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { getUserTodayIso } from "@/lib/user-preferences";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -15,15 +15,15 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function InternalInitiativeDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const { data: ini, error: iniErr } = await supabase
     .from("internal_initiatives")
-    .select("id, title, starts_on, ends_on, estimated_effort_hours, completed_at")
+    .select(
+      "id, title, starts_on, ends_on, estimated_effort_hours, completed_at, include_in_forecast, icp",
+    )
     .eq("id", id)
     .eq("owner_id", user.id)
     .maybeSingle();
@@ -127,6 +127,8 @@ export default async function InternalInitiativeDetailPage({ params }: PageProps
         endsOn={ini.ends_on}
         completedAt={ini.completed_at ?? null}
         initialEstimatedEffortHours={initialEstimatedEffortHoursForHeader}
+        initialIncludeInForecast={Boolean(ini.include_in_forecast)}
+        initialIcp={Boolean(ini.icp)}
       />
       <InternalTasksWorkPanel
         parentListId={id}
@@ -134,6 +136,7 @@ export default async function InternalInitiativeDetailPage({ params }: PageProps
         todayIso={todayIso}
         snapshot={snapRes.snapshot}
         internalTaskCreate={{ kind: "initiative", initiativeId: id }}
+        isIcp={Boolean(ini.icp)}
       />
 
       <section className="mt-8 mb-12">

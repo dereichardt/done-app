@@ -1,5 +1,4 @@
-import { ensureDefaultLookups } from "@/lib/actions/ensure-lookups";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { buildFunctionalAreaLookupData } from "@/lib/functional-area-grouping";
 import { todayISO } from "@/lib/project-phase-status";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
@@ -40,12 +39,9 @@ function lookupName(row: unknown): string | null {
 
 export default async function ProjectIntegrationDetailPage({ params }: PageProps) {
   const { id: projectId, projectIntegrationId } = await params;
-  await ensureDefaultLookups();
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
   const prefsRes = await loadUserPreferences();
   const userTodayIso = todayISO(prefsRes.preferences.timezone);
 

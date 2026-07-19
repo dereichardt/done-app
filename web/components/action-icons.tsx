@@ -107,6 +107,32 @@ export function LockIcon({
   );
 }
 
+export function PinIcon({
+  size = 16,
+  className = "shrink-0",
+  pinned = false,
+}: ActionIconProps & { pinned?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>
+      <path
+        fill={pinned ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m8 4 8 0-1.5 5 3 3H6.5l3-3L8 4Z"
+      />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        d="M12 12v8"
+      />
+    </svg>
+  );
+}
+
 /** Three dots vertically (⋯), for overflow / “more actions” menus. */
 export function EllipsisVerticalIcon({ size = 20, className = "shrink-0" }: ActionIconProps) {
   return (

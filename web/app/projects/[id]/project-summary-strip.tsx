@@ -1,5 +1,5 @@
 import { VarianceCard } from "@/components/home-actuals-vs-forecast";
-import { weekPaceStatus, type HomeWeekTotals } from "@/lib/home-actuals-vs-forecast";
+import type { HomeWeekTotals } from "@/lib/home-actuals-vs-forecast";
 import type { HomeProjectForecastStats } from "@/lib/home-project-status";
 import {
   formatPhaseDate,
@@ -93,7 +93,6 @@ export function ProjectSummaryStrip({
   integrationCount,
   actualsVsForecast,
   projectForecastStats,
-  todayYmd,
   embedded = false,
 }: {
   completedAt: string | null;
@@ -101,8 +100,6 @@ export function ProjectSummaryStrip({
   integrationCount: number;
   actualsVsForecast: HomeWeekTotals;
   projectForecastStats?: HomeProjectForecastStats;
-  /** User-local today; enables this-week pace pill on the variance card. */
-  todayYmd?: string;
   /** When true, omit top margin and Summary heading (for nesting inside Progress). */
   embedded?: boolean;
 }) {
@@ -296,7 +293,6 @@ export function ProjectSummaryStrip({
           <VarianceCard
             title="Actuals vs Forecast"
             totals={actualsVsForecast}
-            paceStatus={todayYmd ? weekPaceStatus(actualsVsForecast, todayYmd) : null}
           />
         )}
       </div>

@@ -1,16 +1,14 @@
 import { ProjectsPageContent } from "@/components/projects-page-content";
 import { loadActiveWorkSessionIndicator } from "@/lib/actions/integration-tasks";
 import { loadProjectListSummariesById } from "@/lib/load-project-list-summaries";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
 import { todayISO } from "@/lib/project-phase-status";
 
 export default async function ProjectsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
   const prefsRes = await loadUserPreferences();
   const userTodayIso = todayISO(prefsRes.preferences.timezone);
 

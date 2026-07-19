@@ -1,6 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
-import { loadAllActiveForecastProjects } from "@/lib/forecast-data";
+import { loadAllActiveForecastItems } from "@/lib/forecast-data";
 import { todayISO } from "@/lib/project-phase-status";
 import { ForecastStudio } from "./forecast-studio";
 
@@ -12,15 +12,13 @@ export default async function ForecastPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const focusProjectId = typeof params.project === "string" ? params.project.trim() : null;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const prefsRes = await loadUserPreferences();
   const todayIso = todayISO(prefsRes.preferences.timezone);
-  const projects = await loadAllActiveForecastProjects(supabase, user.id, {
+  const projects = await loadAllActiveForecastItems(supabase, user.id, {
     todayIso,
     timeZone: prefsRes.preferences.timezone,
   });

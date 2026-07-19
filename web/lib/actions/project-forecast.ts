@@ -9,9 +9,11 @@ import {
   generateForecastHours,
   isForecastSpreadMode,
   type ForecastPhaseInput,
+  type GenerateForecastResult,
   type ForecastSpreadMode,
   type ForecastStartMode,
 } from "@/lib/project-forecast";
+import { generateExpertAssistForecastHours } from "@/lib/expert-assist-forecast";
 import {
   loadAllActiveForecastProjects,
   loadForecastProjectDTO,
@@ -29,10 +31,6 @@ function isSundayYmd(value: string): boolean {
   return !Number.isNaN(date.getTime()) && date.getUTCDay() === 0;
 }
 
-function isValidPmPercent(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n <= 100 && n % 5 === 0;
-}
-
 function isValidStartMode(value: unknown): value is ForecastStartMode {
   return value === "this_week" || value === "next_week";
 }
@@ -41,7 +39,6 @@ export async function generateProjectForecast(
   projectId: string,
   input: {
     startMode: ForecastStartMode;
-    pmPercent: number;
     spreadMode: ForecastSpreadMode;
     includePastPhaseHours?: boolean;
     todayIso: string;
@@ -54,7 +51,6 @@ export async function generateProjectForecast(
   if (!user) return { error: "Not signed in" };
 
   const todayIso = String(input.todayIso ?? "").trim();
-  const pmPercent = Number(input.pmPercent);
   const startMode = input.startMode;
   const spreadMode = input.spreadMode;
   const includePastPhaseHours = Boolean(input.includePastPhaseHours);
@@ -62,9 +58,6 @@ export async function generateProjectForecast(
   if (!isValidYmd(todayIso)) return { error: "Invalid today date." };
   if (!isValidStartMode(startMode)) {
     return { error: "Choose This week or Next week." };
-  }
-  if (!isValidPmPercent(pmPercent)) {
-    return { error: "PM % must be a multiple of 5 between 0 and 100." };
   }
   if (!isForecastSpreadMode(spreadMode)) {
     return { error: "Choose Even spread or Bell curve." };
@@ -78,40 +71,40 @@ export async function generateProjectForecast(
   const dto = await loadForecastProjectDTO(supabase, projectId, user.id, actualsContext);
   if (!dto) return { error: "Project not found" };
 
-  const startDate = forecastStartSundayYmd(todayIso, startMode);
+  let startDate = forecastStartSundayYmd(todayIso, startMode);
 
   // Completed actuals from prior Sunday–Saturday weeks reduce remaining hours.
-  const generated = generateForecastHours({
-    phases: dto.phases as ForecastPhaseInput[],
-    integrations: dto.integrations,
-    deploymentEffortByPhase: prefsRes.preferences.deployment_effort_by_phase,
-    pmPercent,
-    startMode,
-    spreadMode,
-    includePastPhaseHours,
-    todayIso,
-    actualsByRowKey: dto.actualsByRowKey,
-    lockedWeekStarts: dto.lockedWeekStarts,
-    lockedHoursByRow: dto.hoursByRow,
-  });
+  let generated: GenerateForecastResult;
+  if (dto.forecastModel === "single_track") {
+    const estimate = dto.integrations[0]?.estimatedEffortHours ?? 0;
+    const allocation = generateExpertAssistForecastHours({
+      startsOn: dto.timelineStartYmd ?? "",
+      endsOn: dto.timelineEndYmd ?? "",
+      estimatedEffortHours: estimate,
+      actualHours: dto.actualHours,
+      todayIso,
+      startMode,
+      lockedWeekStarts: dto.lockedWeekStarts,
+      existingHoursByWeek: dto.hoursByWeek,
+    });
+    startDate = allocation.startDate;
+    generated = allocation;
+  } else {
+    generated = generateForecastHours({
+      phases: dto.phases as ForecastPhaseInput[],
+      integrations: dto.integrations,
+      deploymentEffortByPhase: prefsRes.preferences.deployment_effort_by_phase,
+      startMode,
+      spreadMode,
+      includePastPhaseHours,
+      todayIso,
+      actualHours: dto.actualHours,
+      lockedWeekStarts: dto.lockedWeekStarts,
+      lockedHoursByWeek: dto.hoursByWeek,
+    });
+  }
 
   if (generated.error) return { error: generated.error };
-
-  const now = new Date().toISOString();
-  const { error: upsertHeaderError } = await supabase.from("project_forecasts").upsert(
-    {
-      project_id: projectId,
-      start_date: startDate,
-      pm_percent: pmPercent,
-      spread_mode: spreadMode,
-      reserve_hours: generated.reserveHours,
-      include_past_phases_in_spread: includePastPhaseHours,
-      generated_at: now,
-      updated_at: now,
-    },
-    { onConflict: "project_id" },
-  );
-  if (upsertHeaderError) return { error: upsertHeaderError.message };
 
   // Replace only unlocked weeks from the chosen start Sunday forward. Include
   // existing dates so stale values outside the newly generated timeline are removed.
@@ -122,45 +115,34 @@ export async function generateProjectForecast(
       ...dto.hours.map((cell) => cell.week_start_date),
     ]),
   ).filter((week) => week >= startDate && !lockedWeeks.has(week));
-  if (replaceWeeks.length > 0) {
-    const { error: deleteError } = await supabase
-      .from("project_forecast_hours")
-      .delete()
-      .eq("project_id", projectId)
-      .in("week_start_date", replaceWeeks);
-    if (deleteError) return { error: deleteError.message };
-  }
-
   const cells: Array<{
-    project_id: string;
-    row_key: string;
     week_start_date: string;
     hours: number;
-    updated_at: string;
   }> = [];
 
-  for (const row of generated.rows) {
-    for (const [week, hours] of Object.entries(row.hoursByWeekYmd)) {
-      if (week < startDate) continue;
-      if (lockedWeeks.has(week)) continue;
-      const h = Math.max(0, Math.round(hours));
-      if (h === 0) continue;
-      cells.push({
-        project_id: projectId,
-        row_key: row.rowKey,
-        week_start_date: week,
-        hours: h,
-        updated_at: now,
-      });
-    }
+  for (const [week, hours] of Object.entries(generated.hoursByWeek)) {
+    if (week < startDate || lockedWeeks.has(week)) continue;
+    const h = Math.max(0, Math.round(hours));
+    if (h === 0) continue;
+    cells.push({
+      week_start_date: week,
+      hours: h,
+    });
   }
 
-  if (cells.length > 0) {
-    const { error: insertError } = await supabase.from("project_forecast_hours").upsert(cells, {
-      onConflict: "project_id,row_key,week_start_date",
-    });
-    if (insertError) return { error: insertError.message };
-  }
+  const now = new Date().toISOString();
+  const { error: persistError } = await supabase.rpc("replace_project_forecast", {
+    p_project_id: projectId,
+    p_start_date: startDate,
+    p_spread_mode: dto.forecastModel === "single_track" ? "even" : spreadMode,
+    p_reserve_hours: generated.reserveHours,
+    p_include_past_phases_in_spread:
+      dto.forecastModel === "single_track" ? false : includePastPhaseHours,
+    p_generated_at: now,
+    p_replace_weeks: replaceWeeks,
+    p_cells: cells,
+  });
+  if (persistError) return { error: persistError.message };
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/forecast");
@@ -253,46 +235,80 @@ export async function setAllActiveForecastWeekLocks(input: {
     return { error: "Past weeks cannot be locked or unlocked." };
   }
 
-  const { data: activeProjects, error: projectsError } = await supabase
-    .from("projects")
-    .select("id")
-    .eq("owner_id", user.id)
-    .is("completed_at", null);
+  const [{ data: activeProjects, error: projectsError }, { data: activeInitiatives, error: initiativesError }] =
+    await Promise.all([
+      supabase
+        .from("projects")
+        .select("id")
+        .eq("owner_id", user.id)
+        .is("completed_at", null),
+      supabase
+        .from("internal_initiatives")
+        .select("id")
+        .eq("owner_id", user.id)
+        .eq("include_in_forecast", true)
+        .is("completed_at", null),
+    ]);
   if (projectsError) return { error: projectsError.message };
+  if (initiativesError) return { error: initiativesError.message };
 
   const projectIds = (activeProjects ?? []).map((project) => project.id);
-  if (projectIds.length === 0) return { projectIds: [] };
+  const initiativeIds = (activeInitiatives ?? []).map((initiative) => initiative.id);
+  if (projectIds.length === 0 && initiativeIds.length === 0) return { projectIds: [] };
 
   if (input.locked) {
     const now = new Date().toISOString();
-    const { error } = await supabase.from("project_forecast_week_locks").upsert(
-      projectIds.map((projectId) => ({
-        project_id: projectId,
-        week_start_date: weekStartDate,
-        updated_at: now,
-      })),
-      { onConflict: "project_id,week_start_date" },
-    );
-    if (error) return { error: error.message };
+    if (projectIds.length > 0) {
+      const { error } = await supabase.from("project_forecast_week_locks").upsert(
+        projectIds.map((projectId) => ({
+          project_id: projectId,
+          week_start_date: weekStartDate,
+          updated_at: now,
+        })),
+        { onConflict: "project_id,week_start_date" },
+      );
+      if (error) return { error: error.message };
+    }
+    if (initiativeIds.length > 0) {
+      const { error } = await supabase.from("initiative_forecast_week_locks").upsert(
+        initiativeIds.map((initiativeId) => ({
+          initiative_id: initiativeId,
+          week_start_date: weekStartDate,
+          updated_at: now,
+        })),
+        { onConflict: "initiative_id,week_start_date" },
+      );
+      if (error) return { error: error.message };
+    }
   } else {
-    const { error } = await supabase
-      .from("project_forecast_week_locks")
-      .delete()
-      .in("project_id", projectIds)
-      .eq("week_start_date", weekStartDate);
-    if (error) return { error: error.message };
+    if (projectIds.length > 0) {
+      const { error } = await supabase
+        .from("project_forecast_week_locks")
+        .delete()
+        .in("project_id", projectIds)
+        .eq("week_start_date", weekStartDate);
+      if (error) return { error: error.message };
+    }
+    if (initiativeIds.length > 0) {
+      const { error } = await supabase
+        .from("initiative_forecast_week_locks")
+        .delete()
+        .in("initiative_id", initiativeIds)
+        .eq("week_start_date", weekStartDate);
+      if (error) return { error: error.message };
+    }
   }
 
   revalidatePath("/forecast");
   revalidatePath("/home");
-  return { projectIds };
+  return { projectIds: [...projectIds, ...initiativeIds] };
 }
 
 export async function saveProjectForecastDraft(
   projectId: string,
   input: {
     todayIso: string;
-    cells: Array<{ rowKey: string; weekStartDate: string; hours: number }>;
+    cells: Array<{ weekStartDate: string; hours: number }>;
     reserveHours?: number;
   },
 ): Promise<{ error?: string }> {
@@ -305,37 +321,18 @@ export async function saveProjectForecastDraft(
   const todayIso = String(input.todayIso ?? "").trim();
   if (!isValidYmd(todayIso)) return { error: "Invalid today date." };
 
-  const { data: project } = await supabase
-    .from("projects")
-    .select("id")
-    .eq("id", projectId)
-    .eq("owner_id", user.id)
-    .maybeSingle();
-  if (!project) return { error: "Project not found" };
-
-  const { data: forecast } = await supabase
-    .from("project_forecasts")
-    .select("project_id")
-    .eq("project_id", projectId)
-    .maybeSingle();
-  if (!forecast) return { error: "Generate a forecast before editing." };
-
   const currentSunday = currentSundayWeekYmd(todayIso);
   const now = new Date().toISOString();
   const upserts: Array<{
-    project_id: string;
-    row_key: string;
     week_start_date: string;
     hours: number;
-    updated_at: string;
   }> = [];
-  const zeroDeletes: Array<{ rowKey: string; weekStartDate: string }> = [];
+  const zeroDeletes: string[] = [];
 
   for (const cell of input.cells ?? []) {
     const weekStartDate = String(cell.weekStartDate ?? "").trim();
-    const rowKey = String(cell.rowKey ?? "").trim();
     const hours = Math.round(Number(cell.hours));
-    if (!rowKey || !isValidYmd(weekStartDate)) {
+    if (!isValidYmd(weekStartDate)) {
       return { error: "Invalid forecast cell." };
     }
     if (weekStartDate < currentSunday) {
@@ -345,63 +342,32 @@ export async function saveProjectForecastDraft(
       return { error: "Hours must be a non-negative integer." };
     }
     if (hours === 0) {
-      zeroDeletes.push({ rowKey, weekStartDate });
+      zeroDeletes.push(weekStartDate);
     } else {
       upserts.push({
-        project_id: projectId,
-        row_key: rowKey,
         week_start_date: weekStartDate,
         hours,
-        updated_at: now,
       });
     }
   }
 
-  const editedWeeks = Array.from(
-    new Set((input.cells ?? []).map((cell) => String(cell.weekStartDate ?? "").trim())),
-  );
-  if (editedWeeks.length > 0) {
-    const { data: locks, error: locksError } = await supabase
-      .from("project_forecast_week_locks")
-      .select("week_start_date")
-      .eq("project_id", projectId)
-      .in("week_start_date", editedWeeks);
-    if (locksError) return { error: locksError.message };
-    if ((locks ?? []).length > 0) {
-      return { error: "Locked forecast weeks cannot be edited." };
-    }
-  }
-
-  if (upserts.length > 0) {
-    const { error } = await supabase.from("project_forecast_hours").upsert(upserts, {
-      onConflict: "project_id,row_key,week_start_date",
-    });
-    if (error) return { error: error.message };
-  }
-
-  for (const z of zeroDeletes) {
-    const { error } = await supabase
-      .from("project_forecast_hours")
-      .delete()
-      .eq("project_id", projectId)
-      .eq("row_key", z.rowKey)
-      .eq("week_start_date", z.weekStartDate);
-    if (error) return { error: error.message };
-  }
-
-  const headerUpdate: { updated_at: string; reserve_hours?: number } = { updated_at: now };
+  let reserveHours: number | null = null;
   if (input.reserveHours != null) {
     const reserve = Math.round(Number(input.reserveHours));
     if (!Number.isFinite(reserve) || reserve < 0) {
       return { error: "Reserve hours must be a non-negative integer." };
     }
-    headerUpdate.reserve_hours = reserve;
+    reserveHours = reserve;
   }
 
-  await supabase
-    .from("project_forecasts")
-    .update(headerUpdate)
-    .eq("project_id", projectId);
+  const { error: persistError } = await supabase.rpc("save_project_forecast_draft", {
+    p_project_id: projectId,
+    p_cells: upserts,
+    p_delete_weeks: zeroDeletes,
+    p_reserve_hours: reserveHours,
+    p_updated_at: now,
+  });
+  if (persistError) return { error: persistError.message };
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/forecast");

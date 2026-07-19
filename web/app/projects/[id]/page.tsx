@@ -9,7 +9,7 @@ import {
   type IntegrationTaskRow,
   type IntegrationTaskWorkSessionRow,
 } from "@/components/integration-tasks-panel";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { serializeProjectIntegrationRow } from "@/lib/project-integration-row";
 import { resolvePhaseStatus, todayISO } from "@/lib/project-phase-status";
 import { loadProjectActivity } from "@/lib/project-activity";
@@ -35,11 +35,9 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function ProjectDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
   const prefsRes = await loadUserPreferences();
   const userTodayIso = todayISO(prefsRes.preferences.timezone);
 
@@ -53,7 +51,11 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       project_type_id,
       primary_role_id,
       project_color_key,
-      project_types ( name ),
+      starts_on,
+      ends_on,
+      estimated_effort_hours,
+      integrations_enabled,
+      project_types ( name, system_key ),
       project_roles ( name )
     `,
     )
@@ -66,7 +68,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
   const [{ data: projectTypes }, { data: projectRoles }] = await Promise.all([
     supabase
       .from("project_types")
-      .select("id, name")
+      .select("id, name, system_key")
       .eq("owner_id", user.id)
       .eq("is_active", true)
       .order("sort_order"),
@@ -168,6 +170,13 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     project.project_types && typeof project.project_types === "object" && "name" in project.project_types
       ? (project.project_types as { name: string }).name
       : null;
+  const typeSystemKey =
+    project.project_types &&
+    typeof project.project_types === "object" &&
+    "system_key" in project.project_types
+      ? (project.project_types as { system_key: string | null }).system_key
+      : null;
+  const isExpertAssist = typeSystemKey === "expert_assist";
   const roleName =
     project.project_roles && typeof project.project_roles === "object" && "name" in project.project_roles
       ? (project.project_roles as { name: string }).name
@@ -175,15 +184,22 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const projectColorKey: ProjectColorKey | null = normalizeProjectColorKey(project.project_color_key);
 
-  const phaseStatus = resolvePhaseStatus(
-    (phases ?? []).map((p) => ({
+  const statusPhases = isExpertAssist
+    ? [
+        {
+          name: "Expert Assist",
+          sort_order: 0,
+          start_date: project.starts_on ?? null,
+          end_date: project.ends_on ?? null,
+        },
+      ]
+    : (phases ?? []).map((p) => ({
       name: p.name,
       sort_order: p.sort_order,
       start_date: p.start_date,
       end_date: p.end_date,
-    })),
-    userTodayIso,
-  );
+    }));
+  const phaseStatus = resolvePhaseStatus(statusPhases, userTodayIso);
 
   const integrationRowsSerialized = (projectIntegrationRows ?? []).map((row) => {
     const base = serializeProjectIntegrationRow(row);
@@ -199,32 +215,49 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const PM_EFFORT_ROW_KEY = "project_management";
 
-  const effortRows: ProjectEffortRowDef[] = [
-    ...integrationRowsSerialized.map((row) => ({
-      key: row.id,
-      label: row.title,
-      kind: "integration" as const,
-      estimatedEffortHours: row.estimatedEffortHours,
-    })),
-    {
-      key: PM_EFFORT_ROW_KEY,
-      label: (pmTrack?.name ?? "").trim() || "Project Management",
-      kind: "project_management" as const,
-      estimatedEffortHours: null,
-    },
-  ];
+  const effortRows: ProjectEffortRowDef[] = isExpertAssist
+    ? [
+        {
+          key: PM_EFFORT_ROW_KEY,
+          label: "Expert Assist",
+          kind: "project_management" as const,
+          estimatedEffortHours:
+            project.estimated_effort_hours != null
+              ? Number(project.estimated_effort_hours)
+              : null,
+        },
+      ]
+    : [
+        ...integrationRowsSerialized.map((row) => ({
+          key: row.id,
+          label: row.title,
+          kind: "integration" as const,
+          estimatedEffortHours: row.estimatedEffortHours,
+        })),
+        {
+          key: PM_EFFORT_ROW_KEY,
+          label: (pmTrack?.name ?? "").trim() || "Project Management",
+          kind: "project_management" as const,
+          estimatedEffortHours: null,
+        },
+      ];
 
   const rowKeyByTrackId = new Map<string, string>();
-  for (const track of integrationTracks) {
-    if (track.project_integration_id) {
+  for (const track of projectTracks ?? []) {
+    if (isExpertAssist) {
+      rowKeyByTrackId.set(track.id, PM_EFFORT_ROW_KEY);
+    } else if (track.kind === "integration" && track.project_integration_id) {
       rowKeyByTrackId.set(track.id, track.project_integration_id);
     }
   }
-  if (pmTrack) {
+  if (pmTrack && !rowKeyByTrackId.has(pmTrack.id)) {
     rowKeyByTrackId.set(pmTrack.id, PM_EFFORT_ROW_KEY);
   }
 
-  const timelineSpan = timelineSpanFromPhases(phases ?? []);
+  const timelineSpan =
+    isExpertAssist && project.starts_on && project.ends_on
+      ? { startYmd: project.starts_on, endYmd: project.ends_on }
+      : timelineSpanFromPhases(phases ?? []);
 
   const [
     activeIndicatorRes,
@@ -348,6 +381,14 @@ export default async function ProjectDetailPage({ params }: PageProps) {
         initialProjectTypeId={project.project_type_id}
         initialPrimaryRoleId={project.primary_role_id}
         initialProjectColorKey={projectColorKey}
+        initialStartsOn={project.starts_on ?? null}
+        initialEndsOn={project.ends_on ?? null}
+        initialEstimatedEffortHours={
+          project.estimated_effort_hours != null
+            ? Number(project.estimated_effort_hours)
+            : null
+        }
+        initialIntegrationsEnabled={project.integrations_enabled !== false}
         projectTypes={projectTypes ?? []}
         projectRoles={projectRoles ?? []}
       />
@@ -356,6 +397,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
         projectId={id}
         projectCustomerName={project.customer_name ?? ""}
         integrationRows={integrationRowsSerialized}
+        integrationsEnabled={project.integrations_enabled !== false}
       />
 
       <ProjectSummaryStrip
@@ -363,21 +405,22 @@ export default async function ProjectDetailPage({ params }: PageProps) {
         phaseStatus={phaseStatus}
         integrationCount={integrationRowsSerialized.length}
         actualsVsForecast={actualsVsForecast.thisWeek}
-        todayYmd={userTodayIso}
       />
 
-      <section className="mt-10">
-        <ProjectTimeline
-          projectId={id}
-          todayIso={userTodayIso}
-          initialPhases={(phases ?? []).map((p) => ({
-            id: p.id,
-            name: p.name,
-            start_date: p.start_date,
-            end_date: p.end_date,
-          }))}
-        />
-      </section>
+      {!isExpertAssist ? (
+        <section className="mt-10">
+          <ProjectTimeline
+            projectId={id}
+            todayIso={userTodayIso}
+            initialPhases={(phases ?? []).map((p) => ({
+              id: p.id,
+              name: p.name,
+              start_date: p.start_date,
+              end_date: p.end_date,
+            }))}
+          />
+        </section>
+      ) : null}
 
       {forecastProject ? (
         <ProjectForecastCard
@@ -408,6 +451,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           todayIso={userTodayIso}
           projectCustomerName={project.customer_name ?? ""}
           initialActiveSessionIndicator={initialActiveSessionIndicator}
+          integrationsEnabled={project.integrations_enabled !== false}
         />
       </section>
 

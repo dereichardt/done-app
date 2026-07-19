@@ -225,6 +225,21 @@
     transition: opacity 160ms var(--easing-standard);
   }
 
+  .app-shell:has(.sidebar:hover) .nav-section-label,
+  .app-shell:has(.sidebar:focus-within) .nav-section-label {
+    max-width: 8rem;
+    width: auto;
+    margin: 0;
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .app-shell:has(.sidebar:hover) .nav-section-divider,
+  .app-shell:has(.sidebar:focus-within) .nav-section-divider {
+    gap: 8px;
+  }
+
   .app-shell:has(.sidebar:hover) .nav-item::before,
   .app-shell:has(.sidebar:focus-within) .nav-item::before {
     left: 6px;
@@ -275,6 +290,53 @@
 }
 
 .nav-list > li {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-section {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+.nav-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 6px;
+  min-width: 0;
+}
+
+.nav-section-label {
+  flex-shrink: 1;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.nav-section-line {
+  flex: 1;
+  min-width: 0;
+  height: 1px;
+  background: var(--app-border);
+}
+
+.nav-section-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+.nav-section-list > li {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -439,6 +501,28 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
     border: 0;
     opacity: 0;
     pointer-events: none;
+  }
+
+  /* Desktop default = collapsed: line only. Labels fade in from the left on expand. */
+  .nav-section-divider {
+    gap: 0;
+    padding: 8px 14px 6px;
+  }
+
+  .nav-section-label {
+    max-width: 0;
+    min-width: 0;
+    width: 0;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    transform: translateX(-8px);
+    pointer-events: none;
+    transition:
+      opacity 160ms var(--easing-standard),
+      transform 180ms var(--easing-standard),
+      max-width 180ms var(--easing-standard),
+      width 180ms var(--easing-standard);
   }
 
   .app-shell:not(:has(.sidebar:hover)):not(:has(.sidebar:focus-within)) .sidebar-toggle-btn {
@@ -688,6 +772,15 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   }
 
   .nav-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .nav-section {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+  }
+
+  .nav-section-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 

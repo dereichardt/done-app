@@ -32,7 +32,7 @@ export async function loadProjectListSummariesById(
 ): Promise<Record<string, ProjectListRowSummary>> {
   if (projectIds.length === 0) return {};
 
-  const [{ data: phaseRows }, { data: integrationRows }] = await Promise.all([
+  const [{ data: phaseRows }, { data: integrationRows }, { data: projectRows }] = await Promise.all([
     supabase
       .from("project_phases")
       .select("project_id, name, sort_order, start_date, end_date")
@@ -41,7 +41,23 @@ export async function loadProjectListSummariesById(
       .from("project_integrations")
       .select("project_id, integration_state")
       .in("project_id", projectIds),
+    supabase
+      .from("projects")
+      .select("id, starts_on, ends_on, project_types(system_key)")
+      .in("id", projectIds),
   ]);
+  const expertAssistDatesByProject = new Map<string, { starts_on: string | null; ends_on: string | null }>();
+  for (const row of projectRows ?? []) {
+    const projectType = Array.isArray(row.project_types)
+      ? row.project_types[0]
+      : row.project_types;
+    if (projectType?.system_key === "expert_assist") {
+      expertAssistDatesByProject.set(row.id, {
+        starts_on: row.starts_on ?? null,
+        ends_on: row.ends_on ?? null,
+      });
+    }
+  }
 
   const phasesByProject = new Map<
     string,
@@ -75,7 +91,18 @@ export async function loadProjectListSummariesById(
   const result: Record<string, ProjectListRowSummary> = {};
   for (const id of projectIds) {
     const phases = phasesByProject.get(id) ?? [];
-    const phaseStatus = resolvePhaseStatus(phases, asOfCalendarDay);
+    const directDates = expertAssistDatesByProject.get(id);
+    const phaseStatus = resolvePhaseStatus(
+      directDates
+        ? [{
+            name: "Expert Assist",
+            sort_order: 0,
+            start_date: directDates.starts_on,
+            end_date: directDates.ends_on,
+          }]
+        : phases,
+      asOfCalendarDay,
+    );
     const piRows = integrationsByProject.get(id) ?? [];
     const totalIntegrationCount = piRows.length;
     let activeIntegrationCount = 0;
@@ -86,8 +113,16 @@ export async function loadProjectListSummariesById(
       else if (s === "blocked" || s === "on_hold") blockedOnHoldCount++;
     }
 
-    const firstStart = phases.length > 0 ? dateOnlyForSpan(phases[0].start_date) : null;
-    const lastEnd = phases.length > 0 ? dateOnlyForSpan(phases[phases.length - 1].end_date) : null;
+    const firstStart = directDates
+      ? dateOnlyForSpan(directDates.starts_on)
+      : phases.length > 0
+        ? dateOnlyForSpan(phases[0].start_date)
+        : null;
+    const lastEnd = directDates
+      ? dateOnlyForSpan(directDates.ends_on)
+      : phases.length > 0
+        ? dateOnlyForSpan(phases[phases.length - 1].end_date)
+        : null;
     let durationDays: number | null = null;
     if (firstStart && lastEnd) {
       durationDays = calendarDaysFromTo(firstStart, lastEnd);

@@ -1,0 +1,1 @@
+drop index if exists public.project_forecast_week_locks_project_week_idx;

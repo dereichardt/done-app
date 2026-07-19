@@ -1,7 +1,7 @@
 import { marked } from "marked";
 import sanitizeHtml from "sanitize-html";
 
-/** Tags produced by Markdown we allow for AI summaries (no raw HTML from the model). */
+/** Tags produced by Markdown that activity reports may render. */
 const SUMMARY_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   allowedTags: ["p", "br", "strong", "b", "em", "i", "u", "ul", "ol", "li", "a"],
   allowedAttributes: {
@@ -21,7 +21,7 @@ const SUMMARY_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
 };
 
 /**
- * Turn model Markdown into safe HTML for `dangerouslySetInnerHTML`.
+ * Turn report Markdown into safe HTML for `dangerouslySetInnerHTML`.
  * GFM-style lists and **bold** are supported; arbitrary HTML is stripped.
  */
 export function summaryMarkdownToSafeHtml(markdown: string): string {

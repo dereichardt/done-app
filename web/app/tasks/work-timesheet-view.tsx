@@ -144,14 +144,6 @@ function addDaysYmd(ymd: string, delta: number): string {
   return formatLocalYmd(d);
 }
 
-function djbHash(s: string): string {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) {
-    h = Math.imul(h, 33) ^ s.charCodeAt(i);
-  }
-  return (h >>> 0).toString(36);
-}
-
 function formatWeekRangeTitle(weekStart: Date): string {
   const start = weekStart;
   const end = new Date(start);
@@ -199,7 +191,7 @@ function rawLinesForCell(
   return lines;
 }
 
-/** Flat label for AI summary + sort keys. */
+/** Flat label for timesheet sort keys and cell details. */
 function trackLabelForSummary(
   trackId: string,
   projects: TasksPageProject[],
@@ -356,10 +348,6 @@ function sortTrackRowIds(
   });
 }
 
-type SummaryState =
-  | { status: "ready"; bullets: string[]; source: "model" | "fallback"; notice?: string }
-  | { status: "error"; message: string; bullets: string[] };
-
 function CopyIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" width={16} height={16} className={className} aria-hidden>
@@ -450,7 +438,6 @@ function TimesheetCellCommentPreview({
   copyControlBg,
   isCopied,
   slotHover,
-  notice,
   onCopy,
 }: {
   previewBody: string;
@@ -458,7 +445,6 @@ function TimesheetCellCommentPreview({
   copyControlBg: string;
   isCopied: boolean;
   slotHover: boolean;
-  notice: string | undefined;
   onCopy: () => void;
 }) {
   const [copyFocused, setCopyFocused] = useState(false);
@@ -505,7 +491,6 @@ function TimesheetCellCommentPreview({
           </div>
         ) : null}
       </div>
-      {notice ? <p className="mt-0.5 text-[10px] text-muted-canvas">{notice}</p> : null}
     </div>
   );
 }
@@ -519,7 +504,6 @@ function TimesheetDayCellBody({
   copyText,
   copyControlBg,
   isCopied,
-  notice,
   onCopy,
 }: {
   has: boolean;
@@ -529,7 +513,6 @@ function TimesheetDayCellBody({
   copyText: string;
   copyControlBg: string;
   isCopied: boolean;
-  notice: string | undefined;
   onCopy: () => void;
 }) {
   const [cellHovered, setCellHovered] = useState(false);
@@ -557,7 +540,6 @@ function TimesheetDayCellBody({
           copyControlBg={copyControlBg}
           isCopied={isCopied}
           slotHover={cellHovered}
-          notice={notice}
           onCopy={onCopy}
         />
       ) : null}
@@ -695,12 +677,14 @@ export function WorkTimesheetView({
 
   const weekStartYmd = formatLocalYmd(weekStart);
 
-  const [summaryMap, setSummaryMap] = useState<Map<string, SummaryState>>(() => new Map());
-  const prefetchGen = useRef(0);
   /** Cells the user copied this session; cleared when leaving the timesheet (component unmount). */
   const [copiedCellKeys, setCopiedCellKeys] = useState<Set<string>>(() => new Set());
   const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
   const [activeHoverDetail, setActiveHoverDetail] = useState<ActiveTimesheetCellPopover | null>(null);
+  const trackIdsKey = trackRowIds.join("\x1e");
+  const interactionContextKey = `${weekStartYmd}\x1f${trackIdsKey}`;
+  const [lastInteractionContextKey, setLastInteractionContextKey] =
+    useState(interactionContextKey);
   const tableBodyWrapRef = useRef<HTMLDivElement | null>(null);
   const closePopoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPopoverHoveredRef = useRef(false);
@@ -716,182 +700,19 @@ export function WorkTimesheetView({
     };
   }, []);
 
-  const summaryKey = useCallback((trackId: string, dayYmd: string, lines: string[]) => {
-    const stable = [...lines].sort((a, b) => a.localeCompare(b));
-    const h = djbHash(stable.join("\x1e"));
-    return `${weekStartYmd}|${trackId}|${dayYmd}|${h}`;
-  }, [weekStartYmd]);
-
-  const sessionsInWeekFingerprint = useMemo(() => {
-    return [...sessionsInWeek]
-      .map((s) => `${s.source}:${s.source_id}:${s.started_at}:${s.finished_at}`)
-      .sort()
-      .join("|");
-  }, [sessionsInWeek]);
-
-  /** Primitives only — React requires a fixed-length dependency array (no raw object arrays). */
-  const projectsFingerprint = useMemo(
-    () => projects.map((p) => `${p.id}\t${p.name}`).join("\n"),
-    [projects],
-  );
-  const tracksFingerprint = useMemo(
-    () =>
-      tracks
-        .map(
-          (t) =>
-            `${t.id}\t${t.projectId}\t${t.kind}\t${t.label}\t${t.projectIntegrationId ?? ""}`,
-        )
-        .join("\n"),
-    [tracks],
-  );
-  const integrationsFingerprint = useMemo(
-    () =>
-      integrations
-        .map((i) => `${i.id}\t${i.projectId}\t${i.label}\t${i.internalTimeCode ?? ""}`)
-        .join("\n"),
-    [integrations],
-  );
-
-  /** Single primitive dep so the effect dependency array is always length 1 (React 19 dev invariant). */
-  const trackIdsKey = trackRowIds.join("\x1e");
-  const dayYmcsKey = dayYmcs.join("\x1e");
-
-  useEffect(() => {
+  if (lastInteractionContextKey !== interactionContextKey) {
+    setLastInteractionContextKey(interactionContextKey);
     setFocusedTrackId(null);
     setActiveHoverDetail(null);
+  }
+
+  useEffect(() => {
     isPopoverHoveredRef.current = false;
     if (closePopoverTimerRef.current) {
       clearTimeout(closePopoverTimerRef.current);
       closePopoverTimerRef.current = null;
     }
-  }, [weekStartYmd, trackIdsKey]);
-
-  const prefetchDepKey = useMemo(
-    () =>
-      JSON.stringify({
-        loading,
-        fetchError: fetchError ?? "",
-        weekStartYmd,
-        trackIds: trackIdsKey,
-        dayYmcs: dayYmcsKey,
-        sessionFp: sessionsInWeekFingerprint,
-        projectFp: projectsFingerprint,
-        tracksFp: tracksFingerprint,
-        integrationsFp: integrationsFingerprint,
-      }),
-    [
-      loading,
-      fetchError,
-      weekStartYmd,
-      trackIdsKey,
-      dayYmcsKey,
-      sessionsInWeekFingerprint,
-      projectsFingerprint,
-      tracksFingerprint,
-      integrationsFingerprint,
-    ],
-  );
-
-  useEffect(() => {
-    if (loading || fetchError) return;
-    if (trackRowIds.length === 0) {
-      setSummaryMap(new Map());
-      return;
-    }
-
-    const gen = ++prefetchGen.current;
-
-    const tasks: Array<{ key: string; trackId: string; dayYmd: string; lines: string[] }> = [];
-    const initial = new Map<string, SummaryState>();
-
-    for (const trackId of trackRowIds) {
-      for (const dayYmd of dayYmcs) {
-        const lines = rawLinesForCell(sessionsInWeek, trackId, dayYmd);
-        if (lines.length === 0) continue;
-        const key = summaryKey(trackId, dayYmd, lines);
-        initial.set(key, {
-          status: "ready",
-          bullets: timesheetFallbackBullets(lines),
-          source: "fallback",
-        });
-        tasks.push({ key, trackId, dayYmd, lines });
-      }
-    }
-
-    setSummaryMap(initial);
-
-    if (tasks.length === 0) return;
-
-    const CONCURRENCY = 5;
-
-    async function fetchCell(t: { key: string; trackId: string; dayYmd: string; lines: string[] }) {
-      const trackLabel = trackLabelForSummary(
-        t.trackId,
-        projects,
-        tracks,
-        integrations,
-        sessionsInWeek.find((s) => s.project_track_id === t.trackId),
-      );
-      try {
-        const res = await fetch("/api/work/timesheet-cell-summary", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ trackLabel, dayYmd: t.dayYmd, lines: t.lines }),
-        });
-        const data = (await res.json()) as {
-          bullets?: string[];
-          source?: "model" | "fallback";
-          error?: string;
-        };
-        if (prefetchGen.current !== gen) return;
-        if (!res.ok) {
-          setSummaryMap((prev) => {
-            if (prefetchGen.current !== gen) return prev;
-            const next = new Map(prev);
-            next.set(t.key, {
-              status: "error",
-              message: (data as { error?: string }).error ?? "Request failed",
-              bullets: timesheetFallbackBullets(t.lines),
-            });
-            return next;
-          });
-          return;
-        }
-        const bullets = Array.isArray(data.bullets) ? data.bullets : [];
-        setSummaryMap((prev) => {
-          if (prefetchGen.current !== gen) return prev;
-          const next = new Map(prev);
-          next.set(t.key, {
-            status: "ready",
-            bullets: bullets.length > 0 ? bullets : timesheetFallbackBullets(t.lines),
-            source: data.source === "model" ? "model" : "fallback",
-            notice: typeof data.error === "string" ? data.error : undefined,
-          });
-          return next;
-        });
-      } catch {
-        if (prefetchGen.current !== gen) return;
-        setSummaryMap((prev) => {
-          if (prefetchGen.current !== gen) return prev;
-          const next = new Map(prev);
-          next.set(t.key, {
-            status: "error",
-            message: "Network error",
-            bullets: timesheetFallbackBullets(t.lines),
-          });
-          return next;
-        });
-      }
-    }
-
-    void (async () => {
-      for (let i = 0; i < tasks.length; i += CONCURRENCY) {
-        if (prefetchGen.current !== gen) return;
-        const chunk = tasks.slice(i, i + CONCURRENCY);
-        await Promise.all(chunk.map((t) => fetchCell(t)));
-      }
-    })();
-  }, [prefetchDepKey]);
+  }, [interactionContextKey]);
 
   const showTimesheetCellPopover = useCallback(
     (el: HTMLElement, opts: { trackId: string; dayYmd: string; hours: number; copyText: string }) => {
@@ -1147,14 +968,7 @@ export function WorkTimesheetView({
                       const h = byDay?.get(dayYmd) ?? 0;
                       const has = h > 0.001;
                       const lines = rawLinesForCell(sessionsInWeek, trackId, dayYmd);
-                      const sk = summaryKey(trackId, dayYmd, lines);
-                      const sum = summaryMap.get(sk);
-                      const bullets =
-                        sum?.status === "ready" || sum?.status === "error"
-                          ? sum.bullets
-                          : lines.length > 0
-                            ? timesheetFallbackBullets(lines)
-                            : [];
+                      const bullets = lines.length > 0 ? timesheetFallbackBullets(lines) : [];
                       const copyText = bullets.join("\n");
                       const previewBody = bullets
                         .map((b) => b.replace(/^\s*-\s+/, "").trim())
@@ -1216,9 +1030,6 @@ export function WorkTimesheetView({
                             copyText={copyText}
                             copyControlBg={copyControlBg}
                             isCopied={isCopied}
-                            notice={
-                              sum?.status === "ready" && sum.notice ? sum.notice : undefined
-                            }
                             onCopy={() => {
                               void (async () => {
                                 try {

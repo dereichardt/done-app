@@ -1,7 +1,6 @@
-import { ensureDefaultLookups } from "@/lib/actions/ensure-lookups";
 import { buildFunctionalAreaLookupData } from "@/lib/functional-area-grouping";
 import { buildIntegrationTypeSelectOptions } from "@/lib/integration-metadata";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import type { IntegrationLookupOptions } from "@/app/projects/[id]/integration-definition-fields";
 import { CatalogEntryNewClient } from "./catalog-entry-new-client";
 
@@ -28,12 +27,9 @@ export default async function CatalogEntryNewPage({ searchParams }: PageProps) {
     implementation_notes: null,
   };
 
-  await ensureDefaultLookups();
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const [{ data: integrationTypes }, { data: functionalAreas }, { data: integrationDomains }] = await Promise.all([
     supabase

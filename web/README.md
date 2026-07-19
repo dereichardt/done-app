@@ -19,14 +19,9 @@ UI uses **Workday Canvas tokens** (`@workday/canvas-tokens-web`) and the same se
 
    Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from the Supabase project settings (API).
 
-2. Apply the database migration (SQL editor or Supabase CLI):
+2. Apply the database migrations:
 
-   Run SQL migrations in [`supabase/migrations/`](./supabase/migrations/) in order against your database:
-
-   1. [`20260227120000_initial_domain.sql`](./supabase/migrations/20260227120000_initial_domain.sql) — `project_types`, `project_roles`, `projects`, `project_phases`, base `integrations` / `project_integrations`, RLS, signup trigger for types and roles.
-   2. [`20260328120000_integrations_extended.sql`](./supabase/migrations/20260328120000_integrations_extended.sql) — `integration_types`, `functional_areas`, `integration_domains`, extended catalog and project-link columns; updated signup seed.
-   3. [`20260328120001_integration_tasks_and_templates.sql`](./supabase/migrations/20260328120001_integration_tasks_and_templates.sql) — `integration_tasks`, `integration_type_task_templates`.
-   4. [`20260328140000_integrations_multiple_per_owner.sql`](./supabase/migrations/20260328140000_integrations_multiple_per_owner.sql) — optional integration codes; duplicate names per owner allowed; empty codes normalized.
+   The ordered migration history lives in [`supabase/migrations/`](./supabase/migrations/). Use the Supabase CLI to replay it locally with `npx supabase db reset`, or apply pending migrations to a linked project with `npx supabase db push`. Do not run individual files out of order.
 
 3. Configure Auth redirect URL in Supabase:
 
@@ -56,12 +51,16 @@ Do not set `AUTH_PASSWORD_LOGIN=true` in production unless you intentionally wan
 - `npm run dev` — development server
 - `npm run build` — production build
 - `npm run lint` — ESLint
+- `npm run typecheck` — strict TypeScript check without emitting files
+- `npm test` — run the Vitest suite once
+- `npm run test:watch` — run Vitest in watch mode
 
-## AI features
+## Activity reports
 
-AI-powered features (e.g. **Summarize activity** on the project detail page) use the [Vercel AI SDK](https://ai-sdk.dev/) with OpenAI. Set `OPENAI_API_KEY` in `.env.local` (server-only; never prefix with `NEXT_PUBLIC_`). The shared client lives at [`lib/ai/client.ts`](./lib/ai/client.ts); change the model there to swap providers for all features at once.
+**Summarize activity** on the project detail page builds a deterministic report from recorded
+timeline, integration, work, and project-management data. It runs locally in the application and
+does not require an external AI provider or API key.
 
 ## Notes
 
-- If your account existed before the migration ran, open **Projects** once; `ensureDefaultLookups` backfills missing type/role rows.
-- If your account existed before the integration migrations, open **Projects** once so `ensureDefaultLookups` can backfill `integration_types` / `functional_areas` / `integration_domains`.
+- Lookup defaults are provisioned transactionally by database migrations for existing accounts and signup triggers for new accounts; ordinary page navigation is read-only.

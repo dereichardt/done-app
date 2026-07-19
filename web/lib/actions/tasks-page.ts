@@ -25,9 +25,8 @@ import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metada
 import {
   normalizeProjectColorKey,
   projectColorCssVar,
-  type ProjectColorKey,
 } from "@/lib/project-colors";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import {
   TASKS_PAGE_INTERNAL_PROJECT_ID,
@@ -192,11 +191,9 @@ export async function loadTasksPageSnapshot(): Promise<{
   snapshot?: TasksPageSnapshot;
   error?: string;
 }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
+  const supabase = await createClient();
   const prefsRes = await loadUserPreferences();
   const todayIso = getUserTodayIso(prefsRes.preferences.timezone);
 
@@ -560,6 +557,7 @@ export async function rescheduleTaskByDrag(
 
     revalidatePath("/work");
     revalidatePath("/tasks");
+    revalidatePath("/timesheet");
     revalidatePath(`/projects/${track.project_id}`);
     if (track.project_integration_id) {
       revalidatePath(`/projects/${track.project_id}/integrations/${track.project_integration_id}`);
@@ -600,6 +598,7 @@ export async function rescheduleTaskByDrag(
 
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
   revalidatePath("/internal");
   if (internalTask.internal_initiative_id) {
     revalidatePath(`/internal/initiatives/${internalTask.internal_initiative_id}`);
@@ -704,6 +703,7 @@ export async function reorderTaskWithinGroup(
 
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
   if (trackRows) {
     for (const track of trackRows) {
       revalidatePath(`/projects/${track.project_id}`);

@@ -32,7 +32,7 @@ An integration **catalog** entry can carry **pre-defined tasks** bundled with th
 
 #### Current baseline
 
-- `integration_type_task_templates` is keyed by `integration_type_id`, not by catalog integration id — see `web/supabase/migrations/20260328120001_integration_tasks_and_templates.sql`.
+- `integration_type_task_templates` is keyed by `integration_type_id`, not by catalog integration id — see `web/supabase/migrations/20260328125730_integration_tasks_and_templates.sql`.
 - Task CRUD for a linked integration: `web/lib/actions/integration-tasks.ts`, `web/app/projects/[id]/integrations/[projectIntegrationId]/integration-tasks-panel.tsx`.
 
 #### Open questions

@@ -10,7 +10,11 @@ import {
   type CapacityGapsSynthesis,
 } from "@/lib/home-capacity-gaps";
 import { loadHomeActualsVsForecast, type HomeActualsVsForecastDTO } from "@/lib/home-actuals-vs-forecast";
-import { syncHomeInboxRules } from "@/lib/home-inbox-rules";
+import {
+  loadOpenHomeInboxItems,
+  syncHomeInboxRules,
+  type HomeInboxItemRow,
+} from "@/lib/home-inbox-rules";
 import { currentSundayWeekYmd } from "@/lib/project-forecast";
 import { getUserTodayIso } from "@/lib/user-preferences";
 
@@ -132,23 +136,43 @@ export async function deleteAllHomeInboxItems(): Promise<{ error?: string }> {
   return {};
 }
 
-/** Re-run inbox rule sync (stale integrations + eligible weekday reminders). */
-export async function syncHomeInboxNow(): Promise<{ error?: string }> {
+const HOME_INBOX_RULES_VERSION = 1;
+
+export async function syncAndLoadHomeInbox(
+  force = false,
+): Promise<{ items?: HomeInboxItemRow[]; synced?: boolean; error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
 
+  const { data: claimed, error: claimError } = await supabase.rpc("claim_home_inbox_sync", {
+    p_rules_version: HOME_INBOX_RULES_VERSION,
+    p_force: force,
+  });
+  if (claimError) return { error: claimError.message };
+
   try {
-    await syncHomeInboxRules(supabase, user.id);
+    if (claimed) await syncHomeInboxRules(supabase, user.id);
   } catch (err) {
-    console.error("[home-inbox] syncHomeInboxNow failed", err);
+    console.error("[home-inbox] syncAndLoadHomeInbox failed", err);
+    if (claimed) {
+      await supabase
+        .from("user_preferences")
+        .update({ home_inbox_last_synced_at: null })
+        .eq("user_id", user.id);
+    }
     return { error: err instanceof Error ? err.message : "Failed to generate inbox actions." };
   }
 
-  revalidatePath("/home");
-  return {};
+  const items = await loadOpenHomeInboxItems(supabase, user.id);
+  return { items, synced: Boolean(claimed) };
+}
+
+/** Manually bypass freshness and regenerate eligible inbox actions. */
+export async function syncHomeInboxNow(): Promise<{ items?: HomeInboxItemRow[]; error?: string }> {
+  return syncAndLoadHomeInbox(true);
 }
 
 export async function loadInboxVarianceReview(): Promise<{
@@ -189,7 +213,14 @@ export async function loadInboxCapacityGaps(): Promise<{
     .is("completed_at", null);
 
   const projectIds = (projects ?? []).map((p) => p.id as string);
-  if (projectIds.length === 0) {
+  const { data: initiatives } = await supabase
+    .from("internal_initiatives")
+    .select("id")
+    .eq("owner_id", user.id)
+    .eq("include_in_forecast", true)
+    .is("completed_at", null);
+  const initiativeIds = (initiatives ?? []).map((row) => row.id as string);
+  if (projectIds.length === 0 && initiativeIds.length === 0) {
     return {
       synthesis: synthesizeCapacityGaps({ weekHours: {}, weekStarts: gapWeeks }),
     };
@@ -197,16 +228,28 @@ export async function loadInboxCapacityGaps(): Promise<{
 
   const gapStart = gapWeeks[0]!;
   const gapEnd = gapWeeks[gapWeeks.length - 1]!;
-  const { data: hoursRows } = await supabase
-    .from("project_forecast_hours")
-    .select("week_start_date, hours")
-    .in("project_id", projectIds)
-    .gte("week_start_date", gapStart)
-    .lte("week_start_date", gapEnd);
+  const [{ data: hoursRows }, { data: initiativeHoursRows }] = await Promise.all([
+    projectIds.length === 0
+      ? Promise.resolve({ data: [] as Array<{ week_start_date: string; hours: number }> })
+      : supabase
+          .from("project_forecast_hours")
+          .select("week_start_date, hours")
+          .in("project_id", projectIds)
+          .gte("week_start_date", gapStart)
+          .lte("week_start_date", gapEnd),
+    initiativeIds.length === 0
+      ? Promise.resolve({ data: [] as Array<{ week_start_date: string; hours: number }> })
+      : supabase
+          .from("initiative_forecast_hours")
+          .select("week_start_date, hours")
+          .in("initiative_id", initiativeIds)
+          .gte("week_start_date", gapStart)
+          .lte("week_start_date", gapEnd),
+  ]);
 
   const weekHours: Record<string, number> = {};
   for (const w of gapWeeks) weekHours[w] = 0;
-  for (const row of hoursRows ?? []) {
+  for (const row of [...(hoursRows ?? []), ...(initiativeHoursRows ?? [])]) {
     const week = String(row.week_start_date).slice(0, 10);
     if (!(week in weekHours)) continue;
     weekHours[week] = (weekHours[week] ?? 0) + Math.max(0, Math.round(Number(row.hours) || 0));

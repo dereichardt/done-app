@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
-export async function createClient() {
+/** One cookie-backed Supabase client per RSC / server-action request. */
+export const createClient = cache(async () => {
   const cookieStore = await cookies();
 
   return createServerClient(
@@ -18,10 +21,19 @@ export async function createClient() {
               cookieStore.set(name, value, options),
             );
           } catch {
-            /* set from Server Component — middleware refreshes session */
+            /* set from Server Component — the Next.js proxy refreshes the session */
           }
         },
       },
     },
   );
-}
+});
+
+/** JWT-validated user, memoized for the current request. */
+export const getCurrentUser = cache(async (): Promise<User | null> => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+});

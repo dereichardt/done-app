@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useRouter } from "next/navigation";
+import { PinIcon } from "@/components/action-icons";
 import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
 import { GenerateForecastDialog } from "@/components/generate-forecast-dialog";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
@@ -19,21 +20,22 @@ import {
   setAllActiveForecastWeekLocks,
   setProjectForecastWeekLock,
 } from "@/lib/actions/project-forecast";
+import {
+  saveInitiativeForecastDraft,
+  setInitiativeForecastWeekLock,
+} from "@/lib/actions/initiative-forecast";
+import { INITIATIVE_FORECAST_ROW_KEY } from "@/lib/initiative-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
-  applyForecastProjectTotalEdit,
   applyForecastRowEdit,
   actualsWithLockedForecastHours,
   buildForecastPhaseWeekSegments,
   computeEstimateVariance,
   computeForecastPastPhaseSummary,
   currentSundayWeekYmd,
-  DEFAULT_FORECAST_PM_PERCENT,
   diffForecastCells,
   forecastPrerequisites,
   forecastStartModeFromStartDate,
-  PM_FORECAST_ROW_KEY,
-  projectTotalsByWeek,
   sumActualsConsumedHours,
   sumEstimatedRoundedHours,
 } from "@/lib/project-forecast";
@@ -42,20 +44,22 @@ import type { DeploymentEffortByPhase } from "@/lib/user-preferences";
 import {
   ForecastWeekCell,
   PORTFOLIO_BAR_MAX_HOURS,
+  portfolioCapacityTone,
 } from "./forecast-week-cell";
 import { ForecastWeekPhaseHeader } from "./forecast-week-phase-header";
+import { ForecastStudioInfoDialog } from "./forecast-studio-info-dialog";
 
-type HoursByRow = Record<string, Record<string, number>>;
+type HoursByWeek = Record<string, number>;
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 /** Per-project edit state for an active Forecast Studio session. */
 type ProjectEditSession = {
   /** Hours at first edit in this studio visit — drives change markup. */
-  sessionBaseline: HoursByRow;
+  sessionBaseline: HoursByWeek;
   /** Last successfully persisted hours (autosave baseline). */
-  persisted: HoursByRow;
+  persisted: HoursByWeek;
   /** Working draft. */
-  draft: HoursByRow;
+  draft: HoursByWeek;
   sessionBaselineReserveHours: number;
   persistedReserveHours: number;
   reserveHours: number;
@@ -66,7 +70,6 @@ const TRACK_COL_MIN_PX = 160;
 const TRACK_COL_MAX_PX = 420;
 const WEEK_COL_PX = 76;
 /** Taller adjustment rows so bar height differences read more clearly. */
-const DATA_ROW_PX = 168;
 const PROJECT_ROW_PX = 168;
 /** Per-project sticky week/phase header (extra room below dates for the scrollbar). */
 const WEEK_HEADER_ROW_PX = 58;
@@ -74,12 +77,12 @@ const WEEK_HEADER_ROW_PX = 58;
 const PORTFOLIO_WEEK_HEADER_PX = 36;
 /** Match data-row cell height so capacity bars (to 32h+) are not clipped. */
 const PORTFOLIO_TOTAL_ROW_PX = 168;
-const PORTFOLIO_STICKY_BLOCK_PX = PORTFOLIO_WEEK_HEADER_PX + PORTFOLIO_TOTAL_ROW_PX;
+/** Switch to compact totals just before the portfolio bars finish scrolling away. */
+const PORTFOLIO_COMPACT_LEAD_PX = 24;
 const ROW_DIVIDER =
   "border-b border-[color-mix(in_oklab,var(--app-border)_55%,transparent)]";
 const AUTOSAVE_MS = 700;
 const STICKY_HEADER_TOP = "var(--shell-header-toolbar-bottom)";
-const STICKY_PROJECT_TOP = `calc(${STICKY_HEADER_TOP} + ${PORTFOLIO_STICKY_BLOCK_PX}px)`;
 
 function formatSummaryHours(hours: number): string {
   if (!Number.isFinite(hours) || hours <= 0) return "0h";
@@ -88,23 +91,19 @@ function formatSummaryHours(hours: number): string {
     .replace(/\s*hr$/i, "h");
 }
 
-/** Sum of forecast hours on/after the current Sunday week. */
-function sumRemainingForecastHours(hoursByRow: HoursByRow, currentSunday: string): number {
-  let total = 0;
-  for (const row of Object.values(hoursByRow)) {
-    for (const [week, hours] of Object.entries(row)) {
-      if (week < currentSunday) continue;
-      if (Number.isFinite(hours) && hours > 0) total += hours;
-    }
+function portfolioCapacityTextClass(hours: number): string {
+  const tone = portfolioCapacityTone(hours);
+  if (tone === "overload") {
+    return "text-[color-mix(in_oklab,var(--app-warning)_65%,var(--app-text))]";
   }
-  return Math.round(total);
+  if (tone === "at-target") {
+    return "text-[color-mix(in_oklab,var(--app-success)_75%,var(--app-text))]";
+  }
+  return "text-[var(--app-text-muted)]";
 }
 
-function sumRowRemainingHours(
-  hoursByWeek: Record<string, number> | undefined,
-  currentSunday: string,
-): number {
-  if (!hoursByWeek) return 0;
+/** Sum of forecast hours on/after the current Sunday week. */
+function sumRemainingForecastHours(hoursByWeek: HoursByWeek, currentSunday: string): number {
   let total = 0;
   for (const [week, hours] of Object.entries(hoursByWeek)) {
     if (week < currentSunday) continue;
@@ -113,27 +112,8 @@ function sumRowRemainingHours(
   return Math.round(total);
 }
 
-function rowHoursDiffer(
-  a: Record<string, number> | undefined,
-  b: Record<string, number> | undefined,
-  weeks: string[],
-): boolean {
-  for (const w of weeks) {
-    if (Math.round(a?.[w] ?? 0) !== Math.round(b?.[w] ?? 0)) return true;
-  }
-  return false;
-}
-
-function cloneHours(h: HoursByRow): HoursByRow {
-  const out: HoursByRow = {};
-  for (const [k, weeks] of Object.entries(h)) {
-    out[k] = { ...weeks };
-  }
-  return out;
-}
-
-function childRowKeys(project: ForecastProjectDTO): string[] {
-  return [...project.integrations.map((i) => i.key), PM_FORECAST_ROW_KEY];
+function cloneHours(h: HoursByWeek): HoursByWeek {
+  return { ...h };
 }
 
 function weekInSpan(weekStart: string, startYmd: string | null, endYmd: string | null): boolean {
@@ -165,10 +145,9 @@ function projectReserveHours(project: ForecastProjectDTO): number {
 
 function forecastCellKey(
   projectId: string,
-  rowKey: "project" | string,
   weekStart: string,
 ): string {
-  return `${projectId}:${rowKey}:${weekStart}`;
+  return `${projectId}:${weekStart}`;
 }
 
 /** First week of each phase segment after the first — where vertical dividers start. */
@@ -203,14 +182,7 @@ export function ForecastStudio({
     setProjects(initialProjects);
   }, [initialProjects]);
 
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    if (focusProjectId) s.add(focusProjectId);
-    return s;
-  });
-
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [activeRowKey, setActiveRowKey] = useState<"project" | string | null>(null);
   /** All projects touched this studio visit — markup persists until leaving the page. */
   const [projectEdits, setProjectEdits] = useState<Record<string, ProjectEditSession>>({});
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -223,8 +195,8 @@ export function ForecastStudio({
   const focusRef = useRef<HTMLDivElement | null>(null);
   const syncingScrollRef = useRef(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftRef = useRef<HoursByRow | null>(null);
-  const persistedRef = useRef<HoursByRow | null>(null);
+  const draftRef = useRef<HoursByWeek | null>(null);
+  const persistedRef = useRef<HoursByWeek | null>(null);
   const reserveHoursRef = useRef<number | null>(null);
   const editingIdRef = useRef<string | null>(null);
   /** Bumped to ignore in-flight autosaves after regenerate / hard reset. */
@@ -236,6 +208,10 @@ export function ForecastStudio({
   const [trackColPx, setTrackColPx] = useState(TRACK_COL_DEFAULT_PX);
   const [isResizingTrack, setIsResizingTrack] = useState(false);
   const trackDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const portfolioHeaderRef = useRef<HTMLDivElement | null>(null);
+  const portfolioTotalRowRef = useRef<HTMLDivElement | null>(null);
+  const [portfolioPinned, setPortfolioPinned] = useState(false);
+  const [portfolioHeaderCompact, setPortfolioHeaderCompact] = useState(false);
 
   const onTrackResizePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLSpanElement>) => {
@@ -315,6 +291,39 @@ export function ForecastStudio({
   }, [isResizingTrack]);
 
   useEffect(() => {
+    if (portfolioPinned) {
+      setPortfolioHeaderCompact(false);
+      return;
+    }
+
+    let frame = 0;
+    const updateCompactState = () => {
+      frame = 0;
+      const header = portfolioHeaderRef.current;
+      const totalRow = portfolioTotalRowRef.current;
+      if (!header || !totalRow) return;
+      const stickyTop = Number.parseFloat(window.getComputedStyle(header).top) || 0;
+      const compactBoundary =
+        stickyTop + PORTFOLIO_WEEK_HEADER_PX + PORTFOLIO_COMPACT_LEAD_PX;
+      const compact = totalRow.getBoundingClientRect().bottom <= compactBoundary + 0.5;
+      setPortfolioHeaderCompact((current) => (current === compact ? current : compact));
+    };
+    const scheduleUpdate = () => {
+      if (frame !== 0) return;
+      frame = window.requestAnimationFrame(updateCompactState);
+    };
+
+    updateCompactState();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+    };
+  }, [portfolioPinned]);
+
+  useEffect(() => {
     draftRef.current = activeProjectId ? (projectEdits[activeProjectId]?.draft ?? null) : null;
   }, [activeProjectId, projectEdits]);
   useEffect(() => {
@@ -359,10 +368,9 @@ export function ForecastStudio({
     const out: Record<string, number> = {};
     for (const w of sharedWeeks) out[w] = 0;
     for (const p of projects) {
-      const hours = projectEdits[p.id]?.draft ?? p.hoursByRow;
-      const totals = projectTotalsByWeek(hours, sharedWeeks);
+      const hours = projectEdits[p.id]?.draft ?? p.hoursByWeek;
       for (const w of sharedWeeks) {
-        out[w] = (out[w] ?? 0) + (totals[w] ?? 0);
+        out[w] = (out[w] ?? 0) + Math.max(0, Math.round(hours[w] ?? 0));
       }
     }
     return out;
@@ -397,7 +405,7 @@ export function ForecastStudio({
     for (const el of allWeekScrollers()) {
       el.scrollLeft = targetScrollLeft;
     }
-  }, [allWeekScrollers, targetScrollLeft, sharedWeeks.length, projects.length, expanded]);
+  }, [allWeekScrollers, targetScrollLeft, sharedWeeks.length, projects.length]);
 
   useEffect(() => {
     if (!focusProjectId) return;
@@ -428,20 +436,17 @@ export function ForecastStudio({
   }, []);
 
   const applyPersistedToProjects = useCallback(
-    (projectId: string, hours: HoursByRow, reserveHours: number) => {
+    (projectId: string, hours: HoursByWeek, reserveHours: number) => {
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id !== projectId) return p;
           return {
             ...p,
-            hoursByRow: cloneHours(hours),
-            hours: Object.entries(hours).flatMap(([row_key, weeks]) =>
-              Object.entries(weeks).map(([week_start_date, h]) => ({
-                row_key,
-                week_start_date,
-                hours: h,
-              })),
-            ),
+            hoursByWeek: cloneHours(hours),
+            hours: Object.entries(hours).map(([week_start_date, h]) => ({
+              week_start_date,
+              hours: h,
+            })),
             forecast: p.forecast
               ? { ...p.forecast, reserve_hours: reserveHours }
               : p.forecast,
@@ -456,7 +461,7 @@ export function ForecastStudio({
     (opts?: {
       after?: () => void;
       projectId?: string;
-      draftOverride?: HoursByRow;
+      draftOverride?: HoursByWeek;
       reserveOverride?: number;
     }) => {
       clearAutosaveTimer();
@@ -486,15 +491,27 @@ export function ForecastStudio({
       setSaveStatus("saving");
       setSaveError(null);
       startTransition(async () => {
-        const res = await saveProjectForecastDraft(projectId, {
+        const project = projects.find((item) => item.id === projectId);
+        const saveInput = {
           todayIso,
           cells: cells.map((c) => ({
-            rowKey: c.rowKey,
             weekStartDate: c.weekStartDate,
             hours: c.hours,
           })),
-          reserveHours: Math.max(0, Math.round(currentReserve)),
-        });
+        };
+        const res =
+          project?.kind === "initiative"
+            ? await saveInitiativeForecastDraft(projectId, {
+                todayIso,
+                cells: saveInput.cells.map((cell) => ({
+                  ...cell,
+                  rowKey: INITIATIVE_FORECAST_ROW_KEY,
+                })),
+              })
+            : await saveProjectForecastDraft(projectId, {
+                ...saveInput,
+                reserveHours: Math.max(0, Math.round(currentReserve)),
+              });
         if (epoch !== saveEpochRef.current) {
           opts?.after?.();
           return;
@@ -530,7 +547,7 @@ export function ForecastStudio({
         opts?.after?.();
       });
     },
-    [clearAutosaveTimer, todayIso, applyPersistedToProjects, router, projectEdits],
+    [clearAutosaveTimer, todayIso, applyPersistedToProjects, router, projectEdits, projects],
   );
 
   const scheduleAutosave = useCallback(() => {
@@ -563,11 +580,18 @@ export function ForecastStudio({
       setPendingLockKeys((prev) => new Set(prev).add(lockKey));
       setSaveError(null);
       startTransition(async () => {
-        const res = await setProjectForecastWeekLock(project.id, {
-          todayIso,
-          weekStartDate: weekStart,
-          locked,
-        });
+        const res =
+          project.kind === "initiative"
+            ? await setInitiativeForecastWeekLock(project.id, {
+                todayIso,
+                weekStartDate: weekStart,
+                locked,
+              })
+            : await setProjectForecastWeekLock(project.id, {
+                todayIso,
+                weekStartDate: weekStart,
+                locked,
+              });
         setPendingLockKeys((prev) => {
           const next = new Set(prev);
           next.delete(lockKey);
@@ -677,25 +701,8 @@ export function ForecastStudio({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [projectEdits]);
 
-  function toggleExpanded(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function expandAll() {
-    setExpanded(new Set(projects.map((p) => p.id)));
-  }
-
-  function collapseAll() {
-    setExpanded(new Set());
-  }
-
-  function activateProject(project: ForecastProjectDTO, rowKey: "project" | string) {
-    const hours = cloneHours(project.hoursByRow);
+  function activateProject(project: ForecastProjectDTO) {
+    const hours = cloneHours(project.hoursByWeek);
     const reserve = projectReserveHours(project);
     setProjectEdits((prev) => {
       const next = prev[project.id]
@@ -719,12 +726,8 @@ export function ForecastStudio({
       return next;
     });
     setActiveProjectId(project.id);
-    setActiveRowKey(rowKey);
     setSaveStatus("idle");
     setSaveError(null);
-    if (rowKey !== "project") {
-      setExpanded((prev) => new Set(prev).add(project.id));
-    }
   }
 
   function discardActiveUnsaved() {
@@ -747,16 +750,9 @@ export function ForecastStudio({
     });
   }
 
-  /** Ensure an edit session exists for this project/row before applying a change. */
-  function ensureEditSession(
-    project: ForecastProjectDTO,
-    rowKey: "project" | string,
-  ): boolean {
+  /** Ensure an edit session exists for this project before applying a change. */
+  function ensureEditSession(project: ForecastProjectDTO): boolean {
     if (activeProjectId === project.id && projectEdits[project.id]) {
-      setActiveRowKey(rowKey);
-      if (rowKey !== "project") {
-        setExpanded((prev) => new Set(prev).add(project.id));
-      }
       return true;
     }
     if (activeProjectId && activeProjectId !== project.id) {
@@ -767,20 +763,20 @@ export function ForecastStudio({
           Math.round(activeEdit.persistedReserveHours) !==
             Math.round(activeEdit.reserveHours));
       if (hasDirty || autosaveTimerRef.current != null || saveStatus === "saving") {
-        setPendingLeaveAction(() => () => activateProject(project, rowKey));
+        setPendingLeaveAction(() => () => activateProject(project));
         setDiscardOpen(true);
         return false;
       }
       clearAutosaveTimer();
-      activateProject(project, rowKey);
+      activateProject(project);
       return true;
     }
-    activateProject(project, rowKey);
+    activateProject(project);
     return true;
   }
 
   const revertCellToSessionOriginal = useCallback(
-    (project: ForecastProjectDTO, rowKey: "project" | string, weekStart: string) => {
+    (project: ForecastProjectDTO, weekStart: string) => {
       const session = projectEdits[project.id];
       const sessionBaseline = session?.sessionBaseline;
       if (!sessionBaseline || !session) return;
@@ -788,70 +784,30 @@ export function ForecastStudio({
       const writable = projectWritableWeeks(project, sharedWeeks, currentSunday);
       const base = cloneHours(session.draft);
       const estimated = sumEstimatedRoundedHours(project.integrations);
-      const actuals = sumActualsConsumedHours(project.integrations, project.actualsByRowKey);
-
-      let sessionValue: number;
-      if (rowKey === "project") {
-        sessionValue = childRowKeys(project).reduce(
-          (s, key) => s + Math.max(0, Math.round(sessionBaseline[key]?.[weekStart] ?? 0)),
-          0,
-        );
-      } else {
-        sessionValue = Math.max(0, Math.round(sessionBaseline[rowKey]?.[weekStart] ?? 0));
-      }
-
-      let currentValue: number;
-      if (rowKey === "project") {
-        currentValue = childRowKeys(project).reduce(
-          (s, key) => s + Math.max(0, Math.round(base[key]?.[weekStart] ?? 0)),
-          0,
-        );
-      } else {
-        currentValue = Math.max(0, Math.round(base[rowKey]?.[weekStart] ?? 0));
-      }
+      const actuals = sumActualsConsumedHours(project.actualHours);
+      const sessionValue = Math.max(0, Math.round(sessionBaseline[weekStart] ?? 0));
+      const currentValue = Math.max(0, Math.round(base[weekStart] ?? 0));
 
       if (sessionValue === currentValue) {
         setLastEditedCellKey(null);
         return;
       }
 
-      const cellKey = forecastCellKey(project.id, rowKey, weekStart);
+      const cellKey = forecastCellKey(project.id, weekStart);
       setLastEditedCellKey(cellKey);
-
-      let nextDraft: HoursByRow;
-      let nextReserve: number;
-      if (rowKey === "project") {
-        const keys = childRowKeys(project);
-        const result = applyForecastProjectTotalEdit({
-          hoursByRow: base,
-          rowKeys: keys,
-          editedWeekStart: weekStart,
-          nextTotalHours: sessionValue,
-          currentSundayWeek: currentSunday,
-          weekStarts: writable,
-          reserveHours: session.reserveHours,
-          estimated,
-          actuals,
-        });
-        nextDraft = result.hoursByRow;
-        nextReserve = result.reserveHours;
-      } else {
-        const rowHours = { ...(base[rowKey] ?? {}) };
-        const projectForecastTotal = sumRemainingForecastHours(base, currentSunday);
-        const result = applyForecastRowEdit({
-          hoursByWeek: rowHours,
-          editedWeekStart: weekStart,
-          nextHours: sessionValue,
-          currentSundayWeek: currentSunday,
-          weekStarts: writable,
-          reserveHours: session.reserveHours,
-          projectForecastTotal,
-          estimated,
-          actuals,
-        });
-        nextDraft = { ...base, [rowKey]: result.hoursByWeek };
-        nextReserve = result.reserveHours;
-      }
+      const result = applyForecastRowEdit({
+        hoursByWeek: base,
+        editedWeekStart: weekStart,
+        nextHours: sessionValue,
+        currentSundayWeek: currentSunday,
+        weekStarts: writable,
+        reserveHours: session.reserveHours,
+        projectForecastTotal: sumRemainingForecastHours(base, currentSunday),
+        estimated,
+        actuals,
+      });
+      const nextDraft = result.hoursByWeek;
+      const nextReserve = result.reserveHours;
 
       draftRef.current = nextDraft;
       reserveHoursRef.current = nextReserve;
@@ -879,22 +835,21 @@ export function ForecastStudio({
     [projectEdits, activeProjectId, sharedWeeks, currentSunday, scheduleAutosave, flushSave],
   );
 
-  const applyRowEdit = useCallback(
-    (project: ForecastProjectDTO, rowKey: string, weekStart: string, nextHours: number) => {
-      if (!ensureEditSession(project, rowKey)) return;
+  const applyProjectEdit = useCallback(
+    (project: ForecastProjectDTO, weekStart: string, nextHours: number) => {
+      if (!ensureEditSession(project)) return;
 
-      const cellKey = forecastCellKey(project.id, rowKey, weekStart);
+      const cellKey = forecastCellKey(project.id, weekStart);
       setLastEditedCellKey(cellKey);
       const writable = projectWritableWeeks(project, sharedWeeks, currentSunday);
       const entry = projectEdits[project.id];
-      const base = cloneHours(entry?.draft ?? project.hoursByRow);
+      const base = cloneHours(entry?.draft ?? project.hoursByWeek);
       const reserve = entry?.reserveHours ?? projectReserveHours(project);
       const estimated = sumEstimatedRoundedHours(project.integrations);
-      const actuals = sumActualsConsumedHours(project.integrations, project.actualsByRowKey);
+      const actuals = sumActualsConsumedHours(project.actualHours);
       const projectForecastTotal = sumRemainingForecastHours(base, currentSunday);
-      const rowHours = { ...(base[rowKey] ?? {}) };
       const result = applyForecastRowEdit({
-        hoursByWeek: rowHours,
+        hoursByWeek: base,
         editedWeekStart: weekStart,
         nextHours,
         currentSundayWeek: currentSunday,
@@ -904,14 +859,14 @@ export function ForecastStudio({
         estimated,
         actuals,
       });
-      const nextDraft = { ...base, [rowKey]: result.hoursByWeek };
+      const nextDraft = result.hoursByWeek;
       draftRef.current = nextDraft;
       reserveHoursRef.current = result.reserveHours;
       setProjectEdits((prev) => {
         const existing = prev[project.id] ?? {
-          sessionBaseline: cloneHours(project.hoursByRow),
-          persisted: cloneHours(project.hoursByRow),
-          draft: cloneHours(project.hoursByRow),
+          sessionBaseline: cloneHours(project.hoursByWeek),
+          persisted: cloneHours(project.hoursByWeek),
+          draft: cloneHours(project.hoursByWeek),
           sessionBaselineReserveHours: projectReserveHours(project),
           persistedReserveHours: projectReserveHours(project),
           reserveHours: projectReserveHours(project),
@@ -931,83 +886,30 @@ export function ForecastStudio({
     [sharedWeeks, currentSunday, scheduleAutosave, saveStatus, projectEdits],
   );
 
-  const applyProjectTotalEdit = useCallback(
-    (project: ForecastProjectDTO, weekStart: string, nextTotal: number) => {
-      if (!ensureEditSession(project, "project")) return;
-
-      const cellKey = forecastCellKey(project.id, "project", weekStart);
-      setLastEditedCellKey(cellKey);
-      const writable = projectWritableWeeks(project, sharedWeeks, currentSunday);
-      const keys = childRowKeys(project);
-      const entry = projectEdits[project.id];
-      const base = cloneHours(entry?.draft ?? project.hoursByRow);
-      const reserve = entry?.reserveHours ?? projectReserveHours(project);
-      const estimated = sumEstimatedRoundedHours(project.integrations);
-      const actuals = sumActualsConsumedHours(project.integrations, project.actualsByRowKey);
-      const result = applyForecastProjectTotalEdit({
-        hoursByRow: base,
-        rowKeys: keys,
-        editedWeekStart: weekStart,
-        nextTotalHours: nextTotal,
-        currentSundayWeek: currentSunday,
-        weekStarts: writable,
-        reserveHours: reserve,
-        estimated,
-        actuals,
-      });
-      draftRef.current = result.hoursByRow;
-      reserveHoursRef.current = result.reserveHours;
-      setProjectEdits((prev) => {
-        const existing = prev[project.id] ?? {
-          sessionBaseline: cloneHours(project.hoursByRow),
-          persisted: cloneHours(project.hoursByRow),
-          draft: cloneHours(project.hoursByRow),
-          sessionBaselineReserveHours: projectReserveHours(project),
-          persistedReserveHours: projectReserveHours(project),
-          reserveHours: projectReserveHours(project),
-        };
-        return {
-          ...prev,
-          [project.id]: {
-            ...existing,
-            draft: result.hoursByRow,
-            reserveHours: result.reserveHours,
-          },
-        };
-      });
-      scheduleAutosave();
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sharedWeeks, currentSunday, scheduleAutosave, saveStatus, projectEdits],
-  );
-
-  function hoursForDisplay(project: ForecastProjectDTO): HoursByRow {
-    return projectEdits[project.id]?.draft ?? project.hoursByRow;
+  function hoursForDisplay(project: ForecastProjectDTO): HoursByWeek {
+    return projectEdits[project.id]?.draft ?? project.hoursByWeek;
   }
 
   /** Session-start hours for left-panel original totals (survives autosave). */
-  function sessionOriginalFor(project: ForecastProjectDTO): HoursByRow {
-    return projectEdits[project.id]?.sessionBaseline ?? project.hoursByRow;
+  function sessionOriginalFor(project: ForecastProjectDTO): HoursByWeek {
+    return projectEdits[project.id]?.sessionBaseline ?? project.hoursByWeek;
   }
 
   function navigateWeek(
     projectId: string,
-    rowKey: string,
     weekStart: string,
     direction: -1 | 1,
   ) {
     const project = projects.find((p) => p.id === projectId);
     if (!project) return;
-    const editableWeeks = sharedWeeks.filter(
-      (w) =>
-        w >= currentSunday &&
-        weekInSpan(w, project.timelineStartYmd, project.timelineEndYmd),
+    const editableWeeks = projectWritableWeeks(project, sharedWeeks, currentSunday).filter(
+      (week) => !project.lockedWeekStarts.includes(week),
     );
     const idx = editableWeeks.indexOf(weekStart);
     if (idx < 0) return;
     const nextWeek = editableWeeks[idx + direction];
     if (!nextWeek) return;
-    const cellId = `${projectId}:${rowKey}:${nextWeek}`;
+    const cellId = `${projectId}:project:${nextWeek}`;
     const el = document.querySelector<HTMLInputElement>(
       `[data-forecast-cell="${cellId}"] input`,
     );
@@ -1024,7 +926,10 @@ export function ForecastStudio({
   if (projects.length === 0) {
     return (
       <div className="card-canvas p-6">
-        <h1 className="heading-page">Forecast Studio</h1>
+        <div className="flex items-center gap-1">
+          <h1 className="heading-page">Forecast Studio</h1>
+          <ForecastStudioInfoDialog />
+        </div>
         <p className="mt-3 text-sm text-[var(--app-text-muted)]">
           No active projects yet. Create a project to generate forecasts.
         </p>
@@ -1032,30 +937,25 @@ export function ForecastStudio({
     );
   }
 
+  const showCompactPortfolioHeader = portfolioHeaderCompact && !portfolioPinned;
+  const stickyProjectTop = `calc(${STICKY_HEADER_TOP} + ${
+    portfolioPinned
+      ? PORTFOLIO_WEEK_HEADER_PX + PORTFOLIO_TOTAL_ROW_PX
+      : PORTFOLIO_WEEK_HEADER_PX
+  }px)`;
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="heading-page">Forecast Studio</h1>
-          <p className="mt-1 text-sm text-[var(--app-text-muted)]">
-            Click any future week to adjust hours. Changes redistribute from the bank and save
-            automatically.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-cta-tertiary" onClick={expandAll}>
-            Expand all
-          </button>
-          <button type="button" className="btn-cta-tertiary" onClick={collapseAll}>
-            Collapse all
-          </button>
-        </div>
+      <div className="flex items-center gap-1">
+        <h1 className="heading-page">Forecast Studio</h1>
+        <ForecastStudioInfoDialog />
       </div>
 
       <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)]">
         {/* Sticky portfolio totals — sum of all project weekly totals (read-only) */}
         <div
-          className="sticky z-30 border-b border-[var(--app-border)] bg-[var(--app-surface)]"
+          ref={portfolioHeaderRef}
+          className="sticky z-30 bg-[var(--app-surface)]"
           style={{ top: STICKY_HEADER_TOP }}
         >
           <div
@@ -1063,12 +963,34 @@ export function ForecastStudio({
             style={{ height: PORTFOLIO_WEEK_HEADER_PX }}
           >
             <div
-              className="relative flex shrink-0 items-center border-r border-[var(--app-border)] px-2 pr-3 shadow-[4px_0_8px_-4px_color-mix(in_oklab,var(--app-text)_14%,transparent)]"
+              className="relative flex shrink-0 items-center justify-between gap-2 border-r border-[var(--app-border)] px-2 pr-3 shadow-[4px_0_8px_-4px_color-mix(in_oklab,var(--app-text)_14%,transparent)]"
               style={{ width: trackColPx, height: PORTFOLIO_WEEK_HEADER_PX }}
             >
               <span className="truncate text-xs font-medium text-[var(--app-text-muted)]">
-                Week
+                {showCompactPortfolioHeader ? "Weekly Total" : "Week"}
               </span>
+              <button
+                type="button"
+                aria-label={
+                  portfolioPinned
+                    ? "Unpin full All Projects weekly totals"
+                    : "Pin full All Projects weekly totals"
+                }
+                aria-pressed={portfolioPinned}
+                title={
+                  portfolioPinned
+                    ? "Let All Projects bars scroll away"
+                    : "Keep All Projects bars frozen"
+                }
+                className={`inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[color-mix(in_oklab,var(--app-text)_35%,transparent)] ${
+                  portfolioPinned
+                    ? "bg-[var(--app-text)] text-[var(--app-surface)]"
+                    : "text-[var(--app-text-muted)] hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-text)]"
+                }`}
+                onClick={() => setPortfolioPinned((pinned) => !pinned)}
+              >
+                <PinIcon size={15} pinned={portfolioPinned} />
+              </button>
               {renderTrackColResizeHandle()}
             </div>
             <div
@@ -1081,20 +1003,50 @@ export function ForecastStudio({
                 {sharedWeeks.map((w) => (
                   <div
                     key={w}
-                    className={`px-1 text-center text-[10px] font-medium text-[var(--app-text-muted)] ${
-                      w === currentSunday || w === scrollTargetWeekYmd
+                    className={`flex h-full items-center justify-center px-1 text-center font-medium ${
+                      showCompactPortfolioHeader &&
+                      (w === currentSunday || w === scrollTargetWeekYmd)
                         ? "bg-[var(--app-info-surface)]"
                         : ""
                     }`}
                   >
-                    {formatSundayWeekLabel(w)}
+                    {showCompactPortfolioHeader ? (
+                      <span
+                        className={`text-xs tabular-nums ${portfolioCapacityTextClass(
+                          portfolioTotalsByWeek[w] ?? 0,
+                        )}`}
+                        title={`${portfolioTotalsByWeek[w] ?? 0} forecast hours`}
+                      >
+                        {portfolioTotalsByWeek[w] ?? 0}
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-[10px] ${
+                          w === currentSunday || w === scrollTargetWeekYmd
+                            ? "text-[var(--app-action)]"
+                            : "text-[var(--app-text-muted)]"
+                        }`}
+                      >
+                        {formatSundayWeekLabel(w)}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           </div>
+        </div>
 
-          <div className={`flex ${ROW_DIVIDER}`} style={{ height: PORTFOLIO_TOTAL_ROW_PX }}>
+        <div
+          ref={portfolioTotalRowRef}
+          className={`${portfolioPinned ? "sticky z-30" : "relative z-10"} flex bg-[var(--app-surface)] ${ROW_DIVIDER}`}
+          style={{
+            height: PORTFOLIO_TOTAL_ROW_PX,
+            ...(portfolioPinned
+              ? { top: `calc(${STICKY_HEADER_TOP} + ${PORTFOLIO_WEEK_HEADER_PX}px)` }
+              : {}),
+          }}
+        >
             <div
               className="relative flex shrink-0 items-center overflow-hidden border-r border-[var(--app-border)] px-2 pr-3 shadow-[4px_0_8px_-4px_color-mix(in_oklab,var(--app-text)_14%,transparent)] bg-[var(--app-surface-muted-solid)]"
               style={{ width: trackColPx, height: PORTFOLIO_TOTAL_ROW_PX }}
@@ -1163,34 +1115,41 @@ export function ForecastStudio({
                 })}
               </div>
             </div>
-          </div>
         </div>
 
         {projects.map((project) => {
-          const isExpanded = expanded.has(project.id);
           const hasStudioSession = project.id in projectEdits;
           const isActiveProject = activeProjectId === project.id;
           const displayHours = hoursForDisplay(project);
           const sessionHours = sessionOriginalFor(project);
-          const totals = projectTotalsByWeek(displayHours, sharedWeeks);
-          const prereq = forecastPrerequisites({
-            phases: project.phases,
-            integrations: project.integrations,
-          });
+          const prereq =
+            project.forecastModel === "single_track"
+              ? project.integrations[0]?.estimatedEffortHours &&
+                project.timelineStartYmd &&
+                project.timelineEndYmd
+                ? ({ ok: true } as const)
+                : ({ ok: false, reason: "A positive estimate and valid dates are required." } as const)
+              : forecastPrerequisites({
+                  phases: project.phases,
+                  integrations: project.integrations,
+                });
           const hasForecast = project.forecast != null;
-          const rowKeys = childRowKeys(project);
           const isFocused = focusProjectId === project.id;
           const startMode = project.forecast
             ? forecastStartModeFromStartDate(project.forecast.start_date, todayIso)
             : "this_week";
-          const phaseSegments = buildForecastPhaseWeekSegments(sharedWeeks, project.phases);
+          const phaseSegments =
+            project.forecastModel === "single_track"
+              ? [{
+                  phaseKey: null,
+                  label: project.kind === "initiative" ? "Initiative" : "Expert Assist",
+                  weeks: sharedWeeks,
+                }]
+              : buildForecastPhaseWeekSegments(sharedWeeks, project.phases);
           const phaseBoundaries = phaseBoundaryWeekStarts(phaseSegments);
 
           const estimatedTotal = sumEstimatedRoundedHours(project.integrations);
-          const actualsTotal = sumActualsConsumedHours(
-            project.integrations,
-            project.actualsByRowKey,
-          );
+          const actualsTotal = sumActualsConsumedHours(project.actualHours);
           const forecastRemainingTotal = sumRemainingForecastHours(displayHours, currentSunday);
           const originalForecastTotal = sumRemainingForecastHours(sessionHours, currentSunday);
           const showSessionTotals = hasStudioSession;
@@ -1206,27 +1165,18 @@ export function ForecastStudio({
             forecastTotal: originalForecastTotal,
           });
 
-          function sessionBaselineHoursForCell(
-            rowKey: "project" | string,
-            weekStart: string,
-          ): number {
-            if (rowKey === "project") {
-              return childRowKeys(project).reduce(
-                (s, key) => s + Math.max(0, Math.round(sessionHours[key]?.[weekStart] ?? 0)),
-                0,
-              );
-            }
-            return Math.max(0, Math.round(sessionHours[rowKey]?.[weekStart] ?? 0));
+          function sessionBaselineHoursForCell(weekStart: string): number {
+            return Math.max(0, Math.round(sessionHours[weekStart] ?? 0));
           }
 
-          function cellEditProps(rowKey: "project" | string, weekStart: string) {
-            const cellKey = forecastCellKey(project.id, rowKey, weekStart);
+          function cellEditProps(weekStart: string) {
+            const cellKey = forecastCellKey(project.id, weekStart);
             return {
               sessionBaselineHours: hasStudioSession
-                ? sessionBaselineHoursForCell(rowKey, weekStart)
+                ? sessionBaselineHoursForCell(weekStart)
                 : null,
               onRevertToSession: hasStudioSession
-                ? () => revertCellToSessionOriginal(project, rowKey, weekStart)
+                ? () => revertCellToSessionOriginal(project, weekStart)
                 : undefined,
               saving:
                 isActiveProject &&
@@ -1236,19 +1186,21 @@ export function ForecastStudio({
             };
           }
 
-          const pastPhaseSummary = hasForecast
+          const pastPhaseSummary =
+            hasForecast && project.forecastModel === "phased_integrations"
             ? computeForecastPastPhaseSummary({
                 phases: project.phases,
                 integrations: project.integrations,
                 deploymentEffortByPhase,
-                pmPercent: project.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT,
                 startMode,
                 todayIso,
-                actualsByRowKey: actualsWithLockedForecastHours({
-                  actualsByRowKey: project.actualsByRowKey,
+                actualHours: actualsWithLockedForecastHours({
+                  actualHours: project.actualHours,
                   lockedWeekStarts: project.lockedWeekStarts,
-                  lockedHoursByRow: displayHours,
+                  lockedHoursByWeek: displayHours,
                   currentSunday,
+                  forecastStartDate:
+                    project.forecast?.start_date ?? currentSunday,
                 }),
               })
             : null;
@@ -1262,23 +1214,12 @@ export function ForecastStudio({
               {/* Sticky project + week/phase header (freezes on vertical scroll) */}
               <div
                 className={`sticky z-20 flex border-b border-[var(--app-border)] bg-[var(--app-surface-muted-solid)]`}
-                style={{ top: STICKY_PROJECT_TOP, height: WEEK_HEADER_ROW_PX }}
+                style={{ top: stickyProjectTop, height: WEEK_HEADER_ROW_PX }}
               >
                 <div
                   className="relative flex shrink-0 items-center gap-2 overflow-hidden border-r border-[var(--app-border)] px-2 pr-3 shadow-[4px_0_8px_-4px_color-mix(in_oklab,var(--app-text)_14%,transparent)]"
                   style={{ width: trackColPx, height: WEEK_HEADER_ROW_PX }}
                 >
-                  <button
-                    type="button"
-                    className="icon-btn shrink-0"
-                    aria-expanded={isExpanded}
-                    aria-label={isExpanded ? "Collapse project" : "Expand project"}
-                    onClick={() => toggleExpanded(project.id)}
-                  >
-                    <span aria-hidden className="text-sm">
-                      {isExpanded ? "▾" : "▸"}
-                    </span>
-                  </button>
                   <div className="min-w-0 flex-1 overflow-hidden">
                     <div className="truncate text-sm font-medium">{project.customer_name}</div>
                   </div>
@@ -1315,7 +1256,7 @@ export function ForecastStudio({
               <div className={`flex ${ROW_DIVIDER}`} style={{ height: PROJECT_ROW_PX }}>
                 <div
                   className={`relative flex shrink-0 items-center overflow-hidden border-r border-[var(--app-border)] px-2 pr-3 shadow-[4px_0_8px_-4px_color-mix(in_oklab,var(--app-text)_14%,transparent)] ${
-                    isActiveProject && activeRowKey === "project"
+                    isActiveProject
                       ? "bg-[color-mix(in_oklab,var(--app-info-surface)_70%,var(--app-surface))]"
                       : "bg-[var(--app-surface)]"
                   }`}
@@ -1324,7 +1265,7 @@ export function ForecastStudio({
                   <div className="min-w-0 flex-1 overflow-hidden py-1 pl-2">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="truncate text-sm font-medium text-[var(--app-text)]">
-                        Project total
+                        {project.kind === "initiative" ? "Initiative total" : "Project total"}
                       </span>
                     </div>
 
@@ -1459,7 +1400,7 @@ export function ForecastStudio({
                 >
                   <div className="grid h-full items-center" style={weeksGridStyle}>
                     {sharedWeeks.map((w) => {
-                      const h = totals[w] ?? 0;
+                      const h = Math.max(0, Math.round(displayHours[w] ?? 0));
                       const inTimeline = weekInSpan(
                         w,
                         project.timelineStartYmd,
@@ -1467,9 +1408,14 @@ export function ForecastStudio({
                       );
                       const past = w < currentSunday;
                       const projectLocked = project.lockedWeekStarts.includes(w);
-                      const canEdit = hasForecast && !past && inTimeline && !projectLocked;
+                      const canEdit =
+                        hasForecast &&
+                        !past &&
+                        inTimeline &&
+                        w >= (project.forecast?.start_date ?? currentSunday) &&
+                        !projectLocked;
                       const isPhaseBoundary = phaseBoundaries.has(w);
-                      const editProps = cellEditProps("project", w);
+                      const editProps = cellEditProps(w);
                       return (
                         <div
                           key={w}
@@ -1497,10 +1443,10 @@ export function ForecastStudio({
                               cellId={`${project.id}:project:${w}`}
                               {...editProps}
                               onCommitHours={(next) =>
-                                applyProjectTotalEdit(project, w, next)
+                                applyProjectEdit(project, w, next)
                               }
                               onNavigateWeek={(dir) =>
-                                navigateWeek(project.id, "project", w, dir)
+                                navigateWeek(project.id, w, dir)
                               }
                               onToggleLock={() => toggleProjectWeekLock(project, w)}
                             />
@@ -1514,121 +1460,6 @@ export function ForecastStudio({
                 </div>
               </div>
 
-              {/* Integration / PM rows — each is its own flex row for height lock */}
-              {isExpanded
-                ? rowKeys.map((rowKey) => {
-                    const label =
-                      rowKey === PM_FORECAST_ROW_KEY
-                        ? project.pmLabel
-                        : (project.integrations.find((i) => i.key === rowKey)?.label ?? rowKey);
-                    const rowActive = isActiveProject && activeRowKey === rowKey;
-                    const rowHours = Math.max(
-                      0,
-                      sumRowRemainingHours(displayHours[rowKey], currentSunday),
-                    );
-                    const rowOriginal = Math.max(
-                      0,
-                      sumRowRemainingHours(sessionHours[rowKey], currentSunday),
-                    );
-                    const showRowDelta =
-                      showSessionTotals &&
-                      rowHoursDiffer(displayHours[rowKey], sessionHours[rowKey], sharedWeeks);
-                    return (
-                      <div
-                        key={rowKey}
-                        className={`flex ${ROW_DIVIDER}`}
-                        style={{ height: DATA_ROW_PX }}
-                      >
-                        <div
-                          className={`relative flex shrink-0 items-center overflow-hidden border-r border-[var(--app-border)] px-2 pr-3 pl-10 shadow-[4px_0_8px_-4px_color-mix(in_oklab,var(--app-text)_14%,transparent)] ${
-                            rowActive
-                              ? "bg-[color-mix(in_oklab,var(--app-info-surface)_70%,var(--app-surface-muted-solid))]"
-                              : "bg-[var(--app-surface-muted-solid)]"
-                          }`}
-                          style={{ width: trackColPx, height: DATA_ROW_PX }}
-                          title={
-                            showRowDelta
-                              ? `${label}: ${formatSummaryHours(rowOriginal)} → ${formatSummaryHours(rowHours)}`
-                              : label
-                          }
-                        >
-                          <div className="min-w-0 flex-1">
-                            <span className="line-clamp-2 text-sm leading-snug text-[var(--app-text)]">
-                              {label}
-                            </span>
-                            {showRowDelta ? (
-                              <div className="mt-0.5 truncate text-[10px] tabular-nums text-[var(--app-text-muted)]">
-                                <span className="line-through opacity-70">
-                                  {formatSummaryHours(rowOriginal)}
-                                </span>
-                                {" → "}
-                                <span className="font-medium text-[var(--app-text)]">
-                                  {formatSummaryHours(rowHours)}
-                                </span>
-                              </div>
-                            ) : null}
-                          </div>
-                          {renderTrackColResizeHandle()}
-                        </div>
-
-                        <div
-                          data-forecast-week-scroll
-                          className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-                          style={{ height: DATA_ROW_PX }}
-                          onScroll={(e) => syncWeekScroll(e.currentTarget)}
-                        >
-                          <div className="grid h-full items-center" style={weeksGridStyle}>
-                            {sharedWeeks.map((w) => {
-                              const h = Math.max(0, Math.round(displayHours[rowKey]?.[w] ?? 0));
-                              const inTimeline = weekInSpan(
-                                w,
-                                project.timelineStartYmd,
-                                project.timelineEndYmd,
-                              );
-                              const past = w < currentSunday;
-                              const projectLocked = project.lockedWeekStarts.includes(w);
-                              const canEdit =
-                                hasForecast && !past && inTimeline && !projectLocked;
-                              const isPhaseBoundary = phaseBoundaries.has(w);
-                              const editProps = cellEditProps(rowKey, w);
-                              return (
-                                <div
-                                  key={w}
-                                  className={`flex h-full items-center justify-center ${
-                                    isPhaseBoundary ? PHASE_DIVIDER_ROW : ""
-                                  } ${
-                                    w === currentSunday || w === scrollTargetWeekYmd
-                                      ? "bg-[var(--app-info-surface)]"
-                                      : "bg-[color-mix(in_oklab,var(--app-surface-alt)_40%,var(--app-surface))]"
-                                  }`}
-                                >
-                                  {inTimeline ? (
-                                    <ForecastWeekCell
-                                      hours={h}
-                                      editable={canEdit}
-                                      locked={past}
-                                      lockState={projectLocked ? "locked" : "unlocked"}
-                                      cellId={`${project.id}:${rowKey}:${w}`}
-                                      {...editProps}
-                                      onCommitHours={(next) =>
-                                        applyRowEdit(project, rowKey, w, next)
-                                      }
-                                      onNavigateWeek={(dir) =>
-                                        navigateWeek(project.id, rowKey, w, dir)
-                                      }
-                                    />
-                                  ) : (
-                                    <span className="text-xs text-[var(--app-text-muted)]">·</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                : null}
             </div>
           );
         })}
@@ -1638,14 +1469,23 @@ export function ForecastStudio({
         <GenerateForecastDialog
           projectId={generateFor.id}
           projectLabel={generateFor.customer_name}
+          entityKind={generateFor.kind}
           phases={generateFor.phases}
           integrations={generateFor.integrations}
-          actualsByRowKey={generateFor.actualsByRowKey}
+          singleTrack={generateFor.forecastModel === "single_track"}
+          actualHours={generateFor.actualHours}
           lockedWeekStarts={generateFor.lockedWeekStarts}
-          lockedHoursByRow={hoursForDisplay(generateFor)}
+          lockedHoursByWeek={hoursForDisplay(generateFor)}
           deploymentEffortByPhase={deploymentEffortByPhase}
-          defaultPmPercent={generateFor.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT}
           defaultSpreadMode={generateFor.forecast?.spread_mode ?? "even"}
+          defaultStartMode={
+            generateFor.forecast
+              ? forecastStartModeFromStartDate(
+                  generateFor.forecast.start_date,
+                  todayIso,
+                )
+              : "this_week"
+          }
           defaultIncludePastPhaseHours={
             generateFor.forecast?.include_past_phases_in_spread ?? false
           }
@@ -1662,7 +1502,6 @@ export function ForecastStudio({
             });
             if (activeProjectId === generateFor.id) {
               setActiveProjectId(null);
-              setActiveRowKey(null);
               editingIdRef.current = null;
               draftRef.current = null;
               persistedRef.current = null;

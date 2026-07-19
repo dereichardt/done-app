@@ -2,9 +2,14 @@
 
 import { CanvasArrowLeftIcon } from "@/components/canvas-arrow-icons";
 import { CanvasSelect } from "@/components/canvas-select";
+import { FormSwitch } from "@/components/form-switch";
 import { ProjectColorPicker } from "@/components/project-color-picker";
 import { reopenProject, updateProjectDetails } from "@/lib/actions/projects";
 import type { ProjectColorKey } from "@/lib/project-colors";
+import {
+  EXPERT_ASSIST_SYSTEM_KEY,
+  type ProjectTypeLookup,
+} from "@/lib/project-types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -21,6 +26,10 @@ export function ProjectDetailHeader({
   initialProjectTypeId,
   initialPrimaryRoleId,
   initialProjectColorKey,
+  initialStartsOn,
+  initialEndsOn,
+  initialEstimatedEffortHours,
+  initialIntegrationsEnabled,
   projectTypes,
   projectRoles,
 }: {
@@ -32,7 +41,11 @@ export function ProjectDetailHeader({
   initialProjectTypeId: string | null;
   initialPrimaryRoleId: string | null;
   initialProjectColorKey: ProjectColorKey | null;
-  projectTypes: LookupRow[];
+  initialStartsOn: string | null;
+  initialEndsOn: string | null;
+  initialEstimatedEffortHours: number | null;
+  initialIntegrationsEnabled: boolean;
+  projectTypes: ProjectTypeLookup[];
   projectRoles: LookupRow[];
 }) {
   const router = useRouter();
@@ -42,6 +55,7 @@ export function ProjectDetailHeader({
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reopening, setReopening] = useState(false);
+  const [projectTypeId, setProjectTypeId] = useState(initialProjectTypeId ?? "");
   const menuRef = useRef<HTMLDivElement>(null);
   const completeDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -65,6 +79,7 @@ export function ProjectDetailHeader({
 
   function openEditMode() {
     setEditKey((k) => k + 1);
+    setProjectTypeId(initialProjectTypeId ?? "");
     setEditing(true);
     setError(null);
   }
@@ -77,6 +92,10 @@ export function ProjectDetailHeader({
     const project_type_id = String(fd.get("project_type_id") ?? "").trim() || null;
     const primary_role_id = String(fd.get("primary_role_id") ?? "").trim() || null;
     const project_color_key = String(fd.get("project_color_key") ?? "").trim() || null;
+    const starts_on = String(fd.get("starts_on") ?? "").trim();
+    const ends_on = String(fd.get("ends_on") ?? "").trim();
+    const estimated_effort_hours = String(fd.get("estimated_effort_hours") ?? "").trim();
+    const integrations_enabled = fd.has("integrations_enabled");
 
     setSaving(true);
     try {
@@ -85,6 +104,10 @@ export function ProjectDetailHeader({
         project_type_id,
         primary_role_id,
         project_color_key,
+        starts_on,
+        ends_on,
+        estimated_effort_hours,
+        integrations_enabled,
       });
       if (result.error) {
         setError(result.error);
@@ -121,6 +144,9 @@ export function ProjectDetailHeader({
     [typeLabel, roleLabel].filter(Boolean).join(" · ") || "No type or role selected";
 
   const isCompleted = completedAt !== null;
+  const isExpertAssist =
+    projectTypes.find((type) => type.id === projectTypeId)?.system_key ===
+    EXPERT_ASSIST_SYSTEM_KEY;
 
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -242,10 +268,60 @@ export function ProjectDetailHeader({
                 id="project-detail-type"
                 name="project_type_id"
                 placeholder="Select…"
-                defaultValue={initialProjectTypeId ?? ""}
+                value={projectTypeId}
+                onValueChange={setProjectTypeId}
                 options={projectTypes.map((t) => ({ value: t.id, label: t.name }))}
               />
             </div>
+            {isExpertAssist ? (
+              <div className="card-canvas flex flex-col gap-4 p-4">
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-canvas">
+                    Start date
+                    <input
+                      name="starts_on"
+                      type="date"
+                      required
+                      defaultValue={initialStartsOn ?? ""}
+                      className="input-canvas h-10 text-sm"
+                    />
+                  </label>
+                  <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-canvas">
+                    End date
+                    <input
+                      name="ends_on"
+                      type="date"
+                      required
+                      defaultValue={initialEndsOn ?? ""}
+                      className="input-canvas h-10 text-sm"
+                    />
+                  </label>
+                </div>
+                <label className="flex flex-col gap-1 text-xs text-muted-canvas">
+                  Estimated effort <span className="font-normal">(hours)</span>
+                  <input
+                    name="estimated_effort_hours"
+                    type="number"
+                    min="0.25"
+                    step="0.25"
+                    inputMode="decimal"
+                    required
+                    defaultValue={initialEstimatedEffortHours ?? ""}
+                    className="input-canvas h-10 text-sm"
+                  />
+                </label>
+                <FormSwitch
+                  name="integrations_enabled"
+                  label="Allow integrations"
+                  description="Allow new integrations to be added to this Expert Assist."
+                  defaultChecked={
+                    initialIntegrationsEnabled &&
+                    projectTypes.find((type) => type.id === initialProjectTypeId)
+                      ?.system_key === EXPERT_ASSIST_SYSTEM_KEY
+                  }
+                />
+              </div>
+            ) : null}
             <div className="canvas-select-field flex flex-col gap-1">
               <label
                 className="block text-sm font-medium"

@@ -1,0 +1,1 @@
+alter table public.integrations rename column description to integrating_with;

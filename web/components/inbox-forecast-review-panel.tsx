@@ -10,30 +10,43 @@ import {
 } from "@/lib/actions/project-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
-  PM_FORECAST_ROW_KEY,
-  applyForecastProjectTotalEdit,
+  applyForecastRowEdit,
   currentSundayWeekYmd,
-  diffForecastCells,
   formatForecastSundayDate,
-  projectTotalsByWeek,
   sumActualsConsumedHours,
   sumEstimatedRoundedHours,
 } from "@/lib/project-forecast";
 import { sundayWeekStartsInclusive } from "@/lib/project-weekly-effort";
 import { addDaysYmd } from "@/lib/zoned-datetime";
 
-type HoursByRow = Record<string, Record<string, number>>;
+type WeeklyHours = Record<string, number>;
 
-function cloneHours(h: HoursByRow): HoursByRow {
-  const out: HoursByRow = {};
-  for (const [k, weeks] of Object.entries(h)) {
-    out[k] = { ...weeks };
-  }
-  return out;
+function cloneHours(hours: WeeklyHours): WeeklyHours {
+  return { ...hours };
 }
 
-function childRowKeys(project: ForecastProjectDTO): string[] {
-  return [...project.integrations.map((i) => i.key), PM_FORECAST_ROW_KEY];
+function diffWeeklyHours(
+  baseline: WeeklyHours,
+  draft: WeeklyHours,
+): Array<{ weekStartDate: string; hours: number }> {
+  const cells: Array<{ weekStartDate: string; hours: number }> = [];
+  const weeks = new Set([...Object.keys(baseline), ...Object.keys(draft)]);
+  for (const weekStartDate of weeks) {
+    const baselineHours = Math.max(0, Math.round(baseline[weekStartDate] ?? 0));
+    const draftHours = Math.max(0, Math.round(draft[weekStartDate] ?? 0));
+    if (baselineHours !== draftHours) {
+      cells.push({ weekStartDate, hours: draftHours });
+    }
+  }
+  return cells;
+}
+
+function remainingForecastHours(hoursByWeek: WeeklyHours, currentSunday: string): number {
+  return Object.entries(hoursByWeek).reduce(
+    (total, [weekStart, hours]) =>
+      weekStart >= currentSunday ? total + Math.max(0, Math.round(hours)) : total,
+    0,
+  );
 }
 
 function weekInSpan(weekStart: string, startYmd: string | null, endYmd: string | null): boolean {
@@ -55,7 +68,8 @@ function projectWritableWeeks(
       w >= forecastStart &&
       !!project.timelineStartYmd &&
       !!project.timelineEndYmd &&
-      weekInSpan(w, project.timelineStartYmd, project.timelineEndYmd),
+      weekInSpan(w, project.timelineStartYmd, project.timelineEndYmd) &&
+      !project.lockedWeekStarts.includes(w),
   );
 }
 
@@ -78,8 +92,8 @@ export function InboxForecastReviewPanel({
   const [error, setError] = useState<string | null>(null);
   const [todayIso, setTodayIso] = useState<string | null>(null);
   const [projects, setProjects] = useState<ForecastProjectDTO[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, HoursByRow>>({});
-  const [persisted, setPersisted] = useState<Record<string, HoursByRow>>({});
+  const [drafts, setDrafts] = useState<Record<string, WeeklyHours>>({});
+  const [persisted, setPersisted] = useState<Record<string, WeeklyHours>>({});
   const [reserveByProject, setReserveByProject] = useState<Record<string, number>>({});
   const [persistedReserveByProject, setPersistedReserveByProject] = useState<
     Record<string, number>
@@ -119,12 +133,12 @@ export function InboxForecastReviewPanel({
       }
       setTodayIso(res.todayIso);
       setProjects(res.projects);
-      const nextDrafts: Record<string, HoursByRow> = {};
-      const nextPersisted: Record<string, HoursByRow> = {};
+      const nextDrafts: Record<string, WeeklyHours> = {};
+      const nextPersisted: Record<string, WeeklyHours> = {};
       const nextReserve: Record<string, number> = {};
       for (const p of res.projects) {
-        nextDrafts[p.id] = cloneHours(p.hoursByRow);
-        nextPersisted[p.id] = cloneHours(p.hoursByRow);
+        nextDrafts[p.id] = cloneHours(p.hoursByWeek);
+        nextPersisted[p.id] = cloneHours(p.hoursByWeek);
         nextReserve[p.id] = projectReserveHours(p);
       }
       setDrafts(nextDrafts);
@@ -148,9 +162,8 @@ export function InboxForecastReviewPanel({
     const out: Record<string, number> = {};
     for (const w of weeks) out[w] = 0;
     for (const p of projects) {
-      const hours = drafts[p.id] ?? p.hoursByRow;
-      const totals = projectTotalsByWeek(hours, weeks);
-      for (const w of weeks) out[w] = (out[w] ?? 0) + (totals[w] ?? 0);
+      const hours = drafts[p.id] ?? p.hoursByWeek;
+      for (const w of weeks) out[w] = (out[w] ?? 0) + (hours[w] ?? 0);
     }
     return out;
   }, [drafts, projects, weeks]);
@@ -166,27 +179,22 @@ export function InboxForecastReviewPanel({
       );
       if (!reviewWritable.includes(weekStart)) return;
 
-      const base = cloneHours(draftsRef.current[project.id] ?? project.hoursByRow);
-      const keys = childRowKeys(project);
-      const reserve =
-        reserveRef.current[project.id] ?? projectReserveHours(project);
+      const base = cloneHours(draftsRef.current[project.id] ?? project.hoursByWeek);
+      const reserve = reserveRef.current[project.id] ?? projectReserveHours(project);
       const estimated = sumEstimatedRoundedHours(project.integrations);
-      const actuals = sumActualsConsumedHours(
-        project.integrations,
-        project.actualsByRowKey,
-      );
-      const result = applyForecastProjectTotalEdit({
-        hoursByRow: base,
-        rowKeys: keys,
+      const actuals = sumActualsConsumedHours(project.actualHours);
+      const result = applyForecastRowEdit({
+        hoursByWeek: base,
         editedWeekStart: weekStart,
-        nextTotalHours: nextTotal,
+        nextHours: nextTotal,
         currentSundayWeek: currentSunday,
         weekStarts: reviewWritable,
         reserveHours: reserve,
+        projectForecastTotal: remainingForecastHours(base, currentSunday),
         estimated,
         actuals,
       });
-      setDrafts((prev) => ({ ...prev, [project.id]: result.hoursByRow }));
+      setDrafts((prev) => ({ ...prev, [project.id]: result.hoursByWeek }));
       setReserveByProject((prev) => ({ ...prev, [project.id]: result.reserveHours }));
     },
     [currentSunday, todayIso, weeks],
@@ -201,7 +209,7 @@ export function InboxForecastReviewPanel({
       const draft = draftsRef.current[p.id];
       const base = persistedRef.current[p.id];
       if (!draft || !base) continue;
-      const cells = diffForecastCells(base, draft);
+      const cells = diffWeeklyHours(base, draft);
       const reserve = reserveRef.current[p.id] ?? projectReserveHours(p);
       const persistedReserve =
         persistedReserveRef.current[p.id] ?? projectReserveHours(p);
@@ -209,11 +217,7 @@ export function InboxForecastReviewPanel({
       if (cells.length === 0 && !reserveChanged) continue;
       const res = await saveProjectForecastDraft(p.id, {
         todayIso: iso,
-        cells: cells.map((c) => ({
-          rowKey: c.rowKey,
-          weekStartDate: c.weekStartDate,
-          hours: c.hours,
-        })),
+        cells,
         reserveHours: Math.max(0, Math.round(reserve)),
       });
       if (res.error) return { error: res.error };
@@ -266,8 +270,8 @@ export function InboxForecastReviewPanel({
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-canvas">
-        Current week is read-only. Edit project totals for the next 4 weeks; changes redistribute across
-        integrations and PM using the same banking rules as Forecast Studio.
+        Current and locked weeks are read-only. Edit project hours for the next 4 weeks; each change
+        applies directly to that week and updates the project reserve.
       </p>
 
       <div className="overflow-x-auto">
@@ -315,8 +319,7 @@ export function InboxForecastReviewPanel({
               ))}
             </tr>
             {withForecast.map((project) => {
-              const hours = drafts[project.id] ?? project.hoursByRow;
-              const totals = projectTotalsByWeek(hours, weeks);
+              const hours = drafts[project.id] ?? project.hoursByWeek;
               const writable = projectWritableWeeks(project, weeks, currentSunday);
               return (
                 <tr key={project.id} className="border-t" style={{ borderColor: "var(--app-border)" }}>
@@ -333,7 +336,7 @@ export function InboxForecastReviewPanel({
                     return (
                       <td key={w} className="px-1 py-2 align-bottom">
                         <ForecastWeekCell
-                          hours={totals[w] ?? 0}
+                          hours={hours[w] ?? 0}
                           editable={canEdit}
                           locked={!canEdit}
                           onCommitHours={(next) => applyProjectTotalEdit(project, w, next)}

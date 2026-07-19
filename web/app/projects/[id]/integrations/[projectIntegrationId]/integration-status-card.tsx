@@ -15,7 +15,6 @@ export function IntegrationStatusCard({
   initial,
   className = "",
   deliveryProgressOverride,
-  onDeliveryProgressChange,
 }: {
   projectIntegrationId: string;
   initial: {
@@ -25,26 +24,22 @@ export function IntegrationStatusCard({
   };
   className?: string;
   deliveryProgressOverride?: string;
-  onDeliveryProgressChange?: (next: string) => void;
 }) {
-  const [delivery, setDelivery] = useState(initial.delivery_progress);
+  const delivery = deliveryProgressOverride ?? initial.delivery_progress;
   const [intState, setIntState] = useState(initial.integration_state);
   const [reason, setReason] = useState(initial.integration_state_reason ?? "");
+  const initialStateKey = `${initial.integration_state}\u0000${initial.integration_state_reason ?? ""}`;
+  const [lastInitialStateKey, setLastInitialStateKey] = useState(initialStateKey);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const reasonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveGen = useRef(0);
 
-  useEffect(() => {
-    setDelivery(initial.delivery_progress);
+  if (lastInitialStateKey !== initialStateKey) {
+    setLastInitialStateKey(initialStateKey);
     setIntState(initial.integration_state);
     setReason(initial.integration_state_reason ?? "");
-  }, [initial.delivery_progress, initial.integration_state, initial.integration_state_reason]);
-
-  useEffect(() => {
-    if (!deliveryProgressOverride) return;
-    setDelivery(deliveryProgressOverride);
-  }, [deliveryProgressOverride]);
+  }
 
   const runPatch = useCallback(
     (payload: {

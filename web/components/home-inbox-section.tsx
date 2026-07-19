@@ -72,12 +72,14 @@ export function HomeInboxSection({
   sectionId,
   onRequestClose,
   onItemsCountChange,
+  onItemsChange,
 }: {
   initialItems: HomeInboxItemRow[];
   timezone: string | null;
   sectionId?: string;
   onRequestClose?: () => void;
   onItemsCountChange?: (count: number) => void;
+  onItemsChange?: (items: HomeInboxItemRow[]) => void;
 }) {
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
@@ -97,6 +99,11 @@ export function HomeInboxSection({
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  useEffect(() => {
+    setItems(initialItems);
+    onItemsCountChange?.(initialItems.length);
+  }, [initialItems, onItemsCountChange]);
 
   const visibleItems = useMemo(() => {
     switch (filter) {
@@ -273,7 +280,11 @@ export function HomeInboxSection({
         setSyncError(res.error);
         return;
       }
-      router.refresh();
+      if (res.items) {
+        setItems(res.items);
+        onItemsChange?.(res.items);
+        onItemsCountChange?.(res.items.length);
+      }
     });
   };
 

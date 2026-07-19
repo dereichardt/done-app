@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { ProjectSummaryStrip } from "@/app/projects/[id]/project-summary-strip";
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { HomeProgressKanban } from "@/components/home-progress-kanban";
 import { HomeProgressTimeline } from "@/components/home-progress-timeline";
-import { loadHomeProjectStatus } from "@/lib/actions/home-project-status";
+import type { HomeProjectStatusCacheEntry } from "@/lib/actions/home-project-status";
 import type { HomeProjectPickerRow } from "@/lib/actions/home";
 import { makeWeekTotals } from "@/lib/home-actuals-vs-forecast";
 import type { HomeProjectStatusPayload } from "@/lib/home-project-status";
@@ -14,51 +14,27 @@ import { resolvePhaseStatus } from "@/lib/project-phase-status";
 
 export function HomeProgressSection({
   projects,
-  initialPayload,
-  initialError,
+  entries,
+  backgroundLoading,
+  onRetry,
+  onPayloadChange,
   sectionId,
   onRequestClose,
 }: {
   projects: HomeProjectPickerRow[];
-  initialPayload?: HomeProjectStatusPayload;
-  initialError?: string;
+  entries: Record<string, HomeProjectStatusCacheEntry>;
+  backgroundLoading: boolean;
+  onRetry: (projectId: string) => void;
+  onPayloadChange: (projectId: string, payload: HomeProjectStatusPayload) => void;
   sectionId?: string;
   onRequestClose?: () => void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [payload, setPayload] = useState<HomeProjectStatusPayload | null>(() => initialPayload ?? null);
-  const [loadError, setLoadError] = useState<string | null>(() => initialError ?? null);
-  const [loading, setLoading] = useState(() => projects.length > 0 && !initialPayload && !initialError);
-
   const activeProjectId = projects[activeIndex]?.id ?? "";
-  const skipFirstFetchForPrefetch = useRef(initialPayload != null);
-
-  const refresh = useCallback(async (projectId: string) => {
-    if (!projectId) return;
-    setLoading(true);
-    setLoadError(null);
-    const res = await loadHomeProjectStatus(projectId);
-    if (res.error) {
-      setLoadError(res.error);
-      setPayload(null);
-    } else if (res.payload) {
-      setPayload(res.payload);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    if (!activeProjectId) return;
-    if (skipFirstFetchForPrefetch.current) {
-      skipFirstFetchForPrefetch.current = false;
-      if (initialPayload != null && projects[0]?.id === activeProjectId) {
-        return;
-      }
-    }
-    queueMicrotask(() => {
-      void refresh(activeProjectId);
-    });
-  }, [activeProjectId, initialPayload, projects, refresh]);
+  const entry = entries[activeProjectId];
+  const payload = entry?.payload ?? null;
+  const loadError = entry?.error ?? null;
+  const loading = backgroundLoading && !entry;
 
   const phaseStatus = useMemo(() => {
     if (!payload) return resolvePhaseStatus([], "");
@@ -120,9 +96,12 @@ export function HomeProgressSection({
       </div>
 
       {loadError ? (
-        <p className="mt-3 text-sm" style={{ color: "var(--app-danger)" }}>
-          {loadError}
-        </p>
+        <div className="mt-3 flex items-center gap-3">
+          <p className="text-sm" style={{ color: "var(--app-danger)" }}>{loadError}</p>
+          <button type="button" className="btn-secondary text-xs" onClick={() => onRetry(activeProjectId)}>
+            Retry
+          </button>
+        </div>
       ) : null}
 
       {loading ? (
@@ -136,12 +115,16 @@ export function HomeProgressSection({
             integrationCount={payload.integrations.length}
             actualsVsForecast={payload.actualsVsForecast ?? makeWeekTotals(0, 0)}
             projectForecastStats={payload.projectForecastStats}
-            todayYmd={payload.todayYmd}
           />
 
           <HomeProgressTimeline phases={payload.phases} todayYmd={payload.todayYmd} />
 
-          <HomeProgressKanban integrations={payload.integrations} />
+          <HomeProgressKanban
+            integrations={payload.integrations}
+            onIntegrationsChange={(integrations) =>
+              onPayloadChange(activeProjectId, { ...payload, integrations })
+            }
+          />
         </div>
       ) : null}
     </section>

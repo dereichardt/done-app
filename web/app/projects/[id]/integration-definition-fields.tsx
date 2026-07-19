@@ -113,22 +113,6 @@ function IntegrationDefinitionFieldsCreateStyle({
   const [estimatedEffort, setEstimatedEffort] = useState(defaultEstimatedEffortHours);
 
   useEffect(() => {
-    setName(defaultName);
-    setIntegrationCode(defaultIntegrationCode);
-    setInternalTimeCode(defaultInternalTimeCode);
-    setIntegratingWith(defaultIntegratingWith);
-    setDirection(defaultDirection);
-    setEstimatedEffort(defaultEstimatedEffortHours);
-  }, [
-    defaultName,
-    defaultIntegrationCode,
-    defaultInternalTimeCode,
-    defaultIntegratingWith,
-    defaultDirection,
-    defaultEstimatedEffortHours,
-  ]);
-
-  useEffect(() => {
     onDefinitionPreviewChange?.(
       formatIntegrationDefinitionDisplayName({
         integration_code: integrationCode,
@@ -296,10 +280,6 @@ export function IntegrationDefinitionFields({
   const empty = [{ value: "", label: "—" }];
   const idBase = useId();
   const [functionalAreaId, setFunctionalAreaId] = useState(defaultFunctionalAreaId);
-
-  useEffect(() => {
-    setFunctionalAreaId(defaultFunctionalAreaId);
-  }, [defaultFunctionalAreaId]);
 
   const derivedDomainId = useMemo(() => {
     const row = lookups.functionalAreas.find((a) => a.id === functionalAreaId);

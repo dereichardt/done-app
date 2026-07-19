@@ -1,17 +1,15 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { CreateProjectForm } from "./create-project-form";
 
 export default async function NewProjectPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const [{ data: projectTypes }, { data: projectRoles }] = await Promise.all([
     supabase
       .from("project_types")
-      .select("id, name")
+      .select("id, name, system_key")
       .eq("owner_id", user.id)
       .eq("is_active", true)
       .order("sort_order"),

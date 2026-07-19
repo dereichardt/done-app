@@ -169,6 +169,50 @@ type InboxInsert = {
   metadata?: Record<string, unknown> | null;
 };
 
+export async function persistHomeInboxItems(
+  supabase: SupabaseClient,
+  ownerId: string,
+  inserts: InboxInsert[],
+): Promise<void> {
+  const payloads = inserts.map((row) => {
+    const payload: Record<string, unknown> = {
+      owner_id: ownerId,
+      rule_key: row.rule_key,
+      dedupe_key: row.dedupe_key,
+      title: row.title,
+      body: row.body,
+      link_path: row.link_path,
+      status: "open",
+      resolved_at: null,
+    };
+    if (row.metadata != null) {
+      payload.metadata = row.metadata;
+    }
+    return payload;
+  });
+
+  if (payloads.length === 0) return;
+
+  const write = () =>
+    supabase
+      .from("home_inbox_items")
+      .upsert(payloads, {
+        onConflict: "owner_id,dedupe_key",
+        ignoreDuplicates: true,
+      });
+
+  const { error } = await write();
+  if (isMetadataColumnMissingError(error)) {
+    for (const payload of payloads) delete payload.metadata;
+    const retry = await write();
+    if (retry.error) {
+      console.error("[home-inbox] batch upsert failed", retry.error);
+    }
+  } else if (error) {
+    console.error("[home-inbox] batch upsert failed", error);
+  }
+}
+
 /**
  * Upserts deterministic inbox rows for the signed-in user. Call from Home RSC
  * with a server Supabase client (RLS as the user). See file-level table for
@@ -353,16 +397,35 @@ export async function syncHomeInboxRules(
     const gapWeeks = capacityGapWeekStarts(currentSunday);
     const gapStart = gapWeeks[0]!;
     const gapEnd = gapWeeks[gapWeeks.length - 1]!;
-    const { data: hoursRows } = await supabase
-      .from("project_forecast_hours")
-      .select("week_start_date, hours")
-      .in("project_id", projectIds)
-      .gte("week_start_date", gapStart)
-      .lte("week_start_date", gapEnd);
+    const { data: forecastInitiatives } = await supabase
+      .from("internal_initiatives")
+      .select("id")
+      .eq("owner_id", ownerId)
+      .eq("include_in_forecast", true)
+      .is("completed_at", null);
+    const initiativeIds = (forecastInitiatives ?? []).map((row) => row.id as string);
+    const [{ data: hoursRows }, { data: initiativeHoursRows }] = await Promise.all([
+      projectIds.length === 0
+        ? Promise.resolve({ data: [] as Array<{ week_start_date: string; hours: number }> })
+        : supabase
+            .from("project_forecast_hours")
+            .select("week_start_date, hours")
+            .in("project_id", projectIds)
+            .gte("week_start_date", gapStart)
+            .lte("week_start_date", gapEnd),
+      initiativeIds.length === 0
+        ? Promise.resolve({ data: [] as Array<{ week_start_date: string; hours: number }> })
+        : supabase
+            .from("initiative_forecast_hours")
+            .select("week_start_date, hours")
+            .in("initiative_id", initiativeIds)
+            .gte("week_start_date", gapStart)
+            .lte("week_start_date", gapEnd),
+    ]);
 
     const weekHours: Record<string, number> = {};
     for (const w of gapWeeks) weekHours[w] = 0;
-    for (const row of hoursRows ?? []) {
+    for (const row of [...(hoursRows ?? []), ...(initiativeHoursRows ?? [])]) {
       const week = String(row.week_start_date).slice(0, 10);
       if (!(week in weekHours)) continue;
       weekHours[week] = (weekHours[week] ?? 0) + Math.max(0, Math.round(Number(row.hours) || 0));
@@ -383,34 +446,7 @@ export async function syncHomeInboxRules(
     });
   }
 
-  for (const row of inserts) {
-    const payload: Record<string, unknown> = {
-      owner_id: ownerId,
-      rule_key: row.rule_key,
-      dedupe_key: row.dedupe_key,
-      title: row.title,
-      body: row.body,
-      link_path: row.link_path,
-      status: "open",
-      resolved_at: null,
-    };
-    if (row.metadata != null) {
-      payload.metadata = row.metadata;
-    }
-    const { error } = await supabase.from("home_inbox_items").insert(payload);
-    if (error && error.code !== "23505") {
-      // Retry without metadata if column missing (should not happen; column exists from day one).
-      if (isMetadataColumnMissingError(error) && row.metadata != null) {
-        delete payload.metadata;
-        const retry = await supabase.from("home_inbox_items").insert(payload);
-        if (retry.error && retry.error.code !== "23505") {
-          console.error("[home-inbox] insert failed", retry.error, row.dedupe_key);
-        }
-      } else {
-        console.error("[home-inbox] insert failed", error, row.dedupe_key);
-      }
-    }
-  }
+  await persistHomeInboxItems(supabase, ownerId, inserts);
 }
 
 export async function loadOpenHomeInboxItems(

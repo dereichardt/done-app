@@ -83,17 +83,51 @@ function ForecastIcon() {
   );
 }
 
-const navItems: NavEntry[] = [
-  { key: "home", label: "Home", href: "/home", icon: <HomeIcon /> },
-  { key: "work", label: "Work", href: "/work", icon: <TasksIcon /> },
-  { key: "projects", label: "Projects", href: "/projects", icon: <FolderIcon /> },
-  { key: "forecast", label: "Forecast", href: "/forecast", icon: <ForecastIcon /> },
-  { key: "internal", label: "Internal", href: "/internal", icon: <InternalIcon /> },
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 5v3.25L10.25 10" />
+    </svg>
+  );
+}
+
+type NavSection = {
+  id: string;
+  label: string;
+  items: NavEntry[];
+};
+
+const homeNavItem: NavEntry = {
+  key: "home",
+  label: "Home",
+  href: "/home",
+  icon: <HomeIcon />,
+};
+
+const navSections: NavSection[] = [
   {
-    key: "integration-catalog",
-    label: "Catalog",
-    href: "/integrations/catalog",
-    icon: <CatalogIcon />,
+    id: "work",
+    label: "Work",
+    items: [
+      { key: "tasks", label: "Tasks", href: "/work", icon: <TasksIcon /> },
+      { key: "forecast", label: "Forecast", href: "/forecast", icon: <ForecastIcon /> },
+      { key: "timesheet", label: "Timesheet", href: "/timesheet", icon: <ClockIcon /> },
+    ],
+  },
+  {
+    id: "portfolio",
+    label: "Portfolio",
+    items: [
+      { key: "projects", label: "Projects", href: "/projects", icon: <FolderIcon /> },
+      { key: "internal", label: "Internal", href: "/internal", icon: <InternalIcon /> },
+      {
+        key: "integration-catalog",
+        label: "Catalog",
+        href: "/integrations/catalog",
+        icon: <CatalogIcon />,
+      },
+    ],
   },
 ];
 
@@ -109,6 +143,42 @@ function SidebarToggleChevron({ expanded }: { expanded: boolean }) {
   );
 }
 
+function renderNavItem(item: NavEntry, pathname: string | null) {
+  const active =
+    !item.disabled &&
+    item.href != null &&
+    pathname != null &&
+    (pathname === item.href || pathname.startsWith(`${item.href}/`));
+
+  const className = `nav-item${active ? " active" : ""}${item.disabled ? " nav-item-placeholder" : ""}`;
+
+  const iconCell = (
+    <span className="nav-icon-slot">
+      <span className="nav-icon">{item.icon}</span>
+    </span>
+  );
+
+  if (item.disabled) {
+    return (
+      <li key={item.key}>
+        <span className={className} aria-disabled="true">
+          {iconCell}
+          <span className="nav-text">{item.label}</span>
+        </span>
+      </li>
+    );
+  }
+
+  return (
+    <li key={item.key}>
+      <Link className={className} href={item.href} aria-current={active ? "page" : undefined}>
+        {iconCell}
+        <span className="nav-text">{item.label}</span>
+      </Link>
+    </li>
+  );
+}
+
 export function ProjectsShell({
   children,
   userInitial,
@@ -120,7 +190,10 @@ export function ProjectsShell({
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [projectTitle, setProjectTitle] = useState<string | null>(null);
   const [projectColorKey, setProjectColorKey] = useState<ProjectColorKey | null>(null);
-  const [showProjectTitleInHeader, setShowProjectTitleInHeader] = useState(false);
+  const [projectTitleVisibility, setProjectTitleVisibility] = useState<{
+    projectId: string;
+    isOutOfView: boolean;
+  } | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDetailsElement>(null);
 
@@ -139,11 +212,20 @@ export function ProjectsShell({
     (pathname?.startsWith("/work/") ?? false) ||
     pathname === "/tasks" ||
     (pathname?.startsWith("/tasks/") ?? false);
+  const isTimesheetRoute =
+    pathname === "/timesheet" || (pathname?.startsWith("/timesheet/") ?? false);
   const isIntegrationCatalogRoute = pathname?.startsWith("/integrations/catalog") ?? false;
   const isSettingsRoute = pathname === "/settings" || (pathname?.startsWith("/settings/") ?? false);
   const isInternalRoute = pathname === "/internal" || (pathname?.startsWith("/internal/") ?? false);
   const isForecastRoute = pathname === "/forecast" || (pathname?.startsWith("/forecast/") ?? false);
   const isProjectDetailRoute = projectIdFromPath != null;
+  const isProjectOverviewRoute =
+    projectIdFromPath != null && pathname === `/projects/${projectIdFromPath}`;
+  const isProjectSubpage = isProjectDetailRoute && !isProjectOverviewRoute;
+  const showProjectTitleInHeader =
+    isProjectSubpage ||
+    (projectTitleVisibility?.projectId === projectIdFromPath &&
+      projectTitleVisibility.isOutOfView);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +233,6 @@ export function ProjectsShell({
       if (!projectIdFromPath) {
         setProjectTitle(null);
         setProjectColorKey(null);
-        setShowProjectTitleInHeader(false);
         return;
       }
 
@@ -191,26 +272,24 @@ export function ProjectsShell({
   }, [projectIdFromPath]);
 
   useEffect(() => {
-    if (!isProjectDetailRoute) return;
+    if (!isProjectOverviewRoute || !projectIdFromPath) return;
 
     const el = document.getElementById("project-title-sentinel");
-    if (!el) {
-      // Subpages typically don't render the main project title; show it immediately.
-      setShowProjectTitleInHeader(true);
-      return;
-    }
+    if (!el) return;
 
-    setShowProjectTitleInHeader(false);
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        setShowProjectTitleInHeader(!entry.isIntersecting);
+        setProjectTitleVisibility({
+          projectId: projectIdFromPath,
+          isOutOfView: !entry.isIntersecting,
+        });
       },
       { root: null, threshold: 0.01 },
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isProjectDetailRoute, projectIdFromPath]);
+  }, [isProjectOverviewRoute, projectIdFromPath]);
 
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -232,7 +311,8 @@ export function ProjectsShell({
     if (isIntegrationCatalogRoute) return "Catalog";
     if (isForecastRoute) return "Forecast Studio";
     if (isInternalRoute) return "Internal";
-    if (isTasksRoute) return "Work";
+    if (isTimesheetRoute) return "Timesheet";
+    if (isTasksRoute) return "Tasks";
     if (isProjectsRoute) return "Projects";
     return "Done";
   }, [
@@ -242,6 +322,7 @@ export function ProjectsShell({
     isIntegrationCatalogRoute,
     isForecastRoute,
     isInternalRoute,
+    isTimesheetRoute,
     isTasksRoute,
     isProjectsRoute,
     showProjectTitleInHeader,
@@ -295,44 +376,18 @@ export function ProjectsShell({
         </div>
 
         <ul className="nav-list">
-          {navItems.map((item) => {
-            const active =
-              !item.disabled &&
-              item.href != null &&
-              (pathname === item.href || pathname.startsWith(`${item.href}/`));
-
-            const className = `nav-item${active ? " active" : ""}${item.disabled ? " nav-item-placeholder" : ""}`;
-
-            const iconCell = (
-              <span className="nav-icon-slot">
-                <span className="nav-icon">{item.icon}</span>
-              </span>
-            );
-
-            if (item.disabled) {
-              return (
-                <li key={item.key}>
-                  <span className={className} aria-disabled="true">
-                    {iconCell}
-                    <span className="nav-text">{item.label}</span>
-                  </span>
-                </li>
-              );
-            }
-
-            return (
-              <li key={item.key}>
-                <Link
-                  className={className}
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                >
-                  {iconCell}
-                  <span className="nav-text">{item.label}</span>
-                </Link>
-              </li>
-            );
-          })}
+          {renderNavItem(homeNavItem, pathname)}
+          {navSections.map((section) => (
+            <li key={section.id} className="nav-section" role="presentation">
+              <div className="nav-section-divider" aria-hidden="true">
+                <span className="nav-section-label">{section.label}</span>
+                <span className="nav-section-line" />
+              </div>
+              <ul className="nav-section-list" aria-label={section.label}>
+                {section.items.map((item) => renderNavItem(item, pathname))}
+              </ul>
+            </li>
+          ))}
         </ul>
       </nav>
 

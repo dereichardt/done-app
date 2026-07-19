@@ -1,5 +1,4 @@
-import { ensureDefaultLookups } from "@/lib/actions/ensure-lookups";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
 import { notFound } from "next/navigation";
 import { DeleteIntegrationConfirmForm } from "./delete-integration-confirm-form";
@@ -10,12 +9,9 @@ type PageProps = { params: Promise<{ id: string; projectIntegrationId: string }>
 
 export default async function DeleteProjectIntegrationPage({ params }: PageProps) {
   const { id: projectId, projectIntegrationId } = await params;
-  await ensureDefaultLookups();
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const { data: project } = await supabase
     .from("projects")

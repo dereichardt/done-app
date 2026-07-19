@@ -1,5 +1,4 @@
-import { ensureDefaultLookups } from "@/lib/actions/ensure-lookups";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import Link from "next/link";
 import { CatalogListTable, type CatalogListRow } from "./catalog-list-table";
 
@@ -15,12 +14,9 @@ function relationName(v: unknown): { name: string } | null {
 }
 
 export default async function IntegrationCatalogListPage() {
-  await ensureDefaultLookups();
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const { data: rows } = await supabase
     .from("integrations")

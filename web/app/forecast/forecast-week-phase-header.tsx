@@ -44,7 +44,7 @@ export function ForecastWeekPhaseHeader({
               {seg.label ? (
                 <div className="pointer-events-none sticky left-0 top-0 z-[2] w-max max-w-full">
                   <span
-                    className="inline-block max-w-[7rem] truncate rounded-br-md border border-[var(--app-border)] border-l-0 border-t-0 bg-[var(--app-surface-muted-solid)] px-1.5 py-0.5 text-[10px] font-medium leading-tight text-[var(--app-text)]"
+                    className="inline-block max-w-[7rem] truncate rounded-br-md border border-[var(--app-text)] border-l-0 border-t-0 bg-[var(--app-text)] px-1.5 py-0.5 text-[10px] font-medium leading-tight text-[var(--app-surface)]"
                     title={seg.label}
                   >
                     {seg.label}
@@ -63,10 +63,10 @@ export function ForecastWeekPhaseHeader({
                 {seg.weeks.map((w) => (
                   <div
                     key={w}
-                    className={`px-1 pb-0.5 pt-0.5 text-center text-[10px] font-medium text-[var(--app-text-muted)] ${
+                    className={`px-1 pb-0.5 pt-0.5 text-center text-[10px] font-medium ${
                       w === currentSunday || w === scrollTargetWeekYmd
-                        ? "bg-[var(--app-info-surface)]"
-                        : ""
+                        ? "text-[var(--app-action)]"
+                        : "text-[var(--app-text-muted)]"
                     }`}
                   >
                     {formatSundayWeekLabel(w)}

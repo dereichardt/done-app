@@ -3,7 +3,15 @@
 import { loadMoreProjectActivity } from "@/lib/actions/project-activity";
 import type { ActivityEvent, ActivityEventKind } from "@/lib/project-activity";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type CSSProperties,
+} from "react";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -323,13 +331,15 @@ export function ProjectActivityFeed({
               onClick={() => setFilter(f.kind)}
               aria-pressed={isActive}
               className="cursor-pointer rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2"
-              style={{
-                borderColor: isActive ? "var(--app-cta-dark-fill)" : "var(--app-border)",
-                background: isActive ? "var(--app-cta-dark-fill)" : "var(--app-surface)",
-                color: isActive ? "var(--app-cta-dark-fg)" : "var(--app-text-muted)",
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ["--tw-ring-color" as any]: "color-mix(in oklab, var(--app-text) 35%, transparent)",
-              }}
+              style={
+                {
+                  borderColor: isActive ? "var(--app-cta-dark-fill)" : "var(--app-border)",
+                  background: isActive ? "var(--app-cta-dark-fill)" : "var(--app-surface)",
+                  color: isActive ? "var(--app-cta-dark-fg)" : "var(--app-text-muted)",
+                  "--tw-ring-color":
+                    "color-mix(in oklab, var(--app-text) 35%, transparent)",
+                } as CSSProperties & { "--tw-ring-color": string }
+              }
             >
               {f.label}
             </button>

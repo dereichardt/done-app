@@ -179,8 +179,10 @@ function KanbanColumn({
 
 export function HomeProgressKanban({
   integrations: initialIntegrations,
+  onIntegrationsChange,
 }: {
   integrations: HomeProjectStatusIntegration[];
+  onIntegrationsChange?: (integrations: HomeProjectStatusIntegration[]) => void;
 }) {
   const dndContextId = useId();
   const [dndReady, setDndReady] = useState(false);
@@ -274,12 +276,13 @@ export function HomeProgressKanban({
     if (integ.delivery_progress === target) return;
 
     const previous = integrations;
-    setIntegrations((rows) => {
-      const next = rows.map((row) => (row.id === integId ? withDeliveryProgress(row, target) : row));
-      const moved = next.find((row) => row.id === integId);
-      if (!moved) return next;
-      return [moved, ...next.filter((row) => row.id !== integId)];
-    });
+    const next = integrations.map((row) =>
+      row.id === integId ? withDeliveryProgress(row, target) : row,
+    );
+    const moved = next.find((row) => row.id === integId);
+    const reordered = moved ? [moved, ...next.filter((row) => row.id !== integId)] : next;
+    setIntegrations(reordered);
+    onIntegrationsChange?.(reordered);
     setPendingId(integId);
 
     void (async () => {
@@ -287,6 +290,7 @@ export function HomeProgressKanban({
       setPendingId(null);
       if (res.error) {
         setIntegrations(previous);
+        onIntegrationsChange?.(previous);
         setSaveError(res.error);
       }
     })();

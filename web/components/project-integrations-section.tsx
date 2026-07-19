@@ -77,6 +77,7 @@ export function ProjectIntegrationsSection({
   todayIso,
   projectCustomerName = "",
   initialActiveSessionIndicator = null,
+  integrationsEnabled = true,
 }: {
   projectId: string;
   rows: SerializedProjectIntegrationRow[];
@@ -85,6 +86,7 @@ export function ProjectIntegrationsSection({
   projectCustomerName?: string;
   /** Present when this user has an active timer on an integration belonging to this project. */
   initialActiveSessionIndicator?: ActiveWorkSessionIndicatorDTO | null;
+  integrationsEnabled?: boolean;
 }) {
   const router = useRouter();
   const rowIdsKey = useMemo(() => rows.map((r) => r.id).join("\0"), [rows]);
@@ -210,18 +212,24 @@ export function ProjectIntegrationsSection({
               <ExpandAllRowsIcon className="h-[22px] w-[22px]" />
             )}
           </button>
-          <Link
-            href={`/projects/${projectId}/integrations/new`}
-            className="btn-cta inline-flex h-9 min-h-9 shrink-0 items-center px-3 text-xs whitespace-nowrap"
-          >
-            Add integration
-          </Link>
+          {integrationsEnabled ? (
+            <Link
+              href={`/projects/${projectId}/integrations/new`}
+              className="btn-cta inline-flex h-9 min-h-9 shrink-0 items-center px-3 text-xs whitespace-nowrap"
+            >
+              Add integration
+            </Link>
+          ) : null}
         </div>
       </div>
 
       <div className="card-canvas mt-4 min-h-0 max-h-[var(--integrations-list-max-height)] overflow-y-auto p-0">
         {rows.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted-canvas">No integrations linked yet.</p>
+          <p className="px-4 py-8 text-center text-sm text-muted-canvas">
+            {integrationsEnabled
+              ? "No integrations linked yet."
+              : "Integration additions are disabled for this project."}
+          </p>
         ) : (
           <ul className="m-0 list-none p-0">
             {rows.map((row) => (

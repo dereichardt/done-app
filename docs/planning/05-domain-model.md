@@ -6,11 +6,11 @@ Describe the first concrete persistence model for the web app (Next.js + Supabas
 
 ## Implementation
 
-- Base migration: [`web/supabase/migrations/20260227120000_initial_domain.sql`](/Users/davidreichardt/Done-App/web/supabase/migrations/20260227120000_initial_domain.sql)
-- Integrations + lookups: [`web/supabase/migrations/20260328120000_integrations_extended.sql`](/Users/davidreichardt/Done-App/web/supabase/migrations/20260328120000_integrations_extended.sql)
-- Integration tasks + templates: [`web/supabase/migrations/20260328120001_integration_tasks_and_templates.sql`](/Users/davidreichardt/Done-App/web/supabase/migrations/20260328120001_integration_tasks_and_templates.sql)
-- Integration naming / code uniqueness: [`web/supabase/migrations/20260328140000_integrations_multiple_per_owner.sql`](/Users/davidreichardt/Done-App/web/supabase/migrations/20260328140000_integrations_multiple_per_owner.sql)
-- App README: [`web/README.md`](/Users/davidreichardt/Done-App/web/README.md)
+- Base migration: [`web/supabase/migrations/20260327184940_initial_domain.sql`](../../web/supabase/migrations/20260327184940_initial_domain.sql)
+- Integrations + lookups: [`web/supabase/migrations/20260328125726_integrations_extended.sql`](../../web/supabase/migrations/20260328125726_integrations_extended.sql)
+- Integration tasks + templates: [`web/supabase/migrations/20260328125730_integration_tasks_and_templates.sql`](../../web/supabase/migrations/20260328125730_integration_tasks_and_templates.sql)
+- Integration naming / code uniqueness: [`web/supabase/migrations/20260328130501_integrations_multiple_per_owner.sql`](../../web/supabase/migrations/20260328130501_integrations_multiple_per_owner.sql)
+- App README: [`web/README.md`](../../web/README.md)
 
 ## Single-user modeling note
 
@@ -18,7 +18,7 @@ Planning docs described `ProjectAssignment(primaryRole)` as a separate entity. F
 
 ## Configurable lookups (Settings-ready)
 
-Rows are **scoped per user** (`owner_id = auth.uid()`), with defaults inserted by trigger `seed_user_defaults` on `auth.users` insert. The app also runs `ensureDefaultLookups` if a user predates the trigger.
+Rows are **scoped per user** (`owner_id = auth.uid()`), with defaults inserted by trigger `seed_user_defaults` on `auth.users` insert. Forward migrations reconcile defaults for accounts that predate the trigger.
 
 ### `project_types`
 
@@ -42,7 +42,7 @@ Same shape as `project_types`.
 
 ### `integration_types`, `functional_areas`, `integration_domains`
 
-Same general shape as `project_types` (owner-scoped, `sort_order`, `is_active`). Seeded on signup and via `ensureDefaultLookups` for older accounts. Used by **integrations** for classification and future **task template** rules by type.
+Same general shape as `project_types` (owner-scoped, `sort_order`, `is_active`). Seeded on signup and reconciled by forward migrations for older accounts. Used by **integrations** for classification and future **task template** rules by type.
 
 ## `projects`
 

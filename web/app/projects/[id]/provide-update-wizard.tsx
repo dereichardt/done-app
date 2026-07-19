@@ -48,7 +48,7 @@ export function ProvideUpdateWizard({
     setDrafts(seedIntegrationDrafts(integrationRows));
     setStep(0);
     setSubmitError(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the row identity set changes, not when parent data is re-instantiated
   }, [integrationRows.map((r) => r.id).join(",")]);
 
   const currentDraft = currentRow

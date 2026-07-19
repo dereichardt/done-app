@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { DeleteProjectConfirmForm } from "./delete-project-confirm-form";
 
@@ -8,11 +8,9 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function DeleteProjectPage({ params }: PageProps) {
   const { id: projectId } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const { data: project } = await supabase
     .from("projects")

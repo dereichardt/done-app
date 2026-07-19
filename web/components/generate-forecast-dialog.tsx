@@ -4,11 +4,11 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
 import { generateProjectForecast } from "@/lib/actions/project-forecast";
+import { generateInitiativeForecast } from "@/lib/actions/initiative-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
 import {
   actualsWithLockedForecastHours,
   computeForecastPastPhaseSummary,
-  DEFAULT_FORECAST_PM_PERCENT,
   DEFAULT_FORECAST_SPREAD_MODE,
   forecastStartSundayYmd,
   formatForecastSundayDate,
@@ -19,18 +19,17 @@ import {
 } from "@/lib/project-forecast";
 import type { DeploymentEffortByPhase } from "@/lib/user-preferences";
 
-const PM_PERCENT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5);
-
 export function GenerateForecastDialog({
   projectId,
   projectLabel,
+  entityKind = "project",
   phases,
   integrations,
-  actualsByRowKey,
+  singleTrack = false,
+  actualHours,
   lockedWeekStarts = [],
-  lockedHoursByRow = {},
+  lockedHoursByWeek = {},
   deploymentEffortByPhase,
-  defaultPmPercent = DEFAULT_FORECAST_PM_PERCENT,
   defaultSpreadMode = DEFAULT_FORECAST_SPREAD_MODE,
   defaultStartMode = "this_week",
   defaultIncludePastPhaseHours = false,
@@ -41,13 +40,14 @@ export function GenerateForecastDialog({
 }: {
   projectId: string;
   projectLabel: string;
+  entityKind?: "project" | "initiative";
   phases: ForecastPhaseInput[];
   integrations: ForecastIntegrationInput[];
-  actualsByRowKey: Record<string, number>;
+  singleTrack?: boolean;
+  actualHours: number;
   lockedWeekStarts?: string[];
-  lockedHoursByRow?: Record<string, Record<string, number>>;
+  lockedHoursByWeek?: Record<string, number>;
   deploymentEffortByPhase: DeploymentEffortByPhase;
-  defaultPmPercent?: number;
   defaultSpreadMode?: ForecastSpreadMode;
   defaultStartMode?: ForecastStartMode;
   /** When regenerating, prefer the project's last choice. */
@@ -60,7 +60,6 @@ export function GenerateForecastDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [startMode, setStartMode] = useState<ForecastStartMode>(defaultStartMode);
-  const [pmPercent, setPmPercent] = useState(defaultPmPercent);
   const [spreadMode, setSpreadMode] = useState<ForecastSpreadMode>(defaultSpreadMode);
   const [includePastPhaseHours, setIncludePastPhaseHours] = useState(
     defaultIncludePastPhaseHours,
@@ -86,27 +85,27 @@ export function GenerateForecastDialog({
         phases,
         integrations,
         deploymentEffortByPhase,
-        pmPercent,
         startMode,
         todayIso,
-        actualsByRowKey: actualsWithLockedForecastHours({
-          actualsByRowKey,
+        actualHours: actualsWithLockedForecastHours({
+          actualHours,
           lockedWeekStarts,
-          lockedHoursByRow,
+          lockedHoursByWeek,
           currentSunday: thisWeekSunday,
+          forecastStartDate: selectedSunday,
         }),
       }),
     [
       phases,
       integrations,
       deploymentEffortByPhase,
-      pmPercent,
       startMode,
       todayIso,
-      actualsByRowKey,
+      actualHours,
       lockedWeekStarts,
-      lockedHoursByRow,
+      lockedHoursByWeek,
       thisWeekSunday,
+      selectedSunday,
     ],
   );
 
@@ -124,18 +123,31 @@ export function GenerateForecastDialog({
     }
     setError(null);
     startTransition(async () => {
-      const res = await generateProjectForecast(projectId, {
-        startMode,
-        pmPercent,
-        spreadMode,
-        includePastPhaseHours: hasPastPhaseHours ? includePastPhaseHours : false,
-        todayIso,
-      });
-      if (res.error) {
-        setError(res.error);
-        return;
+      let generatedItem: ForecastProjectDTO | null | undefined;
+      if (entityKind === "initiative") {
+        const res = await generateInitiativeForecast(projectId, {
+          todayIso,
+          startMode,
+        });
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        generatedItem = res.initiative;
+      } else {
+        const res = await generateProjectForecast(projectId, {
+          startMode,
+          spreadMode,
+          includePastPhaseHours: hasPastPhaseHours ? includePastPhaseHours : false,
+          todayIso,
+        });
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        generatedItem = res.project;
       }
-      onGenerated?.(res.project ?? undefined);
+      onGenerated?.(generatedItem ?? undefined);
       dialogRef.current?.close();
     });
   }
@@ -216,27 +228,12 @@ export function GenerateForecastDialog({
             </p>
           </fieldset>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-[var(--app-text)]">
-              Project Management %
-            </span>
-            <select
-              className="input-canvas"
-              value={String(pmPercent)}
-              onChange={(e) => setPmPercent(Number(e.target.value))}
-            >
-              {PM_PERCENT_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}%
-                </option>
-              ))}
-            </select>
-            <span className="text-xs text-[var(--app-text-muted)]">
-              Taken from each integration&apos;s estimated hours (default 5%). Remaining hours
-              subtract logged actuals per integration and for Project Management.
-            </span>
-          </label>
-
+          {singleTrack ? (
+            <p className="text-sm text-[var(--app-text-muted)]">
+              Remaining estimated effort will be spread evenly across the selected current
+              and future weeks. Locked weeks count as committed effort.
+            </p>
+          ) : (
           <fieldset className="flex flex-col gap-2">
             <legend className="text-sm font-medium text-[var(--app-text)]">Hour spread</legend>
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--app-border)] px-3 py-2.5 has-[:checked]:border-[var(--app-action)] has-[:checked]:bg-[var(--app-info-surface)]">
@@ -250,8 +247,8 @@ export function GenerateForecastDialog({
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-[var(--app-text)]">Even spread</span>
                 <span className="block text-xs text-[var(--app-text-muted)]">
-                  Peanut-butter hours evenly across weeks in each stage (project totals
-                  stay flat; thin leftovers may still show 1h / 0h on a track).
+                  Spread remaining project effort as evenly as possible across the weeks in
+                  each stage.
                 </span>
               </span>
             </label>
@@ -268,14 +265,15 @@ export function GenerateForecastDialog({
                   Bell curve
                 </span>
                 <span className="block text-xs text-[var(--app-text-muted)]">
-                  Heavier in middle–late Architect &amp; Configure and early Test; other
-                  stages stay even.
+                  Place more project effort in middle–late Architect &amp; Configure and early
+                  Test; keep other stages even.
                 </span>
               </span>
             </label>
           </fieldset>
+          )}
 
-          {hasPastPhaseHours ? (
+          {!singleTrack && hasPastPhaseHours ? (
             <fieldset className="flex flex-col gap-2">
               <legend className="text-sm font-medium text-[var(--app-text)]">
                 Past stage hours
@@ -319,10 +317,12 @@ export function GenerateForecastDialog({
             </fieldset>
           ) : null}
 
-          <ForecastEstimateVariancePanel
-            summary={pastPhaseSummary}
-            includePastPhaseHours={hasPastPhaseHours ? includePastPhaseHours : false}
-          />
+          {!singleTrack ? (
+            <ForecastEstimateVariancePanel
+              summary={pastPhaseSummary}
+              includePastPhaseHours={hasPastPhaseHours ? includePastPhaseHours : false}
+            />
+          ) : null}
 
           {error ? (
             <p className="text-sm text-[var(--app-danger)]" role="alert">

@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { serializeProjectIntegrationRow } from "@/lib/project-integration-row";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
 
@@ -8,18 +8,17 @@ export type HomeProjectPickerRow = {
   id: string;
   customer_name: string;
   integration_count: number;
+  integrations_enabled: boolean;
 };
 
 export async function loadHomeProjectPickerRows(): Promise<HomeProjectPickerRow[]> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
+  const supabase = await createClient();
 
   const { data: projects } = await supabase
     .from("projects")
-    .select("id, customer_name")
+    .select("id, customer_name, integrations_enabled")
     .eq("owner_id", user.id)
     .is("completed_at", null)
     .order("active_dashboard_order", { ascending: true, nullsFirst: false })
@@ -39,6 +38,7 @@ export async function loadHomeProjectPickerRows(): Promise<HomeProjectPickerRow[
     id: p.id,
     customer_name: (p.customer_name ?? "").trim() || "Untitled project",
     integration_count: countByProject.get(p.id) ?? 0,
+    integrations_enabled: p.integrations_enabled !== false,
   }));
 }
 

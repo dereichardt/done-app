@@ -344,7 +344,6 @@ export function CatalogListTable({ rows }: { rows: CatalogListRow[] }) {
               <div
                 className="catalog-notes-popover__body mt-2 text-sm"
                 style={{ color: "var(--app-text)" }}
-                // eslint-disable-next-line react/no-danger -- HTML is server-sanitized subset; sanitized again on display
                 dangerouslySetInnerHTML={{ __html: notesPopover.html }}
               />
             </div>,

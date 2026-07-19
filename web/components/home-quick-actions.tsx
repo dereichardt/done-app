@@ -60,6 +60,10 @@ export function HomeQuickActions({
     async (row: HomeProjectPickerRow) => {
       setLoadError(null);
       if (pickerMode === "add_integration") {
+        if (!row.integrations_enabled) {
+          setLoadError("Integration additions are disabled for this project.");
+          return;
+        }
         router.push(`/projects/${row.id}/integrations/new`);
         setPickerMode(null);
         return;
@@ -100,6 +104,7 @@ export function HomeQuickActions({
         : pickerMode === "add_integration"
           ? "Choose a project — Add integration"
           : "";
+  const integrationEnabledProjects = projects.filter((project) => project.integrations_enabled);
 
   return (
     <>
@@ -141,7 +146,7 @@ export function HomeQuickActions({
           <button
             type="button"
             className="btn-quick-action"
-            disabled={projects.length === 0}
+            disabled={integrationEnabledProjects.length === 0}
             onClick={() => openPicker("share")}
             aria-describedby={projects.length === 0 ? EMPTY_HINT_ID : undefined}
           >
@@ -180,7 +185,9 @@ export function HomeQuickActions({
       <HomeProjectPickerDialog
         open={pickerMode != null}
         title={pickerTitle}
-        projects={projects}
+        projects={
+          pickerMode === "add_integration" ? integrationEnabledProjects : projects
+        }
         onClose={closePicker}
         onPick={handlePick}
       />

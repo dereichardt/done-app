@@ -18,7 +18,6 @@ import {
 } from "@/lib/integration-task-helpers";
 import {
   useActionState,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -85,17 +84,20 @@ type TaskQuickAddGlobalModeProps = TaskQuickAddCommonProps & {
 export type TaskQuickAddProps = TaskQuickAddIntegrationModeProps | TaskQuickAddGlobalModeProps;
 
 const PRIORITY_DEFAULT: IntegrationTaskRow["priority"] = "medium";
+const NO_PROJECTS: TaskQuickAddProjectOption[] = [];
+const NO_INTEGRATIONS: TaskQuickAddIntegrationOption[] = [];
+const NO_INTERNAL_DESTINATIONS: TasksPageInternalDestination[] = [];
 
 export function TaskQuickAdd(props: TaskQuickAddProps) {
   const { todayIso, onCreated, className = "", layout = "inline", onCancel } = props;
   const isGlobal = props.mode === "global";
   const isDialogLayout = layout === "dialog";
 
-  const projects = isGlobal ? props.projects : [];
-  const integrations = isGlobal ? props.integrations : [];
+  const projects = isGlobal ? props.projects : NO_PROJECTS;
+  const integrations = isGlobal ? props.integrations : NO_INTEGRATIONS;
   const internalDestinations: TasksPageInternalDestination[] = isGlobal
     ? (props.internalDestinations ?? [])
-    : [];
+    : NO_INTERNAL_DESTINATIONS;
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     if (!isGlobal) return "";
@@ -113,24 +115,15 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     return integrationsForSelectedProject[0]?.id ?? "";
   });
 
-  useEffect(() => {
-    if (!isGlobal) {
-      setSelectedProjectIntegrationId(props.projectTrackId);
-    }
-  }, [isGlobal, !isGlobal ? props.projectTrackId : ""]);
-
-  useEffect(() => {
-    if (!isGlobal) return;
-    const stillValid = integrationsForSelectedProject.some(
-      (row) => row.id === selectedProjectIntegrationId,
-    );
-    if (!stillValid) {
-      setSelectedProjectIntegrationId(integrationsForSelectedProject[0]?.id ?? "");
-    }
-  }, [isGlobal, integrationsForSelectedProject, selectedProjectIntegrationId]);
+  const selectedProjectIntegrationIsValid = integrationsForSelectedProject.some(
+    (row) => row.id === selectedProjectIntegrationId,
+  );
+  const validSelectedProjectIntegrationId = selectedProjectIntegrationIsValid
+    ? selectedProjectIntegrationId
+    : (integrationsForSelectedProject[0]?.id ?? "");
 
   const effectiveProjectIntegrationId = isGlobal
-    ? selectedProjectIntegrationId
+    ? validSelectedProjectIntegrationId
     : props.projectTrackId;
 
   const integrationInternalCreate = !isGlobal && props.mode === "integration" ? props.internalCreate : undefined;
@@ -139,8 +132,23 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     integrationInternalCreate?.variant === "pick_track" ? integrationInternalCreate.adminId : "",
   );
 
+  const [title, setTitle] = useState("");
+  const [priority, setPriority] = useState<IntegrationTaskRow["priority"]>(PRIORITY_DEFAULT);
+  const [dueDateState, setDueDateState] = useState(() => ({ todayIso, value: todayIso }));
+  const dueDate = dueDateState.todayIso === todayIso ? dueDateState.value : todayIso;
+  const setDueDate = (value: string) => setDueDateState({ todayIso, value });
+
   const [createState, createAction, createPending] = useActionState(
     async (_prev: { error?: string } | void, formData: FormData) => {
+      async function finishCreate(result: { error?: string }) {
+        if (result.error) return result;
+        setTitle("");
+        setPriority(PRIORITY_DEFAULT);
+        setDueDate(todayIso);
+        await onCreated?.();
+        return result;
+      }
+
       if (isGlobal && selectedProjectId === TASKS_PAGE_INTERNAL_PROJECT_ID) {
         if (!effectiveProjectIntegrationId) {
           return { error: "Select a project track before adding a task." };
@@ -155,13 +163,13 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
           return { error: "Invalid priority" };
         }
         const due_date = dueRaw === "" ? null : dueRaw;
-        return createInternalTask({
+        return finishCreate(await createInternalTask({
           internal_track_id: dest.kind === "initiative" ? null : dest.id,
           internal_initiative_id: dest.kind === "initiative" ? dest.id : null,
           title,
           priority: priorityRaw,
           due_date,
-        });
+        }));
       }
 
       if (!isGlobal && props.mode === "integration" && props.internalCreate) {
@@ -175,68 +183,49 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
         }
         const due_date = dueRaw === "" ? null : dueRaw;
         if (ic.variant === "initiative") {
-          return createInternalTask({
+          return finishCreate(await createInternalTask({
             internal_track_id: null,
             internal_initiative_id: ic.initiativeId,
             title,
             priority: priorityRaw,
             due_date,
-          });
+          }));
         }
         if (ic.variant === "track") {
-          return createInternalTask({
+          return finishCreate(await createInternalTask({
             internal_track_id: ic.trackId,
             internal_initiative_id: null,
             title,
             priority: priorityRaw,
             due_date,
-          });
+          }));
         }
         const tid = String(formData.get("internal_type_pick") ?? "").trim();
         if (tid !== ic.adminId && tid !== ic.developmentId) {
           return { error: "Invalid type" };
         }
-        return createInternalTask({
+        return finishCreate(await createInternalTask({
           internal_track_id: tid,
           internal_initiative_id: null,
           title,
           priority: priorityRaw,
           due_date,
-        });
+        }));
       }
 
       if (!effectiveProjectIntegrationId) {
         return { error: "Select a project track before adding a task." };
       }
-      return createIntegrationTask(effectiveProjectIntegrationId, formData);
+      return finishCreate(await createIntegrationTask(effectiveProjectIntegrationId, formData));
     },
     {},
   );
 
-  const [title, setTitle] = useState("");
-  const [priority, setPriority] = useState<IntegrationTaskRow["priority"]>(PRIORITY_DEFAULT);
-  const [dueDate, setDueDate] = useState(todayIso);
-  const submitDidRunRef = useRef(false);
   const titleTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useLayoutEffect(() => {
     syncAddTaskTitleHeight(titleTextareaRef.current);
   }, [title]);
-
-  useEffect(() => {
-    if (!submitDidRunRef.current) setDueDate(todayIso);
-  }, [todayIso]);
-
-  useEffect(() => {
-    if (!submitDidRunRef.current) return;
-    if (createPending) return;
-    if (createState?.error) return;
-    setTitle("");
-    setPriority(PRIORITY_DEFAULT);
-    setDueDate(todayIso);
-    submitDidRunRef.current = false;
-    void onCreated?.();
-  }, [createState, createPending, todayIso, onCreated]);
 
   const projectOptions = useMemo(
     () => projects.map((p) => ({ value: p.id, label: p.label })),
@@ -291,7 +280,12 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
         name="project"
         options={projectOptions}
         value={selectedProjectId}
-        onValueChange={(v) => setSelectedProjectId(v)}
+        onValueChange={(v) => {
+          setSelectedProjectId(v);
+          setSelectedProjectIntegrationId(
+            integrations.find((row) => row.projectId === v)?.id ?? "",
+          );
+        }}
       />
     </label>
   ) : null;
@@ -311,7 +305,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
             ? integrationOptions
             : [{ value: "", label: "No tracks" }]
         }
-        value={selectedProjectIntegrationId}
+        value={validSelectedProjectIntegrationId}
         onValueChange={(v) => setSelectedProjectIntegrationId(v)}
       />
     </label>
@@ -396,9 +390,6 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     <form
       action={createAction}
       className={`flex min-w-0 flex-col gap-2 ${className}`.trim()}
-      onSubmit={() => {
-        submitDidRunRef.current = true;
-      }}
     >
       {isDialogLayout ? (
         <div className="add-task-inline-row flex flex-col gap-3">

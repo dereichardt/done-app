@@ -20,7 +20,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useId, useMemo, useState, useSyncExternalStore } from "react";
 import type { ActiveWorkSessionDTO } from "@/lib/actions/integration-tasks";
 import type { TasksPageTask } from "@/lib/tasks-page-shared";
 import {
@@ -28,8 +28,11 @@ import {
   formatDateDisplay,
   nextMondayIsoUtc,
   nextWeekBucketStartIsoUtc,
-  type IntegrationTaskRow,
 } from "@/lib/integration-task-helpers";
+
+const subscribeToHydration = () => () => {};
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 export type TaskBucketId =
   | "past_due"
@@ -271,7 +274,7 @@ function SortableTaskRow({
           onAfterUndo={onAfterUndo}
           onLongPressCompleteLog={
             onLongPressCompleteLog
-              ? (_t: IntegrationTaskRow) => {
+              ? () => {
                   if (task.status === "done") return;
                   onLongPressCompleteLog(task);
                 }
@@ -342,11 +345,11 @@ export function TaskGroupedList({
   const dndContextId = useId();
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
-  const [dndReady, setDndReady] = useState(false);
-
-  useEffect(() => {
-    setDndReady(true);
-  }, []);
+  const dndReady = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
 
   const allTasksFlat = useMemo(() => {
     const m = new Map<string, { task: TasksPageTask; bucket: TaskBucket }>();

@@ -1,6 +1,5 @@
-import { ensureDefaultLookups } from "@/lib/actions/ensure-lookups";
 import { loadCatalogIntegrationDetail } from "@/lib/load-catalog-integration-detail";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { CatalogEntryEditClient } from "./catalog-entry-edit-client";
 
@@ -10,12 +9,9 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function CatalogEntryEditPage({ params }: PageProps) {
   const { id: catalogIntegrationId } = await params;
-  await ensureDefaultLookups();
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const payload = await loadCatalogIntegrationDetail(supabase, user.id, catalogIntegrationId);
   if (!payload) notFound();

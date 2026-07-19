@@ -13,10 +13,8 @@ import {
   computeEstimateVariance,
   computeForecastPastPhaseSummary,
   currentSundayWeekYmd,
-  projectTotalsByWeek,
   sumActualsConsumedHours,
   sumEstimatedRoundedHours,
-  DEFAULT_FORECAST_PM_PERCENT,
 } from "@/lib/project-forecast";
 import { formatSundayWeekLabel } from "@/lib/project-weekly-effort";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
@@ -59,8 +57,11 @@ export function ProjectForecastCard({
   );
 
   const forecastByWeek = useMemo(
-    () => projectTotalsByWeek(project.hoursByRow, previewWeeks),
-    [project.hoursByRow, previewWeeks],
+    () =>
+      Object.fromEntries(
+        previewWeeks.map((week) => [week, Math.max(0, project.hoursByWeek[week] ?? 0)]),
+      ),
+    [project.hoursByWeek, previewWeeks],
   );
 
   const estimatedTotal = useMemo(
@@ -69,20 +70,18 @@ export function ProjectForecastCard({
   );
 
   const actualsTotal = useMemo(
-    () => sumActualsConsumedHours(project.integrations, project.actualsByRowKey),
-    [project.integrations, project.actualsByRowKey],
+    () => sumActualsConsumedHours(project.actualHours),
+    [project.actualHours],
   );
 
   const forecastRemainingTotal = useMemo(() => {
     let sum = 0;
-    for (const row of Object.values(project.hoursByRow)) {
-      for (const [week, hours] of Object.entries(row)) {
-        if (week < currentSunday) continue;
-        if (Number.isFinite(hours) && hours > 0) sum += hours;
-      }
+    for (const [week, hours] of Object.entries(project.hoursByWeek)) {
+      if (week < currentSunday) continue;
+      if (Number.isFinite(hours) && hours > 0) sum += hours;
     }
     return Math.round(sum);
-  }, [project.hoursByRow, currentSunday]);
+  }, [project.hoursByWeek, currentSunday]);
 
   const variance = useMemo(
     () =>
@@ -95,29 +94,30 @@ export function ProjectForecastCard({
   );
 
   const pastPhaseSummary = useMemo(() => {
-    if (!hasForecast) return null;
+    if (!hasForecast || project.forecastModel === "single_track") return null;
     return computeForecastPastPhaseSummary({
       phases: project.phases,
       integrations: project.integrations,
       deploymentEffortByPhase,
-      pmPercent: project.forecast?.pm_percent ?? DEFAULT_FORECAST_PM_PERCENT,
       startMode: "this_week",
       todayIso,
-      actualsByRowKey: actualsWithLockedForecastHours({
-        actualsByRowKey: project.actualsByRowKey,
+      actualHours: actualsWithLockedForecastHours({
+        actualHours: project.actualHours,
         lockedWeekStarts: project.lockedWeekStarts,
-        lockedHoursByRow: project.hoursByRow,
+        lockedHoursByWeek: project.hoursByWeek,
         currentSunday,
+        forecastStartDate: project.forecast?.start_date,
       }),
     });
   }, [
     hasForecast,
+    project.forecastModel,
     project.phases,
     project.integrations,
-    project.forecast?.pm_percent,
-    project.actualsByRowKey,
+    project.forecast?.start_date,
+    project.actualHours,
     project.lockedWeekStarts,
-    project.hoursByRow,
+    project.hoursByWeek,
     deploymentEffortByPhase,
     currentSunday,
     todayIso,
@@ -135,8 +135,9 @@ export function ProjectForecastCard({
       <div className="card-canvas mt-3 p-4">
         {!hasForecast ? (
           <p className="text-sm text-[var(--app-text-muted)]">
-            No forecast yet. Open Forecast Studio to generate one from the timeline and integration
-            estimates.
+            {project.forecastModel === "single_track"
+              ? "No forecast yet. Open Forecast Studio to generate one from the Expert Assist dates and estimated effort."
+              : "No forecast yet. Open Forecast Studio to generate one from the project timeline and total estimated effort."}
           </p>
         ) : (
           <div className="flex flex-col gap-4">

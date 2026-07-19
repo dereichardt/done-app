@@ -6,13 +6,12 @@ import { HomeVarianceTrendsDialog } from "@/components/home-variance-trends-dial
 import {
   type HomeActualsVsForecastDTO,
   type HomeWeekTotals,
-  type WeekPaceStatus,
   hasForecastHours,
   makeWeekTotals,
   variancePercentLabel,
-  weekPaceStatus,
 } from "@/lib/home-actuals-vs-forecast";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
+import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
 
 type WeekMode = "this" | "prior";
 
@@ -26,21 +25,6 @@ function formatBarHours(hours: number): string {
   const s = Number.isInteger(q) ? String(q) : String(parseFloat(q.toFixed(2)));
   return `${s}h`;
 }
-
-const PACE_PILL: Record<WeekPaceStatus, { label: string; className: string }> = {
-  behind: {
-    label: "Behind",
-    className: "integration-state-pill integration-state-pill--on_hold",
-  },
-  on_track: {
-    label: "On Track",
-    className: "task-priority-pill task-priority-pill--low",
-  },
-  ahead: {
-    label: "Ahead",
-    className: "task-priority-pill task-priority-pill--medium",
-  },
-};
 
 function WeekModeToggle({
   mode,
@@ -104,12 +88,11 @@ function WeekModeToggle({
 export function VarianceCard({
   title,
   totals,
-  paceStatus = null,
+  isIcp = false,
 }: {
   title: string;
   totals: HomeWeekTotals;
-  /** This-week Mon–Fri pace pill; omit / null for prior week or unrealistic forecast. */
-  paceStatus?: WeekPaceStatus | null;
+  isIcp?: boolean;
 }) {
   const hasForecast = hasForecastHours(totals.forecast);
   const pct = hasForecast ? variancePercentLabel(totals.forecast, totals.variance) : null;
@@ -118,25 +101,24 @@ export function VarianceCard({
       ? Math.min(100, (totals.actual / totals.forecast) * 100)
       : 0;
   const showActualInBar = totals.actual > 0 && fillPct > 0;
-  const pill = paceStatus ? PACE_PILL[paceStatus] : null;
 
   return (
     <article
       className="card-canvas flex min-h-[10.5rem] w-full flex-col px-4 py-4"
       aria-label={
         hasForecast
-          ? `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, remaining ${formatEffortHoursLabel(totals.variance)}${pct ? ` (${pct})` : ""}${pill ? `, ${pill.label}` : ""}`
+          ? `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, remaining ${formatEffortHoursLabel(totals.variance)}${pct ? ` (${pct})` : ""}`
           : `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, remaining not available`
       }
     >
-      <div className="flex shrink-0 items-start justify-between gap-2">
+      <div className="flex shrink-0 items-start gap-2">
         <h3
           className="min-w-0 text-sm font-medium leading-snug text-[var(--app-text)]"
           title={title}
         >
           <span className="line-clamp-2">{title}</span>
         </h3>
-        {pill ? <span className={`${pill.className} shrink-0`}>{pill.label}</span> : null}
+        {isIcp ? <InitiativeIcpPill className="mt-0.5" /> : null}
       </div>
 
       <div className="mt-1 flex min-h-0 flex-1 flex-col justify-center">
@@ -185,10 +167,8 @@ export function VarianceCard({
 
 export function HomeActualsVsForecast({
   data,
-  todayYmd,
 }: {
   data: HomeActualsVsForecastDTO;
-  todayYmd: string;
 }) {
   const [mode, setMode] = useState<WeekMode>("this");
   const [trendsOpen, setTrendsOpen] = useState(false);
@@ -202,11 +182,9 @@ export function HomeActualsVsForecast({
   const projectTotals = data.projects.map((p) => ({
     id: p.id,
     name: p.name,
+    isIcp: p.isIcp,
     totals: p.byWeek[weekKey] ?? makeWeekTotals(0, 0),
   }));
-
-  const showPace = mode === "this";
-  const totalPace = showPace ? weekPaceStatus(totals, todayYmd) : null;
 
   /** One of four equal slots across the row (accounting for three gaps). */
   const totalSlotWidth = `calc((100% - 3 * ${SLOT_GAP}) / 4)`;
@@ -235,7 +213,7 @@ export function HomeActualsVsForecast({
           aria-label={mode === "this" ? "This week by project" : "Prior week by project"}
         >
           <div className="shrink-0 pb-2" style={{ width: totalSlotWidth }}>
-            <VarianceCard title="Total" totals={totals} paceStatus={totalPace} />
+            <VarianceCard title="Total" totals={totals} />
           </div>
 
           <div className="flex min-w-0 flex-1 items-start gap-3 overflow-x-auto pb-2">
@@ -245,11 +223,7 @@ export function HomeActualsVsForecast({
                 className="min-w-0 shrink-0"
                 style={{ flex: `0 0 ${projectCardWidth}`, width: projectCardWidth }}
               >
-                <VarianceCard
-                  title={p.name}
-                  totals={p.totals}
-                  paceStatus={showPace ? weekPaceStatus(p.totals, todayYmd) : null}
-                />
+                <VarianceCard title={p.name} totals={p.totals} isIcp={p.isIcp} />
               </div>
             ))}
 

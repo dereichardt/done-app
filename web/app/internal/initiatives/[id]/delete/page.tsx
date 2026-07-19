@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { DeleteInitiativeConfirmForm } from "./delete-initiative-confirm-form";
 
@@ -8,11 +8,9 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function DeleteInternalInitiativePage({ params }: PageProps) {
   const { id: initiativeId } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   const { data: ini } = await supabase
     .from("internal_initiatives")

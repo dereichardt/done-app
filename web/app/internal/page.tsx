@@ -2,18 +2,16 @@ import { fetchInternalCombinedAdminDevTaskSnapshot } from "@/lib/actions/interna
 import { ensureInternalTracks } from "@/lib/actions/internal-work";
 import { InternalInitiativesSection } from "@/components/internal-initiatives-section";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { getUserTodayIso } from "@/lib/user-preferences";
 import { InternalTasksWorkPanel } from "./internal-track-panel";
 
 export const dynamic = "force-dynamic";
 
 export default async function InternalPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
+  const supabase = await createClient();
 
   await ensureInternalTracks();
   const prefs = await loadUserPreferences();
@@ -42,7 +40,7 @@ export default async function InternalPage() {
 
   const { data: initiatives } = await supabase
     .from("internal_initiatives")
-    .select("id, title, starts_on, ends_on, completed_at")
+    .select("id, title, starts_on, ends_on, completed_at, icp")
     .eq("owner_id", user.id)
     .order("starts_on", { ascending: false });
 
@@ -52,6 +50,8 @@ export default async function InternalPage() {
     if (aDone !== bDone) return aDone - bDone;
     return (b.starts_on ?? "").localeCompare(a.starts_on ?? "");
   });
+  const activeInitiatives = iniList.filter((initiative) => initiative.completed_at == null);
+  const completedInitiatives = iniList.filter((initiative) => initiative.completed_at != null);
   const iniIds = iniList.map((i) => i.id);
   const countsByInitiativeId: Record<string, { open: number }> = {};
   for (const id of iniIds) {
@@ -74,7 +74,8 @@ export default async function InternalPage() {
       <h1 className="heading-page">Internal</h1>
 
       <InternalInitiativesSection
-        initiatives={iniList}
+        activeInitiatives={activeInitiatives}
+        completedInitiatives={completedInitiatives}
         countsByInitiativeId={countsByInitiativeId}
         todayIso={todayIso}
       />

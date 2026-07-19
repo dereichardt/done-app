@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { cache } from "react";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import {
   DEFAULT_ACTIVITY_SUMMARY_DAY,
   DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
@@ -56,34 +57,40 @@ function toPreferences(row: UserPreferencesRow | null | undefined): UserPreferen
   };
 }
 
-export async function loadUserPreferences(): Promise<{ preferences: UserPreferences; error?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { preferences: defaults(), error: "Not signed in" };
+const loadUserPreferencesCached = cache(
+  async (): Promise<{ preferences: UserPreferences; error?: string }> => {
+    const user = await getCurrentUser();
+    if (!user) return { preferences: defaults(), error: "Not signed in" };
 
-  const { data, error } = await supabase
-    .from("user_preferences")
-    .select(
-      "timezone, activity_summary_day, forecast_review_day, effort_quarter_start_month, deployment_effort_by_phase",
-    )
-    .eq("user_id", user.id)
-    .maybeSingle<UserPreferencesRow>();
-  if (error) return { preferences: defaults(), error: error.message };
-  return { preferences: toPreferences(data) };
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("user_preferences")
+      .select(
+        "timezone, activity_summary_day, forecast_review_day, effort_quarter_start_month, deployment_effort_by_phase",
+      )
+      .eq("user_id", user.id)
+      .maybeSingle<UserPreferencesRow>();
+    if (error) return { preferences: defaults(), error: error.message };
+    return { preferences: toPreferences(data) };
+  },
+);
+
+/** Preferences for the signed-in user, memoized for the current request. */
+export async function loadUserPreferences(): Promise<{
+  preferences: UserPreferences;
+  error?: string;
+}> {
+  return loadUserPreferencesCached();
 }
 
 export async function saveUserPreferences(
   _prev: SavePreferencesState | void,
   formData: FormData,
 ): Promise<SavePreferencesState> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
 
+  const supabase = await createClient();
   const timezoneRaw = String(formData.get("timezone") ?? "");
   const activitySummaryRaw = String(formData.get("activity_summary_day") ?? "").toLowerCase().trim();
   const forecastReviewRaw = String(formData.get("forecast_review_day") ?? "").toLowerCase().trim();
@@ -130,5 +137,9 @@ export async function saveUserPreferences(
   revalidatePath("/projects");
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
+  revalidatePath("/home");
+  revalidatePath("/forecast");
+  revalidatePath("/internal");
   return { success: true };
 }

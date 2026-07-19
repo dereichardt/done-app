@@ -10,6 +10,7 @@ import type {
   ActiveWorkSessionDTO,
   IntegrationTaskSnapshot,
 } from "@/lib/actions/integration-tasks";
+import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
 
 type InternalTasksWorkPanelSingle = {
   variant?: "single";
@@ -21,6 +22,7 @@ type InternalTasksWorkPanelSingle = {
     IntegrationTasksPanelInternalCreate,
     { kind: "initiative" } | { kind: "track" }
   >;
+  isIcp?: boolean;
 };
 
 type InternalTasksWorkPanelCombined = {
@@ -48,7 +50,10 @@ export function InternalTasksWorkPanel(props: InternalTasksWorkPanelProps) {
 
   return (
     <section className="mt-10 flex min-h-0 flex-col gap-2">
-      <h2 className="section-heading">{heading}</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="section-heading">{heading}</h2>
+        {props.variant !== "combined_admin_dev" && props.isIcp ? <InitiativeIcpPill /> : null}
+      </div>
       <div className="h-[min(36rem,60vh)] max-h-[75vh] min-h-0 shrink-0">
         <IntegrationTasksPanel
           className="h-full min-h-0"

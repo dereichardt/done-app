@@ -12,10 +12,12 @@ export function ProjectQuickActionsBar({
   projectId,
   projectCustomerName,
   integrationRows,
+  integrationsEnabled,
 }: {
   projectId: string;
   projectCustomerName: string;
   integrationRows: SerializedProjectIntegrationRow[];
+  integrationsEnabled: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -48,12 +50,14 @@ export function ProjectQuickActionsBar({
           >
             Share update
           </button>
-          <Link
-            href={`/projects/${projectId}/integrations/new`}
-            className="btn-quick-action"
-          >
-            Add integration
-          </Link>
+          {integrationsEnabled ? (
+            <Link
+              href={`/projects/${projectId}/integrations/new`}
+              className="btn-quick-action"
+            >
+              Add integration
+            </Link>
+          ) : null}
           <button
             type="button"
             className="btn-quick-action"
@@ -67,7 +71,9 @@ export function ProjectQuickActionsBar({
               className="text-xs"
               style={{ color: "var(--app-text-muted)" }}
             >
-              Add an integration to enable updates.
+              {integrationsEnabled
+                ? "Add an integration to enable updates."
+                : "Integration additions are disabled for this project."}
             </span>
           ) : null}
         </div>

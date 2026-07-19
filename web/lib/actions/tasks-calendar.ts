@@ -7,7 +7,7 @@ import {
   type ProjectShade,
 } from "@/lib/project-colors";
 import { TASKS_PAGE_INTERNAL_PROJECT_ID } from "@/lib/tasks-page-shared";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import type { GridSessionInput } from "@/components/effort-calendar-grids";
 import { revalidatePath } from "next/cache";
 
@@ -144,6 +144,7 @@ async function loadOwnedProjectIntegration(
 function revalidateTasksCalendarPaths(projectId: string, projectIntegrationId: string | null) {
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
   revalidatePath(`/projects/${projectId}`);
   if (projectIntegrationId) {
     revalidatePath(`/projects/${projectId}/integrations/${projectIntegrationId}`);
@@ -153,6 +154,7 @@ function revalidateTasksCalendarPaths(projectId: string, projectIntegrationId: s
 function revalidateInternalCalendarPaths(initiativeId: string | null) {
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
   revalidatePath("/internal");
   if (initiativeId) revalidatePath(`/internal/initiatives/${initiativeId}`);
 }
@@ -391,11 +393,9 @@ export async function loadTasksCalendarSessions(
   startIso: string,
   endExclusiveIso: string,
 ): Promise<LoadTasksCalendarResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
+  const supabase = await createClient();
 
   // 1. Active projects
   const { data: projectRows, error: projectErr } = await supabase

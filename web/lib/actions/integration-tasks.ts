@@ -2,7 +2,7 @@
 
 import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
 import { loadInternalTaskFinishContextWithSupabase } from "@/lib/internal-task-context";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
 const TASK_STATUSES = ["open", "done", "cancelled"] as const;
@@ -71,6 +71,7 @@ async function loadOwnedIntegrationTrackByProjectIntegration(
 async function revalidateTrackPaths(track: OwnedProjectTrack) {
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
   revalidatePath(`/projects/${track.project_id}`);
   if (track.project_integration_id) {
     revalidatePath(`/projects/${track.project_id}/integrations/${track.project_integration_id}`);
@@ -209,11 +210,9 @@ export async function listMyActiveWorkSessions(): Promise<{
   sessions?: MyActiveWorkSessionListItem[];
   error?: string;
 }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
+  const supabase = await createClient();
 
   const { data: activeRow, error: activeErr } = await supabase
     .from("integration_task_active_work_sessions")
@@ -321,10 +320,8 @@ export async function loadActiveWorkSessionIndicator(): Promise<{
   indicator?: ActiveWorkSessionIndicatorDTO | null;
   error?: string;
 }> {
+  const user = await getCurrentUser();
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
   const listRes = await listMyActiveWorkSessions();
   if (listRes.error) return { error: listRes.error };

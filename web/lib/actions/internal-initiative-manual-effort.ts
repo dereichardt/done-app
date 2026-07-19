@@ -21,6 +21,7 @@ function revalidateInitiativeEffortPaths(initiativeId: string) {
   revalidatePath(`/internal/initiatives/${initiativeId}`);
   revalidatePath("/work");
   revalidatePath("/tasks");
+  revalidatePath("/timesheet");
 }
 
 async function assertOwnedInitiative(

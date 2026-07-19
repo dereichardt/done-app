@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { CanvasSelect } from "@/components/canvas-select";
+import { FormSwitch } from "@/components/form-switch";
 import { ProjectColorPicker } from "@/components/project-color-picker";
 import { createProject } from "@/lib/actions/projects";
-import { useActionState } from "react";
+import { EXPERT_ASSIST_SYSTEM_KEY, type ProjectTypeLookup } from "@/lib/project-types";
+import { useActionState, useState } from "react";
 
 type LookupRow = { id: string; name: string };
 
@@ -12,10 +14,14 @@ export function CreateProjectForm({
   projectTypes,
   projectRoles,
 }: {
-  projectTypes: LookupRow[];
+  projectTypes: ProjectTypeLookup[];
   projectRoles: LookupRow[];
 }) {
   const [state, formAction, pending] = useActionState(createProject, {});
+  const [projectTypeId, setProjectTypeId] = useState("");
+  const isExpertAssist =
+    projectTypes.find((type) => type.id === projectTypeId)?.system_key ===
+    EXPERT_ASSIST_SYSTEM_KEY;
 
   return (
     <form
@@ -43,10 +49,53 @@ export function CreateProjectForm({
           id="new-project-type"
           name="project_type_id"
           placeholder="Select…"
-          defaultValue=""
+          value={projectTypeId}
+          onValueChange={setProjectTypeId}
           options={projectTypes.map((t) => ({ value: t.id, label: t.name }))}
         />
       </div>
+      {isExpertAssist ? (
+        <div className="card-canvas flex flex-col gap-4 p-4">
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-canvas">
+              Start date
+              <input
+                name="starts_on"
+                type="date"
+                required
+                className="input-canvas h-10 text-sm"
+              />
+            </label>
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-canvas">
+              End date
+              <input
+                name="ends_on"
+                type="date"
+                required
+                className="input-canvas h-10 text-sm"
+              />
+            </label>
+          </div>
+          <label className="flex flex-col gap-1 text-xs text-muted-canvas">
+            Estimated effort <span className="font-normal">(hours)</span>
+            <input
+              name="estimated_effort_hours"
+              type="number"
+              min="0.25"
+              step="0.25"
+              inputMode="decimal"
+              required
+              className="input-canvas h-10 text-sm"
+              placeholder="e.g. 80"
+            />
+          </label>
+          <FormSwitch
+            name="integrations_enabled"
+            label="Allow integrations"
+            description="Allow integrations to be added to this Expert Assist."
+          />
+        </div>
+      ) : null}
       <div className="canvas-select-field flex flex-col gap-1">
         <label
           className="block text-sm font-medium"

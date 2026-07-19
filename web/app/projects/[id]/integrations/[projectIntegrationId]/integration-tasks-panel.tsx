@@ -11,7 +11,6 @@ import {
 import {
   createInternalTaskWorkSession,
   discardInternalActiveWorkSession,
-  startOrReplaceInternalActiveWorkSession,
   syncInternalActiveWorkSessionPause,
   updateInternalActiveWorkSessionStartedAt,
 } from "@/lib/actions/internal-tasks";
@@ -141,13 +140,15 @@ function SessionTimeCanvasPickers({
   const [hour, setHour] = useState(String(parts.hour12));
   const [minute, setMinute] = useState(String(parts.minute));
   const [ap, setAp] = useState(parts.isPm ? "pm" : "am");
+  const [lastValueMs, setLastValueMs] = useState(valueMs);
 
-  useEffect(() => {
+  if (lastValueMs !== valueMs) {
+    setLastValueMs(valueMs);
     const p = msTo12hParts(valueMs);
     setHour(String(p.hour12));
     setMinute(String(p.minute));
     setAp(p.isPm ? "pm" : "am");
-  }, [valueMs]);
+  }
 
   async function commitWith(h: string, m: string, apv: string) {
     const hh = parseInt(h, 10);
@@ -1987,7 +1988,6 @@ function panelInternalCreateToQuickAdd(ic: IntegrationTasksPanelInternalCreate):
 }
 
 export function IntegrationTasksPanel({
-  projectIntegrationId: _projectIntegrationId = "",
   projectTrackId,
   tasks,
   workSessionsByTaskId,
@@ -2077,12 +2077,7 @@ export function IntegrationTasksPanel({
 
   useEffect(() => {
     setActiveWorkSession(activeWorkSessionProp);
-  }, [
-    activeWorkSessionProp?.task_id,
-    activeWorkSessionProp?.started_at,
-    activeWorkSessionProp?.paused_ms_accumulated,
-    activeWorkSessionProp?.pause_started_at,
-  ]);
+  }, [activeWorkSessionProp]);
 
   const effectiveGlobalActiveTaskId = useMemo(
     () => activeWorkSession?.task_id ?? globalActiveWorkSessionProp?.task_id ?? null,
@@ -2169,14 +2164,15 @@ export function IntegrationTasksPanel({
   const historyWorkEditRef = useRef<HTMLTextAreaElement | null>(null);
   const historyWorkCommitRef = useRef(false);
   const skipHistoryWorkBlurRef = useRef(false);
+  const historyWorkEditSessionId = historyWorkEdit?.sessionId;
 
   useLayoutEffect(() => {
-    if (!historyWorkEdit) return;
+    if (!historyWorkEditSessionId) return;
     const el = historyWorkEditRef.current;
     if (!el) return;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
-  }, [historyWorkEdit?.sessionId]);
+  }, [historyWorkEditSessionId]);
 
   async function saveTaskTitle(taskId: string, nextTitle: string): Promise<{ error?: string }> {
     const orig = optimisticTasks.find((x: IntegrationTaskRow) => x.id === taskId)?.title ?? "";

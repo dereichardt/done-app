@@ -10,7 +10,7 @@ export default async function WorkPage() {
   if (error || !snapshot) {
     return (
       <div>
-        <h1 className="heading-page">Work</h1>
+        <h1 className="heading-page">Tasks</h1>
         <p className="subheading-page mt-2" style={{ color: "var(--app-danger)" }}>
           {error ?? "Could not load tasks."}
         </p>
@@ -21,7 +21,7 @@ export default async function WorkPage() {
   if (snapshot.projects.length === 0) {
     return (
       <div>
-        <h1 className="heading-page">Work</h1>
+        <h1 className="heading-page">Tasks</h1>
         <p className="subheading-page mt-2">
           You don&apos;t have any active projects yet. Create a project to start tracking tasks here, or use{" "}
           <a href="/internal" className="font-medium hover:underline" style={{ color: "var(--app-action)" }}>

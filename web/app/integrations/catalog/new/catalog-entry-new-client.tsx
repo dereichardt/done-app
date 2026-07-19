@@ -39,6 +39,7 @@ export function CatalogEntryNewClient({
 
   return (
     <CatalogEntryEditForm
+      key={`create:${JSON.stringify(initial)}`}
       mode="create"
       lookups={lookups}
       initial={initial}

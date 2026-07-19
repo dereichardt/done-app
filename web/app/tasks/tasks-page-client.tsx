@@ -52,7 +52,6 @@ import {
 import { formatLocalYmd } from "@/lib/integration-effort-buckets";
 import type { EffortView } from "@/lib/integration-effort-buckets";
 import { TasksEffortCalendar } from "./tasks-effort-calendar";
-import { WorkTimesheetView } from "./work-timesheet-view";
 
 const dialogBaseClass =
   "app-catalog-dialog fixed left-1/2 top-1/2 z-[200] max-h-[min(92dvh,52rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden border-0 p-0 shadow-xl";
@@ -107,14 +106,14 @@ function DialogHeader({
 export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPageSnapshot }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [todayIso, setTodayIso] = useState(initialSnapshot.todayIso);
+  const [todayIso] = useState(initialSnapshot.todayIso);
   const [calendarAnchorFallback, setCalendarAnchorFallback] = useState(initialSnapshot.todayIso);
 
   useEffect(() => {
     setCalendarAnchorFallback(formatLocalYmd(new Date()));
   }, []);
 
-  // ── View state (list | calendar | timesheet) driven by URL params ──────────
+  // ── View state (list | calendar) driven by URL params ──────────
   const rawView = searchParams.get("view");
   const calendarView: EffortView = (() => {
     const s = searchParams.get("scope");
@@ -122,25 +121,28 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
     return "week";
   })();
   const calendarAnchor = searchParams.get("date") ?? calendarAnchorFallback;
-  const workTab: "list" | "calendar" | "timesheet" =
-    rawView === "calendar" ? "calendar" : rawView === "timesheet" ? "timesheet" : "list";
+  const workTab: "list" | "calendar" = rawView === "calendar" ? "calendar" : "list";
   const isCalendar = workTab === "calendar";
-  const isTimesheet = workTab === "timesheet";
+
+  useEffect(() => {
+    if (rawView !== "timesheet") return;
+    const params = new URLSearchParams();
+    const date = searchParams.get("date");
+    if (date) params.set("date", date);
+    const qs = params.toString();
+    router.replace(qs ? `/timesheet?${qs}` : "/timesheet");
+  }, [rawView, router, searchParams]);
 
   const setView = useCallback(
-    (next: "list" | "calendar" | "timesheet") => {
+    (next: "list" | "calendar") => {
       const params = new URLSearchParams(searchParams.toString());
       if (next === "list") {
         params.delete("view");
         params.delete("scope");
         params.delete("date");
-      } else if (next === "calendar") {
+      } else {
         params.set("view", "calendar");
         if (!params.has("scope")) params.set("scope", "week");
-        if (!params.has("date")) params.set("date", calendarAnchorFallback);
-      } else {
-        params.set("view", "timesheet");
-        params.delete("scope");
         if (!params.has("date")) params.set("date", calendarAnchorFallback);
       }
       router.replace(`?${params.toString()}`, { scroll: false });
@@ -352,17 +354,10 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
     indicatorToActiveSessionDto(initialSnapshot.activeWorkSessionIndicator),
   );
 
-  const activeWorkIndicatorSyncKey = useMemo(() => {
-    const i = initialSnapshot.activeWorkSessionIndicator;
-    if (!i) return "";
-    return `${i.scope}|${i.task_id}|${i.started_at}|${i.paused_ms_accumulated}|${i.pause_started_at ?? ""}`;
-  }, [
-    initialSnapshot.activeWorkSessionIndicator?.scope,
-    initialSnapshot.activeWorkSessionIndicator?.task_id,
-    initialSnapshot.activeWorkSessionIndicator?.started_at,
-    initialSnapshot.activeWorkSessionIndicator?.paused_ms_accumulated,
-    initialSnapshot.activeWorkSessionIndicator?.pause_started_at,
-  ]);
+  const activeWorkIndicator = initialSnapshot.activeWorkSessionIndicator;
+  const activeWorkIndicatorSyncKey = activeWorkIndicator
+    ? `${activeWorkIndicator.scope}|${activeWorkIndicator.task_id}|${activeWorkIndicator.started_at}|${activeWorkIndicator.paused_ms_accumulated}|${activeWorkIndicator.pause_started_at ?? ""}`
+    : "";
 
   // Sync client session from server indicator only when indicator *fields* change (not object identity).
   useEffect(() => {
@@ -563,9 +558,9 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
         >
           <div
             aria-hidden
-            className="pointer-events-none absolute left-1 top-1 bottom-1 z-[1] w-[calc((100%-0.5rem)/3)] rounded-full transition-transform duration-200 ease-[cubic-bezier(0.2,0,0.2,1)]"
+            className="pointer-events-none absolute left-1 top-1 bottom-1 z-[1] w-[calc((100%-0.5rem)/2)] rounded-full transition-transform duration-200 ease-[cubic-bezier(0.2,0,0.2,1)]"
             style={{
-              transform: `translateX(${workTab === "list" ? 0 : workTab === "calendar" ? 100 : 200}%)`,
+              transform: `translateX(${workTab === "list" ? 0 : 100}%)`,
               background: "#1f2937",
               boxShadow: "0 0 0 2px color-mix(in oklab, var(--app-border) 70%, white)",
             }}
@@ -598,20 +593,6 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
           >
             Calendar
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workTab === "timesheet"}
-            className={[
-              "relative z-[2] inline-flex h-10 min-w-[5.75rem] flex-1 items-center justify-center rounded-full px-4 text-center text-sm transition-colors cursor-pointer",
-              workTab === "timesheet"
-                ? "font-semibold text-[#f3f5f8]"
-                : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
-            ].join(" ")}
-            onClick={() => setView("timesheet")}
-          >
-            Timesheet
-          </button>
         </div>
       </header>
 
@@ -622,26 +603,24 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
             isCalendar ? "" : "max-h-[calc(100dvh-10rem)]",
           ].join(" ")}
         >
-          {workTab !== "timesheet" ? (
-            <TasksFilters
-              value={filters}
-              onChange={setFilters}
-              projects={projects}
-              tracks={tracks}
-              trailingSlot={
-                workTab === "list" ? (
-                  <button
-                    type="button"
-                    className="btn-cta shrink-0 whitespace-nowrap text-xs"
-                    style={{ padding: "0.4rem 0.85rem" }}
-                    onClick={openAddTaskDialog}
-                  >
-                    Add Task
-                  </button>
-                ) : null
-              }
-            />
-          ) : null}
+          <TasksFilters
+            value={filters}
+            onChange={setFilters}
+            projects={projects}
+            tracks={tracks}
+            trailingSlot={
+              workTab === "list" ? (
+                <button
+                  type="button"
+                  className="btn-cta shrink-0 whitespace-nowrap text-xs"
+                  style={{ padding: "0.4rem 0.85rem" }}
+                  onClick={openAddTaskDialog}
+                >
+                  Add Task
+                </button>
+              ) : null
+            }
+          />
 
           {workSessionActionError && workTab === "list" ? (
             <p
@@ -677,7 +656,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
                 onMoveAcrossBucket={moveAcrossBucket}
               />
             </div>
-          ) : workTab === "calendar" ? (
+          ) : (
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               <TasksEffortCalendar
                 scope={calendarView}
@@ -689,22 +668,6 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
                 tracks={tracks}
                 lastUsedIntegrationId={lastUsedIntegrationId}
                 onRememberIntegration={setLastUsedIntegrationId}
-              />
-            </div>
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <WorkTimesheetView
-                anchorYmd={calendarAnchor}
-                onAnchorChange={setCalendarAnchor}
-                filters={{
-                  search: "",
-                  projectId: "",
-                  projectTrackId: "",
-                  priority: "",
-                }}
-                projects={projects}
-                tracks={tracks}
-                integrations={initialSnapshot.integrations}
               />
             </div>
           )}

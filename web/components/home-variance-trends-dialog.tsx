@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { DialogCloseButton } from "@/components/dialog-close-button";
+import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
 import {
   type HomeActualsVsForecastDTO,
   type HomeWeekTotals,
@@ -279,8 +280,11 @@ export function HomeVarianceTrendsDialog({
                         }}
                         title={p.name}
                       >
-                        <span className="line-clamp-2 text-sm font-medium leading-snug text-[var(--app-text)]">
-                          {p.name}
+                        <span className="flex items-start gap-2">
+                          <span className="line-clamp-2 text-sm font-medium leading-snug text-[var(--app-text)]">
+                            {p.name}
+                          </span>
+                          {p.isIcp ? <InitiativeIcpPill className="mt-0.5" /> : null}
                         </span>
                         <ProjectPeriodSummary totals={period} />
                       </div>

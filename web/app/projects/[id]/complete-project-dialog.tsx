@@ -3,7 +3,7 @@
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { completeProject } from "@/lib/actions/projects";
 import { useRouter } from "next/navigation";
-import { useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 
 /** Visually custom checkbox (thin SVG check) with hidden native input for a11y — native accent cannot thin the mark. */
 function CompleteProjectCheckbox({
@@ -123,7 +123,7 @@ export function CompleteProjectDialog({ projectId, dialogRef, onClose }: Complet
                 Mark all Tasks as Completed
               </span>
               <span className="text-xs" style={{ color: "var(--app-text-muted)" }}>
-                All open tasks across this project's integrations will be marked as done.
+                All open tasks across this project&apos;s integrations will be marked as done.
               </span>
             </span>
           </label>

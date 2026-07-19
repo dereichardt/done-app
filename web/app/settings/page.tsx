@@ -1,12 +1,9 @@
 import { SettingsForm } from "@/app/settings/settings-form";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 export default async function SettingsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return null;
 
   const prefsRes = await loadUserPreferences();

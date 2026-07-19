@@ -10,13 +10,6 @@ import { addDaysYmd } from "@/lib/zoned-datetime";
 
 export const HOME_VARIANCE_TREND_WEEKS = 12;
 
-/** Assumed hours available per weekday (Mon–Fri) for pace status. */
-export const WEEK_PACE_WORKDAY_HOURS = 8;
-export const WEEK_PACE_WORKDAYS = 5;
-export const WEEK_PACE_CAPACITY_HOURS = WEEK_PACE_WORKDAY_HOURS * WEEK_PACE_WORKDAYS;
-
-export type WeekPaceStatus = "behind" | "on_track" | "ahead";
-
 export type HomeWeekTotals = {
   forecast: number;
   actual: number;
@@ -26,6 +19,8 @@ export type HomeWeekTotals = {
 export type HomeActualsVsForecastProject = {
   id: string;
   name: string;
+  kind: "project" | "initiative";
+  isIcp: boolean;
   byWeek: Record<string, HomeWeekTotals>;
 };
 
@@ -82,54 +77,6 @@ export function hasForecastHours(forecast: number): boolean {
   return Number.isFinite(forecast) && forecast > 0;
 }
 
-/**
- * Forecast is realistic for Mon–Fri 8h pacing when it fits in one work week
- * (≤ {@link WEEK_PACE_CAPACITY_HOURS}).
- */
-export function isRealisticWeekForecast(forecast: number): boolean {
-  return hasForecastHours(forecast) && forecast <= WEEK_PACE_CAPACITY_HOURS;
-}
-
-/** Mon=0 … Sun=6 for a `YYYY-MM-DD` calendar date (UTC date parts). */
-function weekdayMon0FromYmd(ymd: string): number {
-  const [y, m, d] = ymd.split("-").map(Number);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return 0;
-  const js = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return (js + 6) % 7;
-}
-
-/**
- * Workdays of the Mon–Fri week that should already be “done” by end of `todayYmd`.
- * Sun → 0 (week not started), Mon → 1 … Fri/Sat → 5.
- */
-export function workdaysElapsedInWeek(todayYmd: string): number {
-  const mon0 = weekdayMon0FromYmd(todayYmd);
-  if (mon0 === 6) return 0; // Sunday
-  if (mon0 === 5) return WEEK_PACE_WORKDAYS; // Saturday
-  return mon0 + 1;
-}
-
-/**
- * Pace vs forecast for this week, using even Mon–Fri 8h-day progress.
- * Returns null when the forecast is not realistic to pace against.
- */
-export function weekPaceStatus(
-  totals: Pick<HomeWeekTotals, "forecast" | "actual">,
-  todayYmd: string,
-): WeekPaceStatus | null {
-  if (!isRealisticWeekForecast(totals.forecast)) return null;
-
-  const elapsed = workdaysElapsedInWeek(todayYmd);
-  const expected = totals.forecast * (elapsed / WEEK_PACE_WORKDAYS);
-  const actual = Number.isFinite(totals.actual) && totals.actual > 0 ? totals.actual : 0;
-  const tolerance = Math.max(WEEK_PACE_WORKDAY_HOURS / 2, totals.forecast * 0.1);
-  const delta = actual - expected;
-
-  if (delta < -tolerance) return "behind";
-  if (delta > tolerance) return "ahead";
-  return "on_track";
-}
-
 /** Sum forecast/actual across weeks that have a forecast (skips weeks with no forecast). */
 export function sumWeekTotals(
   byWeek: Record<string, HomeWeekTotals>,
@@ -181,6 +128,139 @@ function sumTotals(parts: HomeWeekTotals[]): HomeWeekTotals {
   return makeWeekTotals(forecast, actual);
 }
 
+export function sumForecastItemsForWeek(
+  items: HomeActualsVsForecastProject[],
+  week: string,
+): HomeWeekTotals {
+  return sumTotals(items.map((item) => item.byWeek[week] ?? makeWeekTotals(0, 0)));
+}
+
+async function loadHomeInitiativeRows(
+  supabase: SupabaseClient,
+  ownerId: string,
+  weeks: string[],
+  windowStartYmd: string,
+  windowEndExclusiveYmd: string,
+): Promise<HomeActualsVsForecastProject[]> {
+  const { data: initiatives, error } = await supabase
+    .from("internal_initiatives")
+    .select("id, title, icp")
+    .eq("owner_id", ownerId)
+    .eq("include_in_forecast", true)
+    .is("completed_at", null)
+    .order("starts_on", { ascending: true });
+  if (error || !initiatives?.length) {
+    if (error) console.error("[home-actuals-vs-forecast] initiatives load failed", error);
+    return [];
+  }
+
+  const initiativeIds = initiatives.map((row) => row.id as string);
+  const { data: tasks } = await supabase
+    .from("internal_tasks")
+    .select("id, internal_initiative_id")
+    .in("internal_initiative_id", initiativeIds);
+  const taskIds = (tasks ?? []).map((task) => task.id as string);
+  const initiativeIdByTaskId = new Map(
+    (tasks ?? []).map((task) => [task.id as string, task.internal_initiative_id as string]),
+  );
+  const windowStartIso = `${windowStartYmd}T00:00:00.000Z`;
+  const windowEndExclusiveIso = `${windowEndExclusiveYmd}T00:00:00.000Z`;
+
+  const [forecastRes, workRes, manualRes] = await Promise.all([
+    supabase
+      .from("initiative_forecast_hours")
+      .select("initiative_id, week_start_date, hours")
+      .in("initiative_id", initiativeIds)
+      .gte("week_start_date", windowStartYmd)
+      .lt("week_start_date", windowEndExclusiveYmd),
+    taskIds.length === 0
+      ? Promise.resolve({ data: [] as unknown[], error: null })
+      : supabase
+          .from("internal_task_work_sessions")
+          .select("id, internal_task_id, started_at, finished_at, duration_hours")
+          .in("internal_task_id", taskIds)
+          .not("finished_at", "is", null)
+          .lt("started_at", windowEndExclusiveIso)
+          .gt("finished_at", windowStartIso),
+    supabase
+      .from("internal_initiative_manual_effort_entries")
+      .select("id, internal_initiative_id, started_at, finished_at, duration_hours")
+      .in("internal_initiative_id", initiativeIds)
+      .not("finished_at", "is", null)
+      .lt("started_at", windowEndExclusiveIso)
+      .gt("finished_at", windowStartIso),
+  ]);
+
+  const forecastByItemWeek = new Map<string, number>();
+  for (const row of forecastRes.data ?? []) {
+    const key = `${row.initiative_id}|${String(row.week_start_date).slice(0, 10)}`;
+    forecastByItemWeek.set(key, (forecastByItemWeek.get(key) ?? 0) + Math.max(0, Math.round(Number(row.hours) || 0)));
+  }
+  const sessionsByInitiative = new Map<string, EffortSessionInput[]>(
+    initiativeIds.map((id) => [id, []]),
+  );
+  const addSession = (
+    initiativeId: string | undefined,
+    row: {
+      id: string;
+      started_at: string;
+      finished_at: string;
+      duration_hours: number | string;
+    },
+    source: "task_work_session" | "manual",
+  ) => {
+    if (!initiativeId || !row.finished_at) return;
+    const duration = Number(row.duration_hours);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    sessionsByInitiative.get(initiativeId)?.push({
+      source,
+      source_id: row.id,
+      started_at: row.started_at,
+      finished_at: row.finished_at,
+      duration_hours: duration,
+      integration_task_id: null,
+      title: "Initiative effort",
+      work_accomplished: null,
+    });
+  };
+  for (const row of (workRes.data ?? []) as Array<{
+    id: string;
+    internal_task_id: string;
+    started_at: string;
+    finished_at: string;
+    duration_hours: number | string;
+  }>) {
+    addSession(initiativeIdByTaskId.get(row.internal_task_id), row, "task_work_session");
+  }
+  for (const row of (manualRes.data ?? []) as Array<{
+    id: string;
+    internal_initiative_id: string;
+    started_at: string;
+    finished_at: string;
+    duration_hours: number | string;
+  }>) {
+    addSession(row.internal_initiative_id, row, "manual");
+  }
+
+  return initiatives.map((initiative) => {
+    const byWeek = emptyByWeek(weeks);
+    const sessions = sessionsByInitiative.get(initiative.id) ?? [];
+    for (const week of weeks) {
+      byWeek[week] = makeWeekTotals(
+        forecastByItemWeek.get(`${initiative.id}|${week}`) ?? 0,
+        hoursForSundayWeek(sessions, week),
+      );
+    }
+    return {
+      id: initiative.id,
+      name: String(initiative.title ?? "").trim() || "Untitled initiative",
+      kind: "initiative" as const,
+      isIcp: Boolean(initiative.icp),
+      byWeek,
+    };
+  });
+}
+
 export async function loadHomeActualsVsForecast(
   supabase: SupabaseClient,
   ownerId: string,
@@ -227,7 +307,22 @@ export async function loadHomeActualsVsForecast(
     name: String(p.customer_name ?? "").trim() || "Untitled project",
   }));
 
-  if (projects.length === 0) return empty;
+  if (projects.length === 0) {
+    if (onlyProjectId) return empty;
+    const initiativeRows = await loadHomeInitiativeRows(
+      supabase,
+      ownerId,
+      weeks,
+      windowStartYmd,
+      windowEndExclusiveYmd,
+    );
+    return {
+      thisWeek: sumForecastItemsForWeek(initiativeRows, currentSunday),
+      priorWeek: sumForecastItemsForWeek(initiativeRows, priorSunday),
+      weeks,
+      projects: initiativeRows,
+    };
+  }
 
   const projectIds = projects.map((p) => p.id);
 
@@ -363,19 +458,24 @@ export async function loadHomeActualsVsForecast(
       const actual = hoursForSundayWeek(sessions, week);
       byWeek[week] = makeWeekTotals(forecast, actual);
     }
-    return { id: p.id, name: p.name, byWeek };
+    return { id: p.id, name: p.name, kind: "project" as const, isIcp: false, byWeek };
   });
 
-  const thisWeekParts = resultProjects.map(
-    (p) => p.byWeek[currentSunday] ?? makeWeekTotals(0, 0),
-  );
-  const priorWeekParts = resultProjects.map(
-    (p) => p.byWeek[priorSunday] ?? makeWeekTotals(0, 0),
-  );
+  if (!onlyProjectId) {
+    resultProjects.push(
+      ...(await loadHomeInitiativeRows(
+        supabase,
+        ownerId,
+        weeks,
+        windowStartYmd,
+        windowEndExclusiveYmd,
+      )),
+    );
+  }
 
   return {
-    thisWeek: sumTotals(thisWeekParts),
-    priorWeek: sumTotals(priorWeekParts),
+    thisWeek: sumForecastItemsForWeek(resultProjects, currentSunday),
+    priorWeek: sumForecastItemsForWeek(resultProjects, priorSunday),
     weeks,
     projects: resultProjects,
   };

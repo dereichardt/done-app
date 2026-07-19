@@ -20,7 +20,7 @@ import {
   type UserPreferences,
   type WeekdayValue,
 } from "@/lib/user-preferences";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 
 const weekdayOptions: Array<{ value: WeekdayValue; label: string }> = [
   { value: "monday", label: "Monday" },
@@ -52,7 +52,7 @@ export function SettingsForm({
   timezoneOptions: string[];
 }) {
   const [state, formAction, pending] = useActionState(saveUserPreferences, {});
-  const [timezone, setTimezone] = useState(initialPreferences.timezone ?? "");
+  const timezoneInputRef = useRef<HTMLInputElement>(null);
   const [quarterStartMonth, setQuarterStartMonth] = useState<EffortQuarterStartMonth>(
     initialPreferences.effort_quarter_start_month || DEFAULT_EFFORT_QUARTER_START_MONTH,
   );
@@ -65,10 +65,11 @@ export function SettingsForm({
   });
 
   useEffect(() => {
-    if (timezone.trim().length > 0) return;
+    const input = timezoneInputRef.current;
+    if (!input || input.value.trim().length > 0) return;
     const detected = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
-    if (detected.trim().length > 0) setTimezone(detected);
-  }, [timezone]);
+    if (detected.trim().length > 0) input.value = detected;
+  }, []);
 
   const timezoneListId = useMemo(() => "timezone-options", []);
   const effortTotal = sumDeploymentEffort(deploymentEffort);
@@ -96,11 +97,16 @@ export function SettingsForm({
           <label className="block text-sm font-medium" style={{ color: "var(--app-text)" }}>
             Timezone (IANA)
             <input
+              ref={timezoneInputRef}
               className="input-canvas mt-1"
               name="timezone"
               list={timezoneListId}
-              value={timezone}
-              onChange={(e) => setTimezone(e.currentTarget.value)}
+              defaultValue={initialPreferences.timezone ?? ""}
+              onChange={(e) => {
+                if (e.currentTarget.value.trim().length > 0) return;
+                const detected = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+                if (detected.trim().length > 0) e.currentTarget.value = detected;
+              }}
               placeholder="America/New_York"
               autoComplete="off"
               spellCheck={false}

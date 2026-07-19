@@ -17,6 +17,11 @@ import { defaultProjectManagementTrackName } from "@/lib/project-tracks";
 import type { CatalogIntegrationDetailDTO } from "@/lib/load-catalog-integration-detail";
 import { loadCatalogIntegrationDetail } from "@/lib/load-catalog-integration-detail";
 import { DEFAULT_PHASES } from "@/lib/project-phases";
+import {
+  EXPERT_ASSIST_SYSTEM_KEY,
+  parseExpertAssistDetails,
+  type ExpertAssistDetails,
+} from "@/lib/project-types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -73,6 +78,30 @@ export async function createProject(
     return { error: "Invalid project color" };
   }
 
+  let isExpertAssist = false;
+  if (project_type_id) {
+    const { data: projectType } = await supabase
+      .from("project_types")
+      .select("id, system_key")
+      .eq("id", project_type_id)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!projectType) return { error: "Invalid project type" };
+    isExpertAssist = projectType.system_key === EXPERT_ASSIST_SYSTEM_KEY;
+  }
+
+  let expertAssistDetails: ExpertAssistDetails | null = null;
+  if (isExpertAssist) {
+    const parsed = parseExpertAssistDetails({
+      starts_on: String(formData.get("starts_on") ?? ""),
+      ends_on: String(formData.get("ends_on") ?? ""),
+      estimated_effort_hours: String(formData.get("estimated_effort_hours") ?? ""),
+      integrations_enabled: formData.has("integrations_enabled"),
+    });
+    if (parsed.error || !parsed.details) return { error: parsed.error };
+    expertAssistDetails = parsed.details;
+  }
+
   // Reserve a sort position at the end of the active list.
   const { data: orderRow } = await supabase
     .from("projects")
@@ -93,6 +122,10 @@ export async function createProject(
       primary_role_id: primary_role_id || null,
       project_color_key,
       active_dashboard_order: nextOrder,
+      starts_on: expertAssistDetails?.starts_on ?? null,
+      ends_on: expertAssistDetails?.ends_on ?? null,
+      estimated_effort_hours: expertAssistDetails?.estimated_effort_hours ?? null,
+      integrations_enabled: expertAssistDetails?.integrations_enabled ?? true,
     })
     .select("id")
     .single();
@@ -130,6 +163,10 @@ export async function updateProjectDetails(
     project_type_id: string | null;
     primary_role_id: string | null;
     project_color_key: string | null;
+    starts_on?: string;
+    ends_on?: string;
+    estimated_effort_hours?: string;
+    integrations_enabled?: boolean;
   },
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -151,21 +188,23 @@ export async function updateProjectDetails(
 
   const { data: project } = await supabase
     .from("projects")
-    .select("id")
+    .select("id, integrations_enabled")
     .eq("id", projectId)
     .eq("owner_id", user.id)
     .maybeSingle();
 
   if (!project) return { error: "Project not found" };
 
+  let isExpertAssist = false;
   if (project_type_id) {
     const { data: row } = await supabase
       .from("project_types")
-      .select("id")
+      .select("id, system_key")
       .eq("id", project_type_id)
       .eq("owner_id", user.id)
       .maybeSingle();
     if (!row) return { error: "Invalid project type" };
+    isExpertAssist = row.system_key === EXPERT_ASSIST_SYSTEM_KEY;
   }
 
   if (primary_role_id) {
@@ -178,14 +217,29 @@ export async function updateProjectDetails(
     if (!row) return { error: "Invalid role" };
   }
 
+  let expertAssistDetails: ExpertAssistDetails | null = null;
+  if (isExpertAssist) {
+    const parsed = parseExpertAssistDetails({
+      starts_on: data.starts_on ?? "",
+      ends_on: data.ends_on ?? "",
+      estimated_effort_hours: data.estimated_effort_hours ?? "",
+      integrations_enabled: data.integrations_enabled === true,
+    });
+    if (parsed.error || !parsed.details) return { error: parsed.error };
+    expertAssistDetails = parsed.details;
+  }
+
+  const detailUpdates = {
+    customer_name,
+    project_type_id,
+    primary_role_id,
+    project_color_key,
+    ...(expertAssistDetails ?? {}),
+  };
+
   const { error } = await supabase
     .from("projects")
-    .update({
-      customer_name,
-      project_type_id,
-      primary_role_id,
-      project_color_key,
-    })
+    .update(detailUpdates)
     .eq("id", projectId)
     .eq("owner_id", user.id);
 
@@ -215,7 +269,7 @@ export async function saveProjectTimeline(
 
   const { data: project } = await supabase
     .from("projects")
-    .select("id")
+    .select("id, integrations_enabled")
     .eq("id", projectId)
     .eq("owner_id", user.id)
     .maybeSingle();
@@ -465,12 +519,15 @@ export async function createIntegrationAndLink(
 
   const { data: project } = await supabase
     .from("projects")
-    .select("id")
+    .select("id, integrations_enabled")
     .eq("id", projectId)
     .eq("owner_id", user.id)
     .maybeSingle();
 
   if (!project) return { error: "Project not found" };
+  if (project.integrations_enabled === false) {
+    return { error: "Integration additions are disabled for this project" };
+  }
 
   const parsed = await parseIntegrationDefinitionForm(formData, user.id, supabase);
   if (!parsed.ok) return { error: parsed.error };

@@ -30,6 +30,7 @@ export function CatalogEntryEditClient({
 
   return (
     <CatalogEntryEditForm
+      key={`${catalogIntegrationId}:${JSON.stringify(initial)}`}
       mode="edit"
       catalogIntegrationId={catalogIntegrationId}
       lookups={lookups}

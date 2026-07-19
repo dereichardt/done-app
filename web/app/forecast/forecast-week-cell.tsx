@@ -20,6 +20,14 @@ export const PORTFOLIO_BAR_MAX_HOURS = 42;
 /** Portfolio load above this uses warning (pale yellow) instead of success green. */
 export const PORTFOLIO_OVERLOAD_HOURS = 40;
 
+export type PortfolioCapacityTone = "below-target" | "at-target" | "overload";
+
+export function portfolioCapacityTone(hours: number): PortfolioCapacityTone {
+  if (hours > PORTFOLIO_OVERLOAD_HOURS) return "overload";
+  if (hours >= TARGET_WEEKLY_FORECAST_HOURS) return "at-target";
+  return "below-target";
+}
+
 function barHeightPx(hours: number, scaleHours: number, maxPx = BAR_MAX_PX): number {
   const scale = Math.max(1, scaleHours);
   if (hours <= 0) return 4;
@@ -27,10 +35,11 @@ function barHeightPx(hours: number, scaleHours: number, maxPx = BAR_MAX_PX): num
 }
 
 function capacityBarFillClass(hours: number): string {
-  if (hours > PORTFOLIO_OVERLOAD_HOURS) {
+  const tone = portfolioCapacityTone(hours);
+  if (tone === "overload") {
     return "bg-[color-mix(in_oklab,var(--app-warning)_75%,transparent)]";
   }
-  if (hours >= TARGET_WEEKLY_FORECAST_HOURS) {
+  if (tone === "at-target") {
     return "bg-[color-mix(in_oklab,var(--app-success)_75%,transparent)]";
   }
   return "bg-[color-mix(in_oklab,var(--app-text)_22%,transparent)]";
@@ -247,12 +256,7 @@ export function ForecastWeekCell({
         ? "bg-[color-mix(in_oklab,var(--app-text)_12%,transparent)]"
         : "bg-[color-mix(in_oklab,var(--app-text)_18%,transparent)]";
 
-  const capacityTone =
-    displayHours > PORTFOLIO_OVERLOAD_HOURS
-      ? "overload"
-      : displayHours >= TARGET_WEEKLY_FORECAST_HOURS
-        ? "at-target"
-        : "below-target";
+  const capacityTone = portfolioCapacityTone(displayHours);
 
   return (
     <div

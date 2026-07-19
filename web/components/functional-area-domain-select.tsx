@@ -38,13 +38,15 @@ export function FunctionalAreaDomainSelect({
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(defaultValue);
+  const [lastDefaultValue, setLastDefaultValue] = useState(defaultValue);
   const [panel, setPanel] = useState<Panel>({ kind: "domains" });
 
-  const groups = functionalAreaGroups ?? [];
-
   const extraGroups = useMemo(
-    () => groups.filter((g) => g.areas.length > 0 && !DOMAIN_CODE_SET.has(g.label)),
-    [groups],
+    () =>
+      (functionalAreaGroups ?? []).filter(
+        (g) => g.areas.length > 0 && !DOMAIN_CODE_SET.has(g.label),
+      ),
+    [functionalAreaGroups],
   );
 
   const areaById = useMemo(() => {
@@ -62,9 +64,10 @@ export function FunctionalAreaDomainSelect({
     return m;
   }, [functionalAreasByDomain, extraGroups]);
 
-  useEffect(() => {
+  if (lastDefaultValue !== defaultValue) {
+    setLastDefaultValue(defaultValue);
     setValue(defaultValue);
-  }, [defaultValue]);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -182,6 +185,7 @@ export function FunctionalAreaDomainSelect({
                   <button
                     type="button"
                     role="option"
+                    aria-selected={false}
                     className="canvas-select-option flex w-full cursor-pointer items-center gap-2"
                     onClick={() => setPanel({ kind: "areas", code })}
                   >
@@ -214,6 +218,7 @@ export function FunctionalAreaDomainSelect({
                   <button
                     type="button"
                     role="option"
+                    aria-selected={false}
                     className="canvas-select-option flex w-full cursor-pointer items-center gap-2"
                     onClick={() => setPanel({ kind: "areas_extra", label: g.label })}
                   >
@@ -240,6 +245,7 @@ export function FunctionalAreaDomainSelect({
                 <button
                   type="button"
                   role="option"
+                  aria-selected={false}
                   className="canvas-select-option flex w-full cursor-pointer items-center gap-2 font-medium"
                   onClick={() => setPanel({ kind: "domains" })}
                 >

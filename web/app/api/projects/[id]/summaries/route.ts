@@ -1,31 +1,16 @@
-import { streamText } from "ai";
 import { z } from "zod";
 
-import {
-  DEFAULT_MAX_OUTPUT_TOKENS,
-  DEFAULT_SUMMARIZATION_MODEL_ID,
-  defaultSummarizationModel,
-  isAiConfigured,
-} from "@/lib/ai/client";
-import {
-  formatDeliveryProgressLabel,
-  formatIntegrationDefinitionDisplayName,
-  formatIntegrationStateLabel,
-} from "@/lib/integration-metadata";
+import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
 import { loadProjectActivity } from "@/lib/project-activity";
 import {
-  SUMMARIZE_SYSTEM_PROMPT,
   SUMMARY_RANGE_PRESETS,
-  buildSummarizeProjectContextBlock,
-  buildSummaryUserPrompt,
+  buildDeterministicProjectReport,
   resolveSummaryRange,
   type SummaryRangePreset,
 } from "@/lib/project-summaries";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-// Summaries can take 10-30s; give the route generous headroom on Vercel.
-export const maxDuration = 60;
 
 const BodySchema = z
   .object({
@@ -42,13 +27,6 @@ const BodySchema = z
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, { params }: RouteContext) {
-  if (!isAiConfigured()) {
-    return Response.json(
-      { error: "AI is not configured. Set OPENAI_API_KEY in the server environment." },
-      { status: 503 },
-    );
-  }
-
   const { id: projectId } = await params;
 
   const supabase = await createClient();
@@ -187,55 +165,35 @@ export async function POST(request: Request, { params }: RouteContext) {
     };
   });
 
-  const projectContextBlock = buildSummarizeProjectContextBlock({
+  const report = buildDeterministicProjectReport({
+    customerName: project.customer_name,
+    rangeStart,
+    rangeEnd,
+    events: eventsForSummary,
     asOfCalendarDay,
     phases,
     integrations,
   });
 
-  const userPrompt = buildSummaryUserPrompt({
-    customerName: project.customer_name,
-    rangeStart,
-    rangeEnd,
-    events: eventsForSummary,
-    projectContextBlock,
+  const { error: insertError } = await supabase.from("project_summaries").insert({
+    project_id: projectId,
+    owner_id: user.id,
+    range_start: rangeStart,
+    range_end: rangeEnd,
+    range_preset: body.preset === "custom" ? null : body.preset,
+    model: "deterministic:v1",
+    event_count: eventsForSummary.length,
+    body: report,
   });
+  if (insertError) {
+    console.error("[summarize-activity] persistence failed", insertError);
+  }
 
-  const result = streamText({
-    model: defaultSummarizationModel,
-    system: SUMMARIZE_SYSTEM_PROMPT,
-    prompt: userPrompt,
-    maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-    temperature: 0.3,
-    onError({ error }) {
-      console.error("[summarize-activity] stream error", error);
-    },
-    async onFinish({ text }) {
-      try {
-        const { error: insertError } = await supabase.from("project_summaries").insert({
-          project_id: projectId,
-          owner_id: user.id,
-          range_start: rangeStart,
-          range_end: rangeEnd,
-          range_preset: body.preset === "custom" ? null : body.preset,
-          model: DEFAULT_SUMMARIZATION_MODEL_ID,
-          event_count: eventsForSummary.length,
-          body: text,
-        });
-        if (insertError) {
-          console.error("[summarize-activity] persistence failed", insertError);
-        }
-      } catch (err) {
-        console.error("[summarize-activity] persistence threw", err);
-      }
-    },
-  });
-
-  // Plain text stream so the client can read it with a simple TextDecoder loop.
   // Headers echo the resolved range so the client can render it without a
-  // second round-trip while it waits for the first token.
-  return result.toTextStreamResponse({
+  // second round-trip.
+  return new Response(report, {
     headers: {
+      "Content-Type": "text/plain; charset=utf-8",
       "X-Range-Start": rangeStart,
       "X-Range-End": rangeEnd,
       "X-Event-Count": String(eventsForSummary.length),

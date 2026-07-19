@@ -106,19 +106,6 @@ export function CatalogEntryEditForm({
   }, [pending, state, onSaveSuccess]);
 
   useEffect(() => {
-    setFunctionalAreaId(initial.functional_area_id ?? "");
-    setDirection(initial.direction ?? "");
-    setIntegratingMode(
-      isCatalogGenericIntegratingWithLabel(initial.integrating_with) ? "generic" : "vendor",
-    );
-    setVendorDraft(
-      isCatalogGenericIntegratingWithLabel(initial.integrating_with)
-        ? ""
-        : (initial.integrating_with ?? "").trim(),
-    );
-  }, [initial]);
-
-  useEffect(() => {
     const d = deleteDialogRef.current;
     function onDialogClose() {
       setDeleteError(null);
@@ -168,7 +155,6 @@ export function CatalogEntryEditForm({
   return (
     <>
     <form
-      key={catalogIntegrationId ?? "new"}
       action={formAction}
       className="mt-6 flex min-h-[calc(100dvh-12rem)] max-w-5xl flex-col gap-4"
     >

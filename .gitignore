@@ -1,0 +1,4 @@
+/.cursor/*.log
+/.mcp.json
+/web/supabase/.temp/
+/done-ui-prototype-canvas/node_modules/

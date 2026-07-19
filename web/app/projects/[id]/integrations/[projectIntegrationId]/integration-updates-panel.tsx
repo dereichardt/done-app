@@ -16,7 +16,6 @@ import {
 export { formatIntegrationUpdateWhen };
 import {
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -120,11 +119,9 @@ export function IntegrationUpdatesPanel({
 
   const recentFive = useMemo(() => updates.slice(0, RECENT_COUNT), [updates]);
 
-  useEffect(() => {
-    if (editingId && !updates.some((u) => u.id === editingId)) {
-      setEditingId(null);
-    }
-  }, [updates, editingId]);
+  if (editingId && !updates.some((u) => u.id === editingId)) {
+    setEditingId(null);
+  }
 
   const handleDraftChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
     setDraftLen(e.target.value.length);

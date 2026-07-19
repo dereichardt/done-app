@@ -14,6 +14,7 @@ import { toggleAnyTaskCompletion } from "@/lib/actions/tasks-page";
 import {
   useActionState,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -230,18 +231,21 @@ export function TaskCompleteButton({
   onLongPressLog?: () => void;
 }) {
   const [updState, updAction, updPending] = useActionState(
-    async (_prev: { error?: string } | void, _formData: FormData) => toggleAnyTaskCompletion(taskId),
+    async (prev: { error?: string } | void, formData: FormData) => {
+      void prev;
+      void formData;
+      return toggleAnyTaskCompletion(taskId);
+    },
     {},
   );
 
   const toggleSubmitRef = useRef(false);
-  const onToggleSuccessRef = useRef(onToggleSuccess);
-  onToggleSuccessRef.current = onToggleSuccess;
+  const notifyToggleSuccess = useEffectEvent(() => {
+    void onToggleSuccess?.();
+  });
 
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextClickRef = useRef(false);
-  const onLongPressLogRef = useRef(onLongPressLog);
-  onLongPressLogRef.current = onLongPressLog;
   const docPointerCleanupRef = useRef<(() => void) | null>(null);
 
   const clearLongPressTimer = () => {
@@ -258,7 +262,7 @@ export function TaskCompleteButton({
     if (updPending) return;
     toggleSubmitRef.current = false;
     if (updState?.error) return;
-    void onToggleSuccessRef.current?.();
+    notifyToggleSuccess();
   }, [updPending, updState]);
 
   useEffect(() => {
@@ -296,7 +300,7 @@ export function TaskCompleteButton({
           }
         }}
         onPointerDown={(e) => {
-          if (e.button !== 0 || isDone || !onLongPressLogRef.current || updPending) return;
+          if (e.button !== 0 || isDone || !onLongPressLog || updPending) return;
           e.stopPropagation();
           docPointerCleanupRef.current?.();
           docPointerCleanupRef.current = null;
@@ -314,7 +318,7 @@ export function TaskCompleteButton({
           longPressTimerRef.current = setTimeout(() => {
             longPressTimerRef.current = null;
             suppressNextClickRef.current = true;
-            onLongPressLogRef.current?.();
+            onLongPressLog();
           }, LONG_PRESS_MS);
         }}
       >
@@ -341,13 +345,18 @@ export function TaskUndoButton({
   onUndoSuccess?: () => void | Promise<void>;
 }) {
   const [undoState, undoAction, undoPending] = useActionState(
-    async (_prev: { error?: string } | void, _formData: FormData) => toggleAnyTaskCompletion(taskId),
+    async (prev: { error?: string } | void, formData: FormData) => {
+      void prev;
+      void formData;
+      return toggleAnyTaskCompletion(taskId);
+    },
     {},
   );
 
   const undoSubmitRef = useRef(false);
-  const onUndoSuccessRef = useRef(onUndoSuccess);
-  onUndoSuccessRef.current = onUndoSuccess;
+  const notifyUndoSuccess = useEffectEvent(() => {
+    void onUndoSuccess?.();
+  });
 
   void undoState;
 
@@ -356,7 +365,7 @@ export function TaskUndoButton({
     if (undoPending) return;
     undoSubmitRef.current = false;
     if (undoState?.error) return;
-    void onUndoSuccessRef.current?.();
+    notifyUndoSuccess();
   }, [undoPending, undoState]);
 
   return (
@@ -505,15 +514,16 @@ export function TaskRow({
 
   const [dueDateSaving, setDueDateSaving] = useState(false);
   const [dueDateEditError, setDueDateEditError] = useState<string | null>(null);
+  const isTitleEditing = titleEdit !== null;
 
   useLayoutEffect(() => {
-    if (!titleEdit) return;
+    if (!isTitleEditing) return;
     const el = titleEditRef.current;
     if (!el) return;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
     syncAddTaskTitleHeight(el);
-  }, [titleEdit !== null]);
+  }, [isTitleEditing]);
 
   useEffect(() => {
     if (!priorityEditing) return;

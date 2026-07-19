@@ -1,6 +1,8 @@
 "use client";
 
 import { createInternalInitiative } from "@/lib/actions/internal-tasks";
+import { FormSwitch } from "@/components/form-switch";
+import { generateInitiativeForecast } from "@/lib/actions/initiative-forecast";
 import { useRouter } from "next/navigation";
 import { useActionState } from "react";
 
@@ -13,8 +15,21 @@ export function CreateInitiativeForm({ defaultStartsOn }: { defaultStartsOn: str
       const starts_on = String(formData.get("starts_on") ?? "").trim();
       const ends_on = String(formData.get("ends_on") ?? "").trim();
       const estimated_effort_hours = String(formData.get("estimated_effort_hours") ?? "");
-      const res = await createInternalInitiative({ title, starts_on, ends_on, estimated_effort_hours });
+      const include_in_forecast = formData.has("include_in_forecast");
+      const icp = formData.has("icp");
+      const res = await createInternalInitiative({
+        title,
+        starts_on,
+        ends_on,
+        estimated_effort_hours,
+        include_in_forecast,
+        icp,
+      });
       if (res.error) return { error: res.error };
+      if (res.id && include_in_forecast) {
+        const forecastRes = await generateInitiativeForecast(res.id);
+        if (forecastRes.error) return { error: forecastRes.error };
+      }
       if (res.id) router.push(`/internal/initiatives/${res.id}`);
       return {};
     },
@@ -33,6 +48,18 @@ export function CreateInitiativeForm({ defaultStartsOn }: { defaultStartsOn: str
           placeholder="Initiative name"
         />
       </label>
+      <div className="card-canvas flex flex-col gap-4 p-4">
+        <FormSwitch
+          name="include_in_forecast"
+          label="Include in forecast"
+          description="Add this initiative to Forecast Studio and Home variance reporting."
+        />
+        <FormSwitch
+          name="icp"
+          label="ICP"
+          description="Identify this as an ICP initiative wherever initiative titles are shown."
+        />
+      </div>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-canvas">
           Start date
