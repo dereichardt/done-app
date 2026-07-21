@@ -290,11 +290,11 @@ export function TaskGroupedList({
   buckets,
   crumbForTask,
   effectiveGlobalActiveTaskId,
-  startWorkTaskId,
   expandedWorkTaskId,
   activeWorkSession,
   onActiveWorkSessionChange,
   onCloseWorkRow,
+  onWorkSessionActionError,
   onStartWork,
   onOpenHistory,
   onOpenDelete,
@@ -310,13 +310,13 @@ export function TaskGroupedList({
   buckets: TaskBucket[];
   crumbForTask: (task: TasksPageTask) => TaskRowCrumb;
   effectiveGlobalActiveTaskId: string | null;
-  startWorkTaskId: string | null;
   /** Task whose `TaskWorkRow` (timer + controls) is expanded inline, mirroring the integration page. */
   expandedWorkTaskId: string | null;
   /** Active work session DTO (or null). Required when `expandedWorkTaskId` is set. */
   activeWorkSession: ActiveWorkSessionDTO | null;
   onActiveWorkSessionChange: (session: ActiveWorkSessionDTO) => void;
-  onCloseWorkRow: () => void | Promise<void>;
+  onCloseWorkRow: (opts?: { completeTask?: boolean; refresh?: boolean }) => void;
+  onWorkSessionActionError?: (error: string) => void;
   onStartWork: (task: TasksPageTask) => void | Promise<void>;
   onOpenHistory: (task: TasksPageTask) => void;
   onOpenDelete: (task: TasksPageTask) => void;
@@ -449,6 +449,7 @@ export function TaskGroupedList({
                                 activeSession={activeWorkSession}
                                 onActiveSessionChange={onActiveWorkSessionChange}
                                 onClose={onCloseWorkRow}
+                                onActionError={onWorkSessionActionError}
                               />
                             </li>
                           );
@@ -460,7 +461,7 @@ export function TaskGroupedList({
                             bucketId={bucket.id}
                             crumb={crumbForTask(task)}
                             effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-                            starting={startWorkTaskId === task.id}
+                            starting={false}
                             collapsedDone={isCompletedBucket}
                             onStartWork={onStartWork}
                             onOpenHistory={onOpenHistory}
@@ -494,6 +495,7 @@ export function TaskGroupedList({
                             activeSession={activeWorkSession}
                             onActiveSessionChange={onActiveWorkSessionChange}
                             onClose={onCloseWorkRow}
+                            onActionError={onWorkSessionActionError}
                           />
                         </li>
                       );
@@ -505,7 +507,7 @@ export function TaskGroupedList({
                         bucketId={bucket.id}
                         crumb={crumbForTask(task)}
                         effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-                        starting={startWorkTaskId === task.id}
+                        starting={false}
                         collapsedDone={isCompletedBucket}
                         onStartWork={onStartWork}
                         onOpenHistory={onOpenHistory}

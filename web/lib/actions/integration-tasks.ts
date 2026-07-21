@@ -541,8 +541,10 @@ export async function startOrReplaceActiveWorkSession(
   const track = await loadOwnedProjectTrack(supabase, user.id, task.project_track_id);
   if (!track) return { error: "Not found" };
 
-  await supabase.from("internal_task_active_work_sessions").delete().eq("user_id", user.id);
-  const { error: delErr } = await supabase.from("integration_task_active_work_sessions").delete().eq("user_id", user.id);
+  const [, { error: delErr }] = await Promise.all([
+    supabase.from("internal_task_active_work_sessions").delete().eq("user_id", user.id),
+    supabase.from("integration_task_active_work_sessions").delete().eq("user_id", user.id),
+  ]);
 
   if (delErr) return { error: delErr.message };
 
@@ -562,7 +564,6 @@ export async function startOrReplaceActiveWorkSession(
 
   if (insErr || !inserted) return { error: insErr?.message ?? "Could not start session" };
 
-  await revalidateTrackPaths(track);
   return { session: rowToActiveDto(inserted) };
 }
 
@@ -658,7 +659,6 @@ export async function syncActiveWorkSessionPause(
 
   if (direction === "pause") {
     if (row.pause_started_at != null) {
-      await revalidateTrackPaths(track);
       return { session: rowToActiveDto(row) };
     }
     const { data: updated, error: upErr } = await supabase
@@ -669,12 +669,10 @@ export async function syncActiveWorkSessionPause(
       .select("integration_task_id, started_at, paused_ms_accumulated, pause_started_at")
       .single();
     if (upErr || !updated) return { error: upErr?.message ?? "Could not pause" };
-    await revalidateTrackPaths(track);
     return { session: rowToActiveDto(updated) };
   }
 
   if (row.pause_started_at == null) {
-    await revalidateTrackPaths(track);
     return { session: rowToActiveDto(row) };
   }
 
@@ -696,7 +694,6 @@ export async function syncActiveWorkSessionPause(
     .single();
 
   if (upErr || !updated) return { error: upErr?.message ?? "Could not resume" };
-  await revalidateTrackPaths(track);
   return { session: rowToActiveDto(updated) };
 }
 
@@ -726,7 +723,6 @@ export async function discardActiveWorkSession(taskId: string): Promise<{ error?
 
   if (error) return { error: error.message };
 
-  await revalidateTrackPaths(track);
   return {};
 }
 

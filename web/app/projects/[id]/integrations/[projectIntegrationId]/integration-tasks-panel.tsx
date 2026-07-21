@@ -822,7 +822,7 @@ function OffListWorkSessionFinishDialog({
   projectLabel: string;
   activeSession: ActiveWorkSessionDTO;
   dialogRef: React.RefObject<HTMLDialogElement | null>;
-  onSuccess: () => void | Promise<void>;
+  onSuccess: () => void;
 }) {
   const [pausedMsAccumulated, setPausedMsAccumulated] = useState(activeSession.paused_ms_accumulated);
   const [pauseStartedAtMs, setPauseStartedAtMs] = useState<number | null>(
@@ -909,7 +909,7 @@ function OffListWorkSessionFinishDialog({
         return;
       }
       dialogRef.current?.close();
-      await onSuccess();
+      onSuccess();
     } finally {
       setSavePending(null);
     }
@@ -1031,6 +1031,7 @@ export function TaskWorkRow({
   activeSession,
   onActiveSessionChange,
   onClose,
+  onActionError,
 }: {
   taskId: string;
   taskTitle: string;
@@ -1042,7 +1043,8 @@ export function TaskWorkRow({
   finishSessionProjectLabel: string;
   activeSession: ActiveWorkSessionDTO;
   onActiveSessionChange: (session: ActiveWorkSessionDTO) => void;
-  onClose: () => void | Promise<void>;
+  onClose: (opts?: { completeTask?: boolean; refresh?: boolean }) => void;
+  onActionError?: (error: string) => void;
 }) {
   const [startMs, setStartMs] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -1209,7 +1211,7 @@ export function TaskWorkRow({
         return;
       }
       finishDialogRef.current?.close();
-      await onClose();
+      onClose({ completeTask });
     } finally {
       setSavePending(null);
     }
@@ -1386,17 +1388,20 @@ export function TaskWorkRow({
               className="rounded-[var(--app-radius)] px-3 py-2 text-sm font-medium cursor-pointer bg-[var(--app-danger)] text-[var(--app-surface)] transition-[background-color] duration-150 ease-out hover:bg-[color-mix(in_oklab,var(--app-danger)_78%,var(--app-text)_22%)]"
               onClick={() => {
                 setDiscardError(null);
+                const snapshot = activeSession;
+                discardDialogRef.current?.close();
+                onClose({ refresh: false });
                 void (async () => {
                   const res =
-                    activeSession.scope === "internal"
+                    snapshot.scope === "internal"
                       ? await discardInternalActiveWorkSession(taskId)
                       : await discardActiveWorkSession(taskId);
                   if (res?.error) {
-                    setDiscardError(res.error);
+                    onActiveSessionChange(snapshot);
+                    onActionError?.(res.error);
                     return;
                   }
-                  discardDialogRef.current?.close();
-                  await onClose();
+                  onClose({ refresh: true });
                 })();
               }}
             >
@@ -1513,6 +1518,8 @@ export function ActiveWorkSessionDialog({
   activeSession,
   onActiveSessionChange,
   onAfterSessionCleared,
+  onRestoreSession,
+  onActionError,
 }: {
   dialogRef: RefObject<HTMLDialogElement | null>;
   taskId: string;
@@ -1521,7 +1528,10 @@ export function ActiveWorkSessionDialog({
   projectLabel: string;
   activeSession: ActiveWorkSessionDTO;
   onActiveSessionChange: (session: ActiveWorkSessionDTO) => void;
-  onAfterSessionCleared: () => void | Promise<void>;
+  onAfterSessionCleared: (opts?: { completeTask?: boolean; refresh?: boolean }) => void;
+  /** Restore session UI after an optimistic discard fails. */
+  onRestoreSession?: (session: ActiveWorkSessionDTO) => void;
+  onActionError?: (error: string) => void;
 }) {
   const [startMs, setStartMs] = useState<number | null>(() => {
     const t = new Date(activeSession.started_at).getTime();
@@ -1699,7 +1709,7 @@ export function ActiveWorkSessionDialog({
       }
       finishDialogRef.current?.close();
       dialogRef.current?.close();
-      await onAfterSessionCleared();
+      onAfterSessionCleared({ completeTask });
     } finally {
       setSavePending(null);
     }
@@ -1853,18 +1863,21 @@ export function ActiveWorkSessionDialog({
               className="rounded-[var(--app-radius)] px-3 py-2 text-sm font-medium cursor-pointer bg-[var(--app-danger)] text-[var(--app-surface)] transition-[background-color] duration-150 ease-out hover:bg-[color-mix(in_oklab,var(--app-danger)_78%,var(--app-text)_22%)]"
               onClick={() => {
                 setDiscardError(null);
+                const snapshot = activeSession;
+                discardDialogRef.current?.close();
+                dialogRef.current?.close();
+                onAfterSessionCleared({ refresh: false });
                 void (async () => {
                   const res =
-                    activeSession.scope === "internal"
+                    snapshot.scope === "internal"
                       ? await discardInternalActiveWorkSession(taskId)
                       : await discardActiveWorkSession(taskId);
                   if (res?.error) {
-                    setDiscardError(res.error);
+                    onRestoreSession?.(snapshot);
+                    onActionError?.(res.error);
                     return;
                   }
-                  discardDialogRef.current?.close();
-                  dialogRef.current?.close();
-                  await onAfterSessionCleared();
+                  onAfterSessionCleared({ refresh: true });
                 })();
               }}
             >
@@ -2091,7 +2104,6 @@ export function IntegrationTasksPanel({
 
   const [expandedWorkTaskId, setExpandedWorkTaskId] = useState<string | null>(null);
   const [workSessionActionError, setWorkSessionActionError] = useState<string | null>(null);
-  const [startWorkTaskId, setStartWorkTaskId] = useState<string | null>(null);
   const foreignWorkFinishDialogRef = useRef<HTMLDialogElement>(null);
   const [foreignFinishNonce, setForeignFinishNonce] = useState(0);
 
@@ -2109,14 +2121,25 @@ export function IntegrationTasksPanel({
     setExpandedWorkTaskId(aid);
   }, [activeWorkSession?.task_id, optimisticTasks]);
 
-  async function closeWorkRow() {
+  function closeWorkRow(opts?: { completeTask?: boolean; refresh?: boolean }) {
+    const clearedTaskId = activeWorkSession?.task_id ?? expandedWorkTaskId;
     setActiveWorkSession(null);
     setExpandedWorkTaskId(null);
-    await refreshTaskSnapshotAndRoute();
+    if (opts?.completeTask && clearedTaskId) {
+      const completedAt = new Date().toISOString();
+      setOptimisticTasks((prev) =>
+        prev.map((row) =>
+          row.id === clearedTaskId ? { ...row, status: "done", completed_at: completedAt } : row,
+        ),
+      );
+    }
+    if (opts?.refresh !== false) {
+      void refreshTaskSnapshotAndRoute();
+    }
   }
 
-  async function afterOffListWorkSessionSaved() {
-    await refreshTaskSnapshotAndRoute();
+  function afterOffListWorkSessionSaved() {
+    void refreshTaskSnapshotAndRoute();
   }
 
   const [manualLogTask, setManualLogTask] = useState<IntegrationTaskRow | null>(null);
@@ -2241,13 +2264,25 @@ export function IntegrationTasksPanel({
     }
   }
 
-  async function startWorkOnTask(task: IntegrationTaskRow) {
+  function startWorkOnTask(task: IntegrationTaskRow) {
     if (effectiveGlobalActiveTaskId != null && effectiveGlobalActiveTaskId !== task.id) return;
     setWorkSessionActionError(null);
-    setStartWorkTaskId(task.id);
-    try {
-      const res = await startOrReplaceAnyActiveWorkSession(task.id);
+    const scope: ActiveWorkSessionDTO["scope"] =
+      internalTaskCreate != null || task.internal_track_kind != null ? "internal" : "integration";
+    const optimistic: ActiveWorkSessionDTO = {
+      scope,
+      task_id: task.id,
+      started_at: new Date().toISOString(),
+      paused_ms_accumulated: 0,
+      pause_started_at: null,
+    };
+    setActiveWorkSession(optimistic);
+    setExpandedWorkTaskId(task.id);
+    void (async () => {
+      const res = await startOrReplaceAnyActiveWorkSession(task.id, scope);
       if (res.error) {
+        setActiveWorkSession(null);
+        setExpandedWorkTaskId(null);
         setWorkSessionActionError(res.error);
         return;
       }
@@ -2255,9 +2290,7 @@ export function IntegrationTasksPanel({
         setActiveWorkSession(res.session);
         setExpandedWorkTaskId(task.id);
       }
-    } finally {
-      setStartWorkTaskId(null);
-    }
+    })();
   }
 
   function openHistoryDialog(task: IntegrationTaskRow) {
@@ -2323,6 +2356,7 @@ export function IntegrationTasksPanel({
             activeSession={activeWorkSession}
             onActiveSessionChange={setActiveWorkSession}
             onClose={closeWorkRow}
+            onActionError={setWorkSessionActionError}
           />
         </li>
       );
@@ -2341,7 +2375,7 @@ export function IntegrationTasksPanel({
               : undefined
           }
           effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-          starting={startWorkTaskId === t.id}
+          starting={false}
           onStartWork={startWorkOnTask}
           onOpenHistory={openHistoryDialog}
           onOpenDelete={openDeleteDialog}

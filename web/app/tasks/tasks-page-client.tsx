@@ -361,7 +361,6 @@ export function TasksPageClient({
   );
 
   const [workSessionActionError, setWorkSessionActionError] = useState<string | null>(null);
-  const [startWorkTaskId, setStartWorkTaskId] = useState<string | null>(null);
 
   const [activeWorkSession, setActiveWorkSession] = useState<ActiveWorkSessionDTO | null>(() =>
     indicatorToActiveSessionDto(initialSnapshot.activeWorkSessionIndicator),
@@ -403,25 +402,48 @@ export function TasksPageClient({
     setExpandedWorkTaskId((prev) => (prev === workSessionTaskId ? prev : workSessionTaskId));
   }, [workSessionTaskId, openTaskStatusForWorkSession]);
 
-  const closeWorkRow = useCallback(async () => {
-    setActiveWorkSession(null);
-    setExpandedWorkTaskId(null);
-    refresh();
-  }, [refresh]);
+  const closeWorkRow = useCallback(
+    (opts?: { completeTask?: boolean; refresh?: boolean }) => {
+      const clearedTaskId = activeWorkSession?.task_id ?? expandedWorkTaskId;
+      setActiveWorkSession(null);
+      setExpandedWorkTaskId(null);
+      if (opts?.completeTask && clearedTaskId) {
+        updateTaskInState(clearedTaskId, {
+          status: "done",
+          completed_at: new Date().toISOString(),
+        });
+      }
+      if (opts?.refresh !== false) {
+        refresh();
+      }
+    },
+    [activeWorkSession?.task_id, expandedWorkTaskId, refresh, updateTaskInState],
+  );
 
   const startWorkOnTask = useCallback(
-    async (task: TasksPageTask) => {
+    (task: TasksPageTask) => {
       if (effectiveGlobalActiveTaskId != null && effectiveGlobalActiveTaskId !== task.id) {
         return;
       }
       setWorkSessionActionError(null);
-      setStartWorkTaskId(task.id);
-      try {
+      const scope: ActiveWorkSessionDTO["scope"] = task.scope === "internal" ? "internal" : "integration";
+      const optimistic: ActiveWorkSessionDTO = {
+        scope,
+        task_id: task.id,
+        started_at: new Date().toISOString(),
+        paused_ms_accumulated: 0,
+        pause_started_at: null,
+      };
+      setActiveWorkSession(optimistic);
+      setExpandedWorkTaskId(task.id);
+      void (async () => {
         const res =
-          task.scope === "internal"
+          scope === "internal"
             ? await startOrReplaceInternalActiveWorkSession(task.id)
             : await startOrReplaceActiveWorkSession(task.id);
         if (res.error) {
+          setActiveWorkSession(null);
+          setExpandedWorkTaskId(null);
           setWorkSessionActionError(res.error);
           return;
         }
@@ -429,12 +451,9 @@ export function TasksPageClient({
           setActiveWorkSession(res.session);
           setExpandedWorkTaskId(task.id);
         }
-        refresh();
-      } finally {
-        setStartWorkTaskId(null);
-      }
+      })();
     },
-    [effectiveGlobalActiveTaskId, refresh],
+    [effectiveGlobalActiveTaskId],
   );
 
   const addTaskDialogRef = useRef<HTMLDialogElement>(null);
@@ -651,11 +670,11 @@ export function TasksPageClient({
                 buckets={buckets}
                 crumbForTask={crumbForTask}
                 effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-                startWorkTaskId={startWorkTaskId}
                 expandedWorkTaskId={expandedWorkTaskId}
                 activeWorkSession={activeWorkSession}
                 onActiveWorkSessionChange={setActiveWorkSession}
                 onCloseWorkRow={closeWorkRow}
+                onWorkSessionActionError={setWorkSessionActionError}
                 onStartWork={startWorkOnTask}
                 onOpenHistory={openHistoryDialog}
                 onOpenDelete={openDeleteDialog}

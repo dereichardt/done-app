@@ -759,7 +759,10 @@ export async function deleteAnyTask(taskId: string): Promise<{ error?: string }>
 
 export async function startOrReplaceAnyActiveWorkSession(
   taskId: string,
+  scope?: ActiveWorkSessionDTO["scope"],
 ): Promise<{ session?: ActiveWorkSessionDTO; error?: string }> {
+  if (scope === "integration") return startOrReplaceActiveWorkSession(taskId);
+  if (scope === "internal") return startOrReplaceInternalActiveWorkSession(taskId);
   const supabase = await createClient();
   const { data } = await supabase.from("integration_tasks").select("id").eq("id", taskId).maybeSingle();
   if (data) return startOrReplaceActiveWorkSession(taskId);

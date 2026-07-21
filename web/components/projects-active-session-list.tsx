@@ -3,7 +3,7 @@
 import { ActiveWorkSessionDialog } from "@/components/integration-tasks-panel";
 import { ProjectRowSummaryMetrics } from "@/components/project-row-summary-metrics";
 import { reorderActiveProjects } from "@/lib/actions/projects";
-import type { ActiveWorkSessionIndicatorDTO } from "@/lib/actions/integration-tasks";
+import type { ActiveWorkSessionDTO, ActiveWorkSessionIndicatorDTO } from "@/lib/actions/integration-tasks";
 import type { ProjectListRowSummary } from "@/lib/load-project-list-summaries";
 import {
   DndContext,
@@ -293,6 +293,9 @@ export function ProjectsActiveSessionList({
   const [activeSessionIndicator, setActiveSessionIndicator] = useState<ActiveWorkSessionIndicatorDTO | null>(
     initialActiveSessionIndicator ?? null,
   );
+  const lastActiveSessionIndicatorRef = useRef<ActiveWorkSessionIndicatorDTO | null>(
+    initialActiveSessionIndicator ?? null,
+  );
   const activeWorkSessionDialogRef = useRef<HTMLDialogElement>(null);
 
   // Local ordered list — synced from props, updated optimistically on drag end.
@@ -309,14 +312,37 @@ export function ProjectsActiveSessionList({
     setDndReady(true);
   }, []);
 
+  useEffect(() => {
+    if (activeSessionIndicator) {
+      lastActiveSessionIndicatorRef.current = activeSessionIndicator;
+    }
+  }, [activeSessionIndicator]);
+
   const openActiveWorkSessionModal = useCallback(() => {
     requestAnimationFrame(() => activeWorkSessionDialogRef.current?.showModal());
   }, []);
 
-  const afterActiveWorkSessionCleared = useCallback(async () => {
-    setActiveSessionIndicator(null);
-    router.refresh();
-  }, [router]);
+  const afterActiveWorkSessionCleared = useCallback(
+    (opts?: { completeTask?: boolean; refresh?: boolean }) => {
+      setActiveSessionIndicator(null);
+      if (opts?.refresh !== false) {
+        router.refresh();
+      }
+    },
+    [router],
+  );
+
+  const restoreActiveWorkSession = useCallback((session: ActiveWorkSessionDTO) => {
+    const last = lastActiveSessionIndicatorRef.current;
+    if (!last || last.task_id !== session.task_id) return;
+    setActiveSessionIndicator({
+      ...last,
+      started_at: session.started_at,
+      paused_ms_accumulated: session.paused_ms_accumulated,
+      pause_started_at: session.pause_started_at,
+    });
+    requestAnimationFrame(() => activeWorkSessionDialogRef.current?.showModal());
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -477,6 +503,7 @@ export function ProjectsActiveSessionList({
             );
           }}
           onAfterSessionCleared={afterActiveWorkSessionCleared}
+          onRestoreSession={restoreActiveWorkSession}
         />
       ) : null}
     </>

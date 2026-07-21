@@ -27,8 +27,10 @@ async function clearAllActiveWorkSessionsForUser(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
 ) {
-  await supabase.from("integration_task_active_work_sessions").delete().eq("user_id", userId);
-  await supabase.from("internal_task_active_work_sessions").delete().eq("user_id", userId);
+  await Promise.all([
+    supabase.from("integration_task_active_work_sessions").delete().eq("user_id", userId),
+    supabase.from("internal_task_active_work_sessions").delete().eq("user_id", userId),
+  ]);
 }
 
 function revalidateInternalAll(initiativeId?: string | null) {
@@ -152,7 +154,6 @@ export async function startOrReplaceInternalActiveWorkSession(
 
   if (insErr || !inserted) return { error: insErr?.message ?? "Could not start session" };
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
   return { session: rowToInternalActiveDto(inserted) };
 }
 
@@ -232,7 +233,6 @@ export async function syncInternalActiveWorkSessionPause(
 
   if (direction === "pause") {
     if (row.pause_started_at != null) {
-      revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
       return { session: rowToInternalActiveDto(row) };
     }
     const { data: updated, error: upErr } = await supabase
@@ -243,12 +243,10 @@ export async function syncInternalActiveWorkSessionPause(
       .select("internal_task_id, started_at, paused_ms_accumulated, pause_started_at")
       .single();
     if (upErr || !updated) return { error: upErr?.message ?? "Could not pause" };
-    revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
     return { session: rowToInternalActiveDto(updated) };
   }
 
   if (row.pause_started_at == null) {
-    revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
     return { session: rowToInternalActiveDto(row) };
   }
 
@@ -270,7 +268,6 @@ export async function syncInternalActiveWorkSessionPause(
     .single();
 
   if (upErr || !updated) return { error: upErr?.message ?? "Could not resume" };
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
   return { session: rowToInternalActiveDto(updated) };
 }
 
@@ -292,7 +289,6 @@ export async function discardInternalActiveWorkSession(taskId: string): Promise<
 
   if (error) return { error: error.message };
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
   return {};
 }
 
