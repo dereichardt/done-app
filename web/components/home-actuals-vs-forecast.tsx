@@ -89,10 +89,13 @@ export function VarianceCard({
   title,
   totals,
   isIcp = false,
+  compact = false,
 }: {
   title: string;
   totals: HomeWeekTotals;
   isIcp?: boolean;
+  /** Denser layout for overlay summary strips. */
+  compact?: boolean;
 }) {
   const hasForecast = hasForecastHours(totals.forecast);
   const pct = hasForecast ? variancePercentLabel(totals.forecast, totals.variance) : null;
@@ -104,7 +107,10 @@ export function VarianceCard({
 
   return (
     <article
-      className="card-canvas flex min-h-[10.5rem] w-full flex-col px-4 py-4"
+      className={[
+        "card-canvas flex w-full flex-col",
+        compact ? "min-h-0 px-3 py-2.5" : "min-h-[10.5rem] px-4 py-4",
+      ].join(" ")}
       aria-label={
         hasForecast
           ? `${title}: forecast ${formatEffortHoursLabel(totals.forecast)}, actuals ${formatEffortHoursLabel(totals.actual)}, remaining ${formatEffortHoursLabel(totals.variance)}${pct ? ` (${pct})` : ""}`
@@ -113,7 +119,10 @@ export function VarianceCard({
     >
       <div className="flex shrink-0 items-start gap-2">
         <h3
-          className="min-w-0 text-sm font-medium leading-snug text-[var(--app-text)]"
+          className={[
+            "min-w-0 font-medium leading-snug text-[var(--app-text)]",
+            compact ? "text-xs" : "text-sm",
+          ].join(" ")}
           title={title}
         >
           <span className="line-clamp-2">{title}</span>
@@ -121,12 +130,25 @@ export function VarianceCard({
         {isIcp ? <InitiativeIcpPill className="mt-0.5" /> : null}
       </div>
 
-      <div className="mt-1 flex min-h-0 flex-1 flex-col justify-center">
-        <span className="mb-1.5 self-end text-xs font-medium tabular-nums leading-none text-[var(--app-text)]">
+      <div
+        className={[
+          "flex min-h-0 flex-1 flex-col justify-center",
+          compact ? "mt-1" : "mt-1",
+        ].join(" ")}
+      >
+        <span
+          className={[
+            "self-end font-medium tabular-nums leading-none text-[var(--app-text)]",
+            compact ? "mb-1 text-[0.7rem]" : "mb-1.5 text-xs",
+          ].join(" ")}
+        >
           {formatBarHours(totals.forecast)}
         </span>
         <div
-          className="relative h-8 w-full overflow-hidden rounded-full"
+          className={[
+            "relative w-full overflow-hidden rounded-full",
+            compact ? "h-6" : "h-8",
+          ].join(" ")}
           style={{ background: "var(--app-border)" }}
           aria-hidden
         >
@@ -145,7 +167,12 @@ export function VarianceCard({
           ) : null}
         </div>
 
-        <p className="mt-4 text-xs font-medium tabular-nums text-[var(--app-text)]">
+        <p
+          className={[
+            "font-medium tabular-nums text-[var(--app-text)]",
+            compact ? "mt-2 text-[0.7rem]" : "mt-4 text-xs",
+          ].join(" ")}
+        >
           {hasForecast ? (
             <>
               <span>{formatEffortHoursLabel(totals.variance)} remaining</span>

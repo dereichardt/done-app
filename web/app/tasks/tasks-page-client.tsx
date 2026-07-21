@@ -51,7 +51,17 @@ import {
 } from "react";
 import { formatLocalYmd } from "@/lib/integration-effort-buckets";
 import type { EffortView } from "@/lib/integration-effort-buckets";
+import type { HomeActualsVsForecastDTO } from "@/lib/home-actuals-vs-forecast";
+import type { WorkForecastTrackActual } from "@/lib/work-forecast-track-actuals";
+import { WorkForecastActualsFab } from "@/components/work-forecast-actuals-overlay";
 import { TasksEffortCalendar } from "./tasks-effort-calendar";
+
+const EMPTY_TASK_FILTERS: TasksFiltersValue = {
+  search: "",
+  projectId: "",
+  projectTrackId: "",
+  priority: "",
+};
 
 const dialogBaseClass =
   "app-catalog-dialog fixed left-1/2 top-1/2 z-[200] max-h-[min(92dvh,52rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden border-0 p-0 shadow-xl";
@@ -103,7 +113,15 @@ function DialogHeader({
   );
 }
 
-export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPageSnapshot }) {
+export function TasksPageClient({
+  initialSnapshot,
+  actualsVsForecast,
+  trackActuals,
+}: {
+  initialSnapshot: TasksPageSnapshot;
+  actualsVsForecast: HomeActualsVsForecastDTO;
+  trackActuals: WorkForecastTrackActual[];
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [todayIso] = useState(initialSnapshot.todayIso);
@@ -194,12 +212,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
     [tracks],
   );
 
-  const [filters, setFilters] = useState<TasksFiltersValue>({
-    search: "",
-    projectId: "",
-    projectTrackId: "",
-    priority: "",
-  });
+  const [filters, setFilters] = useState<TasksFiltersValue>(EMPTY_TASK_FILTERS);
   const [lastUsedIntegrationId, setLastUsedIntegrationId] = useState<string | null>(null);
 
   const filterTask = useCallback(
@@ -603,13 +616,13 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
             isCalendar ? "" : "max-h-[calc(100dvh-10rem)]",
           ].join(" ")}
         >
-          <TasksFilters
-            value={filters}
-            onChange={setFilters}
-            projects={projects}
-            tracks={tracks}
-            trailingSlot={
-              workTab === "list" ? (
+          {workTab === "list" ? (
+            <TasksFilters
+              value={filters}
+              onChange={setFilters}
+              projects={projects}
+              tracks={tracks}
+              trailingSlot={
                 <button
                   type="button"
                   className="btn-cta shrink-0 whitespace-nowrap text-xs"
@@ -618,9 +631,9 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
                 >
                   Add Task
                 </button>
-              ) : null
-            }
-          />
+              }
+            />
+          ) : null}
 
           {workSessionActionError && workTab === "list" ? (
             <p
@@ -663,7 +676,7 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
                 anchorYmd={calendarAnchor}
                 onScopeChange={setCalendarScope}
                 onAnchorChange={setCalendarAnchor}
-                filters={filters}
+                filters={EMPTY_TASK_FILTERS}
                 projects={projects}
                 tracks={tracks}
                 lastUsedIntegrationId={lastUsedIntegrationId}
@@ -993,6 +1006,13 @@ export function TasksPageClient({ initialSnapshot }: { initialSnapshot: TasksPag
         onClose={() => setManualLogTask(null)}
         onCompleteTask={(taskId) => toggleAnyTaskCompletion(taskId)}
         onSaved={refresh}
+      />
+
+      <WorkForecastActualsFab
+        data={actualsVsForecast}
+        trackActuals={trackActuals}
+        projects={projects}
+        tracks={tracks}
       />
     </div>
   );

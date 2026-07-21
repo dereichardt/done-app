@@ -112,6 +112,14 @@ function hoursForSundayWeek(sessions: EffortSessionInput[], weekStartYmd: string
   return sum;
 }
 
+/** Prorated hours for a Sunday week (exported for Work forecast track chips). */
+export function effortHoursForSundayWeek(
+  sessions: EffortSessionInput[],
+  weekStartYmd: string,
+): number {
+  return hoursForSundayWeek(sessions, weekStartYmd);
+}
+
 function emptyByWeek(weeks: string[]): Record<string, HomeWeekTotals> {
   const out: Record<string, HomeWeekTotals> = {};
   for (const w of weeks) out[w] = makeWeekTotals(0, 0);

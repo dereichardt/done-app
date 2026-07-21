@@ -106,159 +106,6 @@ const FALLBACK_BLOCK_STYLE: CalendarBlockStyle = {
   hoverBorderColor: "color-mix(in oklab, var(--app-action) 45%, var(--app-border) 55%)",
 };
 
-// ─── Summary tiles ────────────────────────────────────────────────────────────
-
-function IntegrationSummaryTiles({
-  sessions,
-  periodStart,
-  periodEnd,
-  projects,
-  tracks,
-}: {
-  sessions: TasksCalendarSession[];
-  periodStart: Date;
-  periodEnd: Date;
-  projects: TasksPageProject[];
-  tracks: TasksPageTrack[];
-}) {
-  const projectById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project] as const)),
-    [projects],
-  );
-  const trackById = useMemo(
-    () => new Map(tracks.map((track) => [track.id, track] as const)),
-    [tracks],
-  );
-  const [expanded, setExpanded] = useState(false);
-
-  const tileStyleForTrack = useCallback(
-    (trackId: string): { borderColor: string; background: string; valueColor: string } => {
-      const track = trackById.get(trackId);
-      const projectColorVar = track?.projectId ? projectById.get(track.projectId)?.colorVar : null;
-      if (!projectColorVar) {
-        return {
-          borderColor: "var(--app-border)",
-          background: "var(--app-surface-alt)",
-          valueColor: "var(--app-action)",
-        };
-      }
-      return {
-        borderColor: `color-mix(in oklab, var(${projectColorVar}) 36%, var(--app-border))`,
-        background: `color-mix(in oklab, var(${projectColorVar}) 16%, var(--app-surface-alt))`,
-        valueColor: `color-mix(in oklab, var(${projectColorVar}) 64%, var(--app-action))`,
-      };
-    },
-    [projectById, trackById],
-  );
-
-  const totalsByTrack = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of sessions) {
-      const dh = Number(s.duration_hours);
-      if (!Number.isFinite(dh) || dh <= 0) continue;
-      // Overlap check
-      const a = new Date(s.started_at).getTime();
-      const b = new Date(s.finished_at).getTime();
-      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
-      if (a >= periodEnd.getTime() || b <= periodStart.getTime()) continue;
-      map.set(s.project_track_id, (map.get(s.project_track_id) ?? 0) + dh);
-    }
-    return map;
-  }, [sessions, periodStart, periodEnd]);
-
-  const projectRows = useMemo(() => {
-    const rows = new Map<string, { total: number; tracks: Array<{ trackId: string; hours: number }> }>();
-    for (const [trackId, hours] of totalsByTrack.entries()) {
-      const track = trackById.get(trackId);
-      if (!track || hours <= 0) continue;
-      const current = rows.get(track.projectId);
-      if (current) {
-        current.total += hours;
-        current.tracks.push({ trackId, hours });
-      } else {
-        rows.set(track.projectId, { total: hours, tracks: [{ trackId, hours }] });
-      }
-    }
-    return Array.from(rows.entries())
-      .map(([projectId, data]) => ({
-        projectId,
-        projectName: projectById.get(projectId)?.name ?? "Project",
-        total: data.total,
-        tracks: data.tracks.sort((a, b) => b.hours - a.hours),
-      }))
-      .sort((a, b) => b.total - a.total);
-  }, [projectById, totalsByTrack, trackById]);
-
-  if (projectRows.length === 0) {
-    return (
-      <p className="text-sm text-muted-canvas">No time logged for this period.</p>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--app-border)", background: "var(--app-surface-alt)" }}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 text-xs font-medium text-muted-canvas transition-colors hover:text-[var(--app-text)]"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        <svg
-          viewBox="0 0 20 20"
-          width={12}
-          height={12}
-          aria-hidden
-          className="shrink-0 transition-transform"
-          style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
-        >
-          <path
-            d="M7 4l6 6-6 6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        {expanded ? "Hide hours breakdown" : "Show hours breakdown"}
-      </button>
-
-      {expanded ? (
-        <div className="mt-2 space-y-1.5">
-          {projectRows.map((row) => (
-            <div key={row.projectId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-[11px] font-semibold" style={{ color: "var(--app-text)" }}>
-                {row.projectName}
-                <span className="ml-1 font-semibold tabular-nums text-muted-canvas">
-                  ({formatEffortHoursLabel(row.total)})
-                </span>
-              </span>
-              {row.tracks.map(({ trackId, hours }) => {
-                const tileStyle = tileStyleForTrack(trackId);
-                const label = trackById.get(trackId)?.label ?? "Track";
-                return (
-                  <div
-                    key={trackId}
-                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-                    style={{ borderColor: tileStyle.borderColor, background: tileStyle.background }}
-                  >
-                    <span className="max-w-[12rem] truncate text-[11px] font-medium text-muted-canvas" title={label}>
-                      {label}
-                    </span>
-                    <span className="text-[11px] font-semibold tabular-nums" style={{ color: tileStyle.valueColor }}>
-                      {formatEffortHoursLabel(hours)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 // ─── Detail popover ───────────────────────────────────────────────────────────
 
 type ActiveBlock = {
@@ -1026,22 +873,11 @@ export function TasksEffortCalendar({
         </p>
       </div>
 
-      {/* Summary tiles */}
-      {loading ? (
-        <SummaryTilesSkeleton />
-      ) : fetchError ? (
+      {fetchError ? (
         <p className="text-sm" style={{ color: "var(--app-danger)" }}>
           Could not load sessions: {fetchError}
         </p>
-      ) : (
-        <IntegrationSummaryTiles
-          sessions={filteredSessions}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          projects={projects}
-          tracks={tracks}
-        />
-      )}
+      ) : null}
       {calendarActionError ? (
         <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
           {calendarActionError}
@@ -1423,20 +1259,6 @@ export function TasksEffortCalendar({
 }
 
 // ─── Loading skeletons ────────────────────────────────────────────────────────
-
-function SummaryTilesSkeleton() {
-  return (
-    <div className="flex items-center gap-2">
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="h-10 w-32 animate-pulse rounded-lg border"
-          style={{ borderColor: "var(--app-border)", background: "var(--app-surface-alt)" }}
-        />
-      ))}
-    </div>
-  );
-}
 
 function CalendarGridSkeleton() {
   return (
