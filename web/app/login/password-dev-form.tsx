@@ -1,10 +1,41 @@
 "use client";
 
-import { signInWithPassword } from "@/lib/actions/auth";
-import { useActionState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 
 export function PasswordDevForm() {
-  const [state, formAction, pending] = useActionState(signInWithPassword, {});
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function onSubmit(formData: FormData) {
+    const email = String(formData.get("email") ?? "").trim();
+    const password = String(formData.get("password") ?? "");
+    if (!email || !password) {
+      setError("Enter email and password.");
+      return;
+    }
+
+    setError(null);
+    startTransition(async () => {
+      try {
+        const supabase = createClient();
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) {
+          setError(signInError.message);
+          return;
+        }
+        router.replace("/home");
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Sign-in failed.");
+      }
+    });
+  }
 
   return (
     <div
@@ -18,7 +49,7 @@ export function PasswordDevForm() {
         For local development only. Create the user in Supabase (Auth → Users) with the same email
         and password.
       </p>
-      <form className="mt-4 flex flex-col gap-3" action={formAction}>
+      <form className="mt-4 flex flex-col gap-3" action={onSubmit}>
         <label className="block text-sm font-medium" style={{ color: "var(--app-text)" }}>
           Email
           <input
@@ -44,9 +75,9 @@ export function PasswordDevForm() {
           {pending ? "Signing in…" : "Sign in with password"}
         </button>
       </form>
-      {state?.error ? (
+      {error ? (
         <p className="mt-3 text-sm" style={{ color: "var(--app-danger)" }} role="alert">
-          {state.error}
+          {error}
         </p>
       ) : null}
     </div>
