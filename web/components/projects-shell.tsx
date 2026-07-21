@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { loadOpenHomeInboxCount } from "@/lib/actions/home-inbox";
 import { loadProjectHeader, signOut } from "@/lib/actions/projects";
 import { projectColorCssVar, type ProjectColorKey } from "@/lib/project-colors";
 
@@ -88,6 +89,16 @@ function ClockIcon() {
     <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
       <circle cx="8" cy="8" r="5.5" />
       <path d="M8 5v3.25L10.25 10" />
+    </svg>
+  );
+}
+
+function InboxIcon() {
+  return (
+    <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+      <path d="M2 4.5h12v8H2z" />
+      <path d="M2 4.5l2.5 3.5h7L14 4.5" />
+      <path d="M2 12.5h12" />
     </svg>
   );
 }
@@ -195,6 +206,7 @@ export function ProjectsShell({
     isOutOfView: boolean;
   } | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [inboxOpenCount, setInboxOpenCount] = useState(0);
   const userMenuRef = useRef<HTMLDetailsElement>(null);
 
   const projectIdFromPath = useMemo(() => {
@@ -218,6 +230,7 @@ export function ProjectsShell({
   const isSettingsRoute = pathname === "/settings" || (pathname?.startsWith("/settings/") ?? false);
   const isInternalRoute = pathname === "/internal" || (pathname?.startsWith("/internal/") ?? false);
   const isForecastRoute = pathname === "/forecast" || (pathname?.startsWith("/forecast/") ?? false);
+  const isInboxRoute = pathname === "/inbox" || (pathname?.startsWith("/inbox/") ?? false);
   const isProjectDetailRoute = projectIdFromPath != null;
   const isProjectOverviewRoute =
     projectIdFromPath != null && pathname === `/projects/${projectIdFromPath}`;
@@ -304,9 +317,20 @@ export function ProjectsShell({
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [userMenuOpen]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void loadOpenHomeInboxCount().then((count) => {
+      if (!cancelled) setInboxOpenCount(count);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
   const headerLeftLabel = useMemo(() => {
     if (!pathname) return "Done";
     if (isProjectDetailRoute) return showProjectTitleInHeader ? projectTitle ?? "Project" : "Project";
+    if (isInboxRoute) return "Inbox";
     if (isSettingsRoute) return "Settings";
     if (isIntegrationCatalogRoute) return "Catalog";
     if (isForecastRoute) return "Forecast Studio";
@@ -318,6 +342,7 @@ export function ProjectsShell({
   }, [
     pathname,
     isProjectDetailRoute,
+    isInboxRoute,
     isSettingsRoute,
     isIntegrationCatalogRoute,
     isForecastRoute,
@@ -433,27 +458,45 @@ export function ProjectsShell({
                 headerLeftLabel
               )}
             </Link>
-            <details
-              ref={userMenuRef}
-              className="user-menu"
-              onToggle={(e) => setUserMenuOpen((e.target as HTMLDetailsElement).open)}
-            >
-              <summary className="user-menu-summary" aria-label="Account menu">
-                <span className="user-avatar" aria-hidden="true">
-                  {userInitial.slice(0, 1).toUpperCase()}
+            <div className="shell-header-actions">
+              <Link
+                href="/inbox"
+                className={`shell-inbox-btn${isInboxRoute ? " shell-inbox-btn--active" : ""}${inboxOpenCount > 0 ? " shell-inbox-btn--has-items" : ""}`}
+                aria-label={`Inbox, ${inboxOpenCount} items`}
+                aria-current={isInboxRoute ? "page" : undefined}
+              >
+                <span className="shell-inbox-icon" aria-hidden="true">
+                  <InboxIcon />
+                  {inboxOpenCount > 0 ? <span className="shell-inbox-dot" /> : null}
                 </span>
-              </summary>
-              <div className="user-menu-panel">
-                <Link href="/settings" className="user-menu-link">
-                  Settings
-                </Link>
-                <form action={signOut} className="user-menu-signout-form">
-                  <button type="submit" className="user-menu-signout">
-                    Sign out
-                  </button>
-                </form>
-              </div>
-            </details>
+                {inboxOpenCount > 0 ? (
+                  <span className="shell-inbox-count" aria-hidden="true">
+                    {inboxOpenCount}
+                  </span>
+                ) : null}
+              </Link>
+              <details
+                ref={userMenuRef}
+                className="user-menu"
+                onToggle={(e) => setUserMenuOpen((e.target as HTMLDetailsElement).open)}
+              >
+                <summary className="user-menu-summary" aria-label="Account menu">
+                  <span className="user-avatar" aria-hidden="true">
+                    {userInitial.slice(0, 1).toUpperCase()}
+                  </span>
+                </summary>
+                <div className="user-menu-panel">
+                  <Link href="/settings" className="user-menu-link">
+                    Settings
+                  </Link>
+                  <form action={signOut} className="user-menu-signout-form">
+                    <button type="submit" className="user-menu-signout">
+                      Sign out
+                    </button>
+                  </form>
+                </div>
+              </details>
+            </div>
           </div>
         </header>
         {showProjectAccentBar && projectAccentBarStyle ? (

@@ -41,6 +41,7 @@ export async function proxy(request: NextRequest) {
 
   const requiresAuth =
     pathname.startsWith("/home") ||
+    pathname.startsWith("/inbox") ||
     pathname.startsWith("/projects") ||
     pathname.startsWith("/work") ||
     pathname.startsWith("/tasks") ||

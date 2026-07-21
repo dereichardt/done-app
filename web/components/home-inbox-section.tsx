@@ -355,7 +355,7 @@ export function HomeInboxSection({
 
       <div className="mt-4 w-full min-w-0 rounded-[var(--app-radius)]">
         <div
-          className="card-canvas flex min-h-0 max-h-[calc(100dvh-10rem)] w-full flex-col overflow-hidden md:min-h-[28rem]"
+          className="card-canvas flex min-h-0 max-h-[calc(100dvh-10rem)] w-full flex-col overflow-hidden md:min-h-[calc(100dvh-14rem)]"
           aria-label="Inbox list container"
         >
           <div

@@ -33,7 +33,7 @@ export async function markHomeInboxItemDone(itemId: string): Promise<{ error?: s
     .eq("status", "open");
 
   if (error) return { error: error.message };
-  revalidatePath("/home");
+  revalidateHomeInboxPaths();
   return {};
 }
 
@@ -54,7 +54,7 @@ export async function markHomeInboxItemRead(itemId: string): Promise<{ error?: s
     .is("read_at", null);
 
   if (error) return { error: error.message };
-  revalidatePath("/home");
+  revalidateHomeInboxPaths();
   return {};
 }
 
@@ -74,7 +74,7 @@ export async function deleteHomeInboxItem(itemId: string): Promise<{ error?: str
     .eq("status", "open");
 
   if (error) return { error: error.message };
-  revalidatePath("/home");
+  revalidateHomeInboxPaths();
   return {};
 }
 
@@ -94,7 +94,7 @@ export async function markAllHomeInboxItemsRead(): Promise<{ error?: string }> {
     .is("read_at", null);
 
   if (error) return { error: error.message };
-  revalidatePath("/home");
+  revalidateHomeInboxPaths();
   return {};
 }
 
@@ -113,7 +113,7 @@ export async function markAllHomeInboxItemsUnread(): Promise<{ error?: string }>
     .not("read_at", "is", null);
 
   if (error) return { error: error.message };
-  revalidatePath("/home");
+  revalidateHomeInboxPaths();
   return {};
 }
 
@@ -132,8 +132,31 @@ export async function deleteAllHomeInboxItems(): Promise<{ error?: string }> {
     .eq("status", "open");
 
   if (error) return { error: error.message };
-  revalidatePath("/home");
+  revalidateHomeInboxPaths();
   return {};
+}
+
+function revalidateHomeInboxPaths() {
+  revalidatePath("/home");
+  revalidatePath("/inbox");
+}
+
+/** Lightweight open-item count for the shell header badge (no rule sync). */
+export async function loadOpenHomeInboxCount(): Promise<number> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return 0;
+
+  const { count, error } = await supabase
+    .from("home_inbox_items")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_id", user.id)
+    .eq("status", "open");
+
+  if (error) return 0;
+  return count ?? 0;
 }
 
 const HOME_INBOX_RULES_VERSION = 1;
