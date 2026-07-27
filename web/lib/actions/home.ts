@@ -27,10 +27,14 @@ export async function loadHomeProjectPickerRows(): Promise<HomeProjectPickerRow[
   if (!projects?.length) return [];
 
   const ids = projects.map((p) => p.id);
-  const { data: counts } = await supabase.from("project_integrations").select("project_id").in("project_id", ids);
+  const { data: counts } = await supabase
+    .from("project_integrations")
+    .select("project_id, integration_state")
+    .in("project_id", ids);
 
   const countByProject = new Map<string, number>();
   for (const c of counts ?? []) {
+    if (c.integration_state === "removed_from_scope") continue;
     countByProject.set(c.project_id, (countByProject.get(c.project_id) ?? 0) + 1);
   }
 

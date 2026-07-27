@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isIntegrationCountedInScope } from "@/lib/integration-metadata";
 import {
   calendarDaysFromTo,
   resolvePhaseStatus,
@@ -9,7 +10,7 @@ export type ProjectListRowSummary = {
   phaseStatus: PhaseStatusResult;
   activeIntegrationCount: number;
   blockedOnHoldCount: number;
-  /** All project integrations (for completed-engagement row metrics). */
+  /** In-scope project integrations (excludes `removed_from_scope`). */
   totalIntegrationCount: number;
   /** First phase start and last phase end (by `sort_order`); used for completed list stats. */
   engagementPhaseSpan: {
@@ -104,10 +105,11 @@ export async function loadProjectListSummariesById(
       asOfCalendarDay,
     );
     const piRows = integrationsByProject.get(id) ?? [];
-    const totalIntegrationCount = piRows.length;
+    const inScopeRows = piRows.filter((r) => isIntegrationCountedInScope(r.integration_state));
+    const totalIntegrationCount = inScopeRows.length;
     let activeIntegrationCount = 0;
     let blockedOnHoldCount = 0;
-    for (const r of piRows) {
+    for (const r of inScopeRows) {
       const s = r.integration_state;
       if (s === "active") activeIntegrationCount++;
       else if (s === "blocked" || s === "on_hold") blockedOnHoldCount++;

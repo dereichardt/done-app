@@ -6,8 +6,10 @@ import {
   isDeliveryProgress,
   isIntegrationDirection,
   isIntegrationState,
+  isRemovedFromScope,
 } from "@/lib/integration-metadata";
 import { isProjectColorKey, normalizeProjectColorKey } from "@/lib/project-colors";
+import { maybeApplyEnteringRemovedFromScope } from "@/lib/project-integration-removed-from-scope";
 import { createClient } from "@/lib/supabase/server";
 import {
   isImplementationNotesHtmlEmpty,
@@ -922,7 +924,7 @@ export async function patchProjectIntegrationStatus(
 
   const { data: row } = await supabase
     .from("project_integrations")
-    .select("id, project_id, delivery_progress")
+    .select("id, project_id, delivery_progress, integration_state")
     .eq("id", projectIntegrationId)
     .maybeSingle();
 
@@ -936,6 +938,21 @@ export async function patchProjectIntegrationStatus(
     .maybeSingle();
 
   if (!project) return { error: "Not found" };
+
+  if (
+    row.delivery_progress !== dp &&
+    (isRemovedFromScope(st) || isRemovedFromScope(row.integration_state))
+  ) {
+    return { error: "Cannot change delivery progress for an integration removed from scope" };
+  }
+
+  const sideEffects = await maybeApplyEnteringRemovedFromScope(supabase, {
+    projectIntegrationId,
+    ownerId: user.id,
+    previousState: row.integration_state,
+    nextState: st,
+  });
+  if (sideEffects.error) return { error: sideEffects.error };
 
   const { error } = await supabase
     .from("project_integrations")
@@ -959,6 +976,9 @@ export async function patchProjectIntegrationStatus(
 
   revalidatePath(`/projects/${row.project_id}`);
   revalidatePath(`/projects/${row.project_id}/integrations/${projectIntegrationId}`);
+  revalidatePath("/home");
+  revalidatePath("/work");
+  revalidatePath("/tasks");
   return {};
 }
 
@@ -978,7 +998,7 @@ export async function patchProjectIntegrationDeliveryProgress(
 
   const { data: row } = await supabase
     .from("project_integrations")
-    .select("id, project_id, delivery_progress")
+    .select("id, project_id, delivery_progress, integration_state")
     .eq("id", projectIntegrationId)
     .maybeSingle();
 
@@ -994,6 +1014,9 @@ export async function patchProjectIntegrationDeliveryProgress(
   if (!project) return { error: "Not found" };
 
   if (row.delivery_progress === dp) return {};
+  if (isRemovedFromScope(row.integration_state)) {
+    return { error: "Cannot change delivery progress for an integration removed from scope" };
+  }
 
   const { error } = await supabase
     .from("project_integrations")
@@ -1036,7 +1059,7 @@ export async function patchProjectIntegrationStateOnly(
 
   const { data: row } = await supabase
     .from("project_integrations")
-    .select("id, project_id")
+    .select("id, project_id, integration_state")
     .eq("id", projectIntegrationId)
     .maybeSingle();
 
@@ -1051,6 +1074,14 @@ export async function patchProjectIntegrationStateOnly(
 
   if (!project) return { error: "Not found" };
 
+  const sideEffects = await maybeApplyEnteringRemovedFromScope(supabase, {
+    projectIntegrationId,
+    ownerId: user.id,
+    previousState: row.integration_state,
+    nextState: st,
+  });
+  if (sideEffects.error) return { error: sideEffects.error };
+
   const { error } = await supabase
     .from("project_integrations")
     .update({
@@ -1063,6 +1094,9 @@ export async function patchProjectIntegrationStateOnly(
 
   revalidatePath(`/projects/${row.project_id}`);
   revalidatePath(`/projects/${row.project_id}/integrations/${projectIntegrationId}`);
+  revalidatePath("/home");
+  revalidatePath("/work");
+  revalidatePath("/tasks");
   return {};
 }
 
@@ -1311,6 +1345,7 @@ export async function completeProject(
         integration_state_reason: null,
       })
       .eq("project_id", projectId)
+      .neq("integration_state", "removed_from_scope")
       .or("integration_state.neq.completed,delivery_progress.neq.delivered");
     if (intErr) return { error: intErr.message };
   }

@@ -5,9 +5,12 @@ import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-selec
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { IntegrationStatePill } from "@/components/integration-state-pill";
 import { patchProjectIntegrationStateOnly } from "@/lib/actions/projects";
-import { projectIntegrationStateSelectOptions } from "@/lib/integration-metadata";
+import {
+  formatIntegrationDefinitionDisplayName,
+  integrationStateShowsReason,
+  projectIntegrationStateSelectOptions,
+} from "@/lib/integration-metadata";
 import { updateIntegrationFromForm } from "@/lib/actions/projects";
-import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -125,7 +128,7 @@ export function ProjectIntegrationDetailHeader({
   const subline =
     [typeLabel, functionalAreaLabel, domainLabel].filter(Boolean).join(" · ") ||
     "No type, area, or domain selected";
-  const showReason = integrationState === "blocked" || integrationState === "on_hold";
+  const showReason = integrationStateShowsReason(integrationState);
   const reasonTooltip = showReason && stateReason.trim().length > 0 ? stateReason.trim() : "";
 
   async function saveStatus(nextState: string, reasonText: string) {
@@ -380,9 +383,9 @@ export function ProjectIntegrationDetailHeader({
                 }}
               />
             </label>
-            {integrationState === "blocked" || integrationState === "on_hold" ? (
+            {integrationStateShowsReason(integrationState) ? (
               <label className="flex flex-col gap-1 text-xs" style={{ color: "var(--app-text-muted)" }}>
-                Blocked / on hold reason
+                Reason
                 <textarea
                   className="input-canvas min-h-[4.5rem] resize-y"
                   rows={3}

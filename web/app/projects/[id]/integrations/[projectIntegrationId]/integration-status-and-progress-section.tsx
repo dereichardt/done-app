@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { isRemovedFromScope } from "@/lib/integration-metadata";
 import { IntegrationDeliveryProgressTrack } from "./integration-delivery-progress-track";
 import { IntegrationUpdatesPanel, type IntegrationUpdateRow } from "./integration-updates-panel";
 
@@ -33,6 +34,7 @@ export function IntegrationStatusAndProgressSection({
   updates,
 }: IntegrationStatusAndProgressSectionProps) {
   const [delivery, setDelivery] = useState(deliveryProgress);
+  const readOnly = isRemovedFromScope(integrationState);
 
   return (
     <>
@@ -43,9 +45,10 @@ export function IntegrationStatusAndProgressSection({
         value={delivery}
         transitions={deliveryProgressTransitions}
         onChange={setDelivery}
+        readOnly={readOnly}
       />
 
-      <section className="mt-10">
+      <section className={`mt-10 ${readOnly ? "opacity-55" : ""}`}>
         <div className="flex flex-col gap-2">
           <h2 className="section-heading">Updates</h2>
           <div className="h-[21rem] max-h-[85vh] min-h-0 shrink-0">
@@ -55,6 +58,7 @@ export function IntegrationStatusAndProgressSection({
               projectLabel={projectLabel}
               integrationDisplayTitle={integrationDisplayTitle}
               updates={updates}
+              readOnly={readOnly}
             />
           </div>
         </div>

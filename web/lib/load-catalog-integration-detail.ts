@@ -116,10 +116,10 @@ export async function loadCatalogIntegrationDetail(
   if (childIds.length > 0) {
     const { data: piRows } = await supabase
       .from("project_integrations")
-      .select("id, project_id, integration_id, delivery_progress, projects ( customer_name )")
+      .select("id, project_id, integration_id, delivery_progress, integration_state, projects ( customer_name )")
       .in("integration_id", childIds);
 
-    const piList = piRows ?? [];
+    const piList = (piRows ?? []).filter((pi) => pi.integration_state !== "removed_from_scope");
     const piIds = piList.map((p) => p.id);
 
     let taskRows: { id: string; project_track_id: string }[] = [];

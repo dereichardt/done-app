@@ -14,6 +14,7 @@ import {
 } from "@/lib/actions/integration-tasks";
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { ProjectIntegrationListRow } from "@/components/project-integration-list-row";
+import { isRemovedFromScope } from "@/lib/integration-metadata";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -326,6 +327,7 @@ export function ProjectIntegrationsSection({
                 finishSessionIntegrationLabel={tasksModalRow?.title ?? ""}
                 finishSessionProjectLabel={projectCustomerName}
                 todayIso={todayIso}
+                taskCreateDisabled={isRemovedFromScope(tasksModalRow?.integration_state)}
                 onClientTaskSnapshotInvalidate={() => loadTaskSnapshot(modalRowId)}
               />
             ) : modalLoadError ? (

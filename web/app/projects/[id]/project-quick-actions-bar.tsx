@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { ProvideUpdateWizard } from "./provide-update-wizard";
 import { SummarizeActivityDialog } from "./summarize-activity-dialog";
+import { isIntegrationCountedInScope } from "@/lib/integration-metadata";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
 
 const EMPTY_HINT_ID = "quick-actions-no-integrations-hint";
@@ -23,7 +24,10 @@ export function ProjectQuickActionsBar({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [summarizeOpen, setSummarizeOpen] = useState(false);
 
-  const hasIntegrations = integrationRows.length > 0;
+  const inScopeIntegrationRows = integrationRows.filter((row) =>
+    isIntegrationCountedInScope(row.integration_state),
+  );
+  const hasIntegrations = inScopeIntegrationRows.length > 0;
 
   const openWizard = () => {
     setWizardOpen(true);
@@ -84,7 +88,7 @@ export function ProjectQuickActionsBar({
           dialogRef={dialogRef}
           projectId={projectId}
           projectCustomerName={projectCustomerName}
-          integrationRows={integrationRows}
+          integrationRows={inScopeIntegrationRows}
           onClose={closeWizard}
         />
       ) : null}

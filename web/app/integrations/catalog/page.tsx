@@ -57,9 +57,10 @@ export default async function IntegrationCatalogListPage() {
     if (childIds.length > 0) {
       const { data: pis } = await supabase
         .from("project_integrations")
-        .select("integration_id")
+        .select("integration_id, integration_state")
         .in("integration_id", childIds);
       for (const pi of pis ?? []) {
+        if (pi.integration_state === "removed_from_scope") continue;
         const tmpl = childIdToTemplate.get(pi.integration_id);
         if (tmpl) usageLinkCountById.set(tmpl, (usageLinkCountById.get(tmpl) ?? 0) + 1);
       }

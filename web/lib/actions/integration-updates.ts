@@ -1,5 +1,6 @@
 "use server";
 
+import { isRemovedFromScope } from "@/lib/integration-metadata";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -9,10 +10,10 @@ async function loadOwnedProjectIntegration(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   projectIntegrationId: string,
-): Promise<{ id: string; project_id: string } | null> {
+): Promise<{ id: string; project_id: string; integration_state: string | null } | null> {
   const { data: pi } = await supabase
     .from("project_integrations")
-    .select("id, project_id")
+    .select("id, project_id, integration_state")
     .eq("id", projectIntegrationId)
     .maybeSingle();
 
@@ -53,6 +54,9 @@ export async function createIntegrationUpdate(
 
   const pi = await loadOwnedProjectIntegration(supabase, user.id, projectIntegrationId);
   if (!pi) return { error: "Not found" };
+  if (isRemovedFromScope(pi.integration_state)) {
+    return { error: "Cannot update an integration removed from scope" };
+  }
 
   const parsed = parseBody(formData);
   if (!parsed.ok) return { error: parsed.error };
@@ -88,6 +92,9 @@ export async function updateIntegrationUpdate(
 
   const pi = await loadOwnedProjectIntegration(supabase, user.id, row.project_integration_id);
   if (!pi) return { error: "Not found" };
+  if (isRemovedFromScope(pi.integration_state)) {
+    return { error: "Cannot update an integration removed from scope" };
+  }
 
   const parsed = parseBody(formData);
   if (!parsed.ok) return { error: parsed.error };
@@ -123,6 +130,9 @@ export async function deleteIntegrationUpdate(updateId: string): Promise<{ error
 
   const pi = await loadOwnedProjectIntegration(supabase, user.id, row.project_integration_id);
   if (!pi) return { error: "Not found" };
+  if (isRemovedFromScope(pi.integration_state)) {
+    return { error: "Cannot update an integration removed from scope" };
+  }
 
   const { error } = await supabase.from("integration_updates").delete().eq("id", updateId);
 

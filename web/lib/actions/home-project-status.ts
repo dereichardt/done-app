@@ -10,6 +10,7 @@ import {
 } from "@/lib/home-project-status";
 import { loadHomeActualsVsForecast, makeWeekTotals } from "@/lib/home-actuals-vs-forecast";
 import { loadAllActiveForecastProjects, loadForecastProjectDTO } from "@/lib/forecast-data";
+import { isIntegrationCountedInScope } from "@/lib/integration-metadata";
 import {
   computeEstimateVariance,
   currentSundayWeekYmd,
@@ -162,7 +163,9 @@ export async function loadHomeProjectStatus(
     }
   }
 
-  const serialized = (piRows ?? []).map((row) => serializeProjectIntegrationRow(row));
+  const serialized = (piRows ?? [])
+    .map((row) => serializeProjectIntegrationRow(row))
+    .filter((s) => isIntegrationCountedInScope(s.integration_state));
 
   let estimatedSum =
     isExpertAssist && project.estimated_effort_hours != null
@@ -402,7 +405,8 @@ export async function loadAllHomeProjectStatuses(): Promise<{
 
     const serialized = (integrationsRes.data ?? [])
       .filter((row) => row.project_id === projectId)
-      .map((row) => serializeProjectIntegrationRow(row));
+      .map((row) => serializeProjectIntegrationRow(row))
+      .filter((integration) => isIntegrationCountedInScope(integration.integration_state));
     let estimatedSum =
       isExpertAssist && project.estimated_effort_hours != null
         ? Number(project.estimated_effort_hours)

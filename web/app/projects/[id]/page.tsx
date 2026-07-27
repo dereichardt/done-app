@@ -11,6 +11,7 @@ import {
 } from "@/components/integration-tasks-panel";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { serializeProjectIntegrationRow } from "@/lib/project-integration-row";
+import { isIntegrationCountedInScope } from "@/lib/integration-metadata";
 import { resolvePhaseStatus, todayISO } from "@/lib/project-phase-status";
 import { loadProjectActivity } from "@/lib/project-activity";
 import { notFound } from "next/navigation";
@@ -232,7 +233,9 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           key: row.id,
           label: row.title,
           kind: "integration" as const,
-          estimatedEffortHours: row.estimatedEffortHours,
+          estimatedEffortHours: isIntegrationCountedInScope(row.integration_state)
+            ? row.estimatedEffortHours
+            : null,
         })),
         {
           key: PM_EFFORT_ROW_KEY,
@@ -403,7 +406,10 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       <ProjectSummaryStrip
         completedAt={project.completed_at ?? null}
         phaseStatus={phaseStatus}
-        integrationCount={integrationRowsSerialized.length}
+        integrationCount={
+          integrationRowsSerialized.filter((row) => isIntegrationCountedInScope(row.integration_state))
+            .length
+        }
         actualsVsForecast={actualsVsForecast.thisWeek}
       />
 

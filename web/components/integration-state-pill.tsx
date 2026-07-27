@@ -1,10 +1,15 @@
-import { formatIntegrationStateLabel, isIntegrationState } from "@/lib/integration-metadata";
+import {
+  formatIntegrationStateLabel,
+  isIntegrationState,
+  type ProjectIntegrationState,
+} from "@/lib/integration-metadata";
 
-const VARIANT_CLASS: Record<"active" | "blocked" | "on_hold" | "completed", string> = {
+const VARIANT_CLASS: Record<ProjectIntegrationState, string> = {
   active: "integration-state-pill--active",
   blocked: "integration-state-pill--blocked",
   on_hold: "integration-state-pill--on_hold",
   completed: "integration-state-pill--completed",
+  removed_from_scope: "integration-state-pill--removed_from_scope",
 };
 
 export function IntegrationStatePill({ state }: { state: string }) {

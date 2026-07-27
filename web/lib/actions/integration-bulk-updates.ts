@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { isDeliveryProgress, isIntegrationState } from "@/lib/integration-metadata";
+import { maybeApplyEnteringRemovedFromScope } from "@/lib/project-integration-removed-from-scope";
 
 const MAX_BODY = 300;
 
@@ -48,11 +49,14 @@ export async function submitProvideUpdateBatch(
 
   const { data: piRows } = await supabase
     .from("project_integrations")
-    .select("id")
+    .select("id, integration_state")
     .eq("project_id", projectId)
     .in("id", piIds);
 
-  const validIds = new Set((piRows ?? []).map((r) => r.id));
+  const previousStateById = new Map(
+    (piRows ?? []).map((r) => [r.id as string, r.integration_state as string | null] as const),
+  );
+  const validIds = new Set(previousStateById.keys());
 
   const savedProjectIntegrationIds: string[] = [];
 
@@ -74,6 +78,16 @@ export async function submitProvideUpdateBatch(
     }
     if (!isIntegrationState(st)) {
       return { error: "Invalid integration state value", savedProjectIntegrationIds };
+    }
+
+    const sideEffects = await maybeApplyEnteringRemovedFromScope(supabase, {
+      projectIntegrationId: entry.projectIntegrationId,
+      ownerId: user.id,
+      previousState: previousStateById.get(entry.projectIntegrationId),
+      nextState: st,
+    });
+    if (sideEffects.error) {
+      return { error: sideEffects.error, savedProjectIntegrationIds };
     }
 
     // Always patch status — the caller only submits entries that are on the form.
@@ -109,8 +123,12 @@ export async function submitProvideUpdateBatch(
     }
 
     savedProjectIntegrationIds.push(entry.projectIntegrationId);
+    previousStateById.set(entry.projectIntegrationId, st);
   }
 
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/home");
+  revalidatePath("/work");
+  revalidatePath("/tasks");
   return { savedProjectIntegrationIds };
 }

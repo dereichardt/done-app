@@ -94,6 +94,7 @@ export function IntegrationUpdatesPanel({
   integrationDisplayTitle,
   updates,
   className = "",
+  readOnly = false,
 }: {
   projectIntegrationId: string;
   /** Project customer name; shown in the “All updates” dialog subtitle (matches finish-session modal). */
@@ -102,6 +103,8 @@ export function IntegrationUpdatesPanel({
   integrationDisplayTitle: string;
   updates: IntegrationUpdateRow[];
   className?: string;
+  /** When true, hide composer and edit/delete — updates remain visible as history. */
+  readOnly?: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const draftTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -134,73 +137,79 @@ export function IntegrationUpdatesPanel({
 
   return (
     <div className={`card-canvas flex h-full min-h-0 flex-col overflow-hidden p-3 ${className}`.trim()}>
-      <form
-        ref={formRef}
-        className="flex shrink-0 flex-col gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const form = e.currentTarget;
-          const fd = new FormData(form);
-          setCreatePending(true);
-          setCreateError(null);
-          void (async () => {
-            const res = await createIntegrationUpdate(projectIntegrationId, fd);
-            setCreatePending(false);
-            if (res.error) {
-              setCreateError(res.error);
-              return;
-            }
-            form.reset();
-            setDraftLen(0);
-            requestAnimationFrame(() => syncComposerTextareaHeight(draftTextareaRef.current));
-          })();
-        }}
-      >
-        <div className="flex flex-col gap-0.5">
-          <div className="input-canvas input-canvas--shell flex min-h-[2.25rem] items-center gap-2 py-1.5 pl-3 pr-2">
-            <textarea
-              ref={draftTextareaRef}
-              name="body"
-              required
-              maxLength={MAX}
-              rows={1}
-              className="max-h-32 min-h-[1.25rem] min-w-0 flex-1 resize-none overflow-x-hidden break-words border-0 bg-transparent py-0.5 text-sm leading-snug outline-none ring-0 placeholder:text-muted-canvas"
-              style={{ color: "var(--app-text)" }}
-              placeholder="Share your update"
-              aria-label="Share your update"
-              onChange={handleDraftChange}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter" && !ev.shiftKey) {
-                  ev.preventDefault();
-                  formRef.current?.requestSubmit();
-                }
-              }}
-            />
-            <button
-              type="submit"
-              disabled={createPending}
-              className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border text-[#f3f5f8] shadow-sm transition-[background-color,border-color,opacity] hover:enabled:bg-[color-mix(in_oklab,#1f2937_90%,#f3f5f8_10%)] hover:enabled:border-[color-mix(in_oklab,#4b5563_55%,#f3f5f8_12%)] disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                borderColor: "color-mix(in oklab, #1f2937 78%, #4b5563 22%)",
-                background: "#1f2937",
-              }}
-              aria-label="Submit update"
-            >
-              {createPending ? <SubmitSpinner /> : <CanvasArrowRightIcon />}
-            </button>
+      {readOnly ? (
+        <p className="mb-2 shrink-0 text-sm text-muted-canvas">
+          Updates are locked while this integration is removed from scope.
+        </p>
+      ) : (
+        <form
+          ref={formRef}
+          className="flex shrink-0 flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const form = e.currentTarget;
+            const fd = new FormData(form);
+            setCreatePending(true);
+            setCreateError(null);
+            void (async () => {
+              const res = await createIntegrationUpdate(projectIntegrationId, fd);
+              setCreatePending(false);
+              if (res.error) {
+                setCreateError(res.error);
+                return;
+              }
+              form.reset();
+              setDraftLen(0);
+              requestAnimationFrame(() => syncComposerTextareaHeight(draftTextareaRef.current));
+            })();
+          }}
+        >
+          <div className="flex flex-col gap-0.5">
+            <div className="input-canvas input-canvas--shell flex min-h-[2.25rem] items-center gap-2 py-1.5 pl-3 pr-2">
+              <textarea
+                ref={draftTextareaRef}
+                name="body"
+                required
+                maxLength={MAX}
+                rows={1}
+                className="max-h-32 min-h-[1.25rem] min-w-0 flex-1 resize-none overflow-x-hidden break-words border-0 bg-transparent py-0.5 text-sm leading-snug outline-none ring-0 placeholder:text-muted-canvas"
+                style={{ color: "var(--app-text)" }}
+                placeholder="Share your update"
+                aria-label="Share your update"
+                onChange={handleDraftChange}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter" && !ev.shiftKey) {
+                    ev.preventDefault();
+                    formRef.current?.requestSubmit();
+                  }
+                }}
+              />
+              <button
+                type="submit"
+                disabled={createPending}
+                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border text-[#f3f5f8] shadow-sm transition-[background-color,border-color,opacity] hover:enabled:bg-[color-mix(in_oklab,#1f2937_90%,#f3f5f8_10%)] hover:enabled:border-[color-mix(in_oklab,#4b5563_55%,#f3f5f8_12%)] disabled:cursor-not-allowed disabled:opacity-50"
+                style={{
+                  borderColor: "color-mix(in oklab, #1f2937 78%, #4b5563 22%)",
+                  background: "#1f2937",
+                }}
+                aria-label="Submit update"
+              >
+                {createPending ? <SubmitSpinner /> : <CanvasArrowRightIcon />}
+              </button>
+            </div>
+            <div className="flex justify-end pr-0.5">
+              <span className="text-xs tabular-nums text-muted-canvas">
+                {draftLen}/{MAX}
+              </span>
+            </div>
           </div>
-          <div className="flex justify-end pr-0.5">
-            <span className="text-xs tabular-nums text-muted-canvas">
-              {draftLen}/{MAX}
-            </span>
-          </div>
-        </div>
-        {createError ? (
-          <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
-            {createError}
-          </p>
-        ) : null}
-      </form>
+          {createError ? (
+            <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
+              {createError}
+            </p>
+          ) : null}
+        </form>
+      )}
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center justify-between gap-2">
@@ -230,7 +239,7 @@ export function IntegrationUpdatesPanel({
                 key={row.id}
                 className={integrationUpdateRowBubbleClass}
               >
-                {editingId === row.id && !allUpdatesModalOpen ? (
+                {editingId === row.id && !allUpdatesModalOpen && !readOnly ? (
                   <InlineEditRow
                     row={row}
                     onCancel={() => setEditingId(null)}
@@ -245,32 +254,34 @@ export function IntegrationUpdatesPanel({
                       >
                         {formatIntegrationUpdateWhen(row.created_at)}
                       </time>
-                      <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                        <button
-                          type="button"
-                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-text)]"
-                          style={{ borderColor: "var(--app-border)" }}
-                          aria-label="Edit update"
-                          onClick={() => setEditingId(row.id)}
-                        >
-                          <EditIcon size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-danger)]"
-                          style={{ borderColor: "var(--app-border)" }}
-                          aria-label="Delete update"
-                          onClick={() => {
-                            flushSync(() => {
-                              setDeleteTarget(row);
-                              setDeleteError(null);
-                            });
-                            deleteDialogRef.current?.showModal();
-                          }}
-                        >
-                          <TrashIcon />
-                        </button>
-                      </div>
+                      {!readOnly ? (
+                        <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                          <button
+                            type="button"
+                            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-text)]"
+                            style={{ borderColor: "var(--app-border)" }}
+                            aria-label="Edit update"
+                            onClick={() => setEditingId(row.id)}
+                          >
+                            <EditIcon size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-danger)]"
+                            style={{ borderColor: "var(--app-border)" }}
+                            aria-label="Delete update"
+                            onClick={() => {
+                              flushSync(() => {
+                                setDeleteTarget(row);
+                                setDeleteError(null);
+                              });
+                              deleteDialogRef.current?.showModal();
+                            }}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                     <p
                       className="mt-1 whitespace-pre-wrap break-words text-sm leading-snug"
@@ -336,7 +347,7 @@ export function IntegrationUpdatesPanel({
                     key={row.id}
                     className={integrationUpdateRowBubbleClass}
                   >
-                    {editingId === row.id ? (
+                    {editingId === row.id && !readOnly ? (
                       <InlineEditRow
                         row={row}
                         onCancel={() => setEditingId(null)}
@@ -351,32 +362,34 @@ export function IntegrationUpdatesPanel({
                           >
                             {formatIntegrationUpdateWhen(row.created_at)}
                           </time>
-                          <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                            <button
-                              type="button"
-                              className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-text)]"
-                              style={{ borderColor: "var(--app-border)" }}
-                              aria-label="Edit update"
-                              onClick={() => setEditingId(row.id)}
-                            >
-                              <EditIcon size={14} />
-                            </button>
-                            <button
-                              type="button"
-                              className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-danger)]"
-                              style={{ borderColor: "var(--app-border)" }}
-                              aria-label="Delete update"
-                              onClick={() => {
-                                flushSync(() => {
-                                  setDeleteTarget(row);
-                                  setDeleteError(null);
-                                });
-                                deleteDialogRef.current?.showModal();
-                              }}
-                            >
-                              <TrashIcon />
-                            </button>
-                          </div>
+                          {!readOnly ? (
+                            <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                              <button
+                                type="button"
+                                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-text)]"
+                                style={{ borderColor: "var(--app-border)" }}
+                                aria-label="Edit update"
+                                onClick={() => setEditingId(row.id)}
+                              >
+                                <EditIcon size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] text-muted-canvas transition-colors hover:bg-[var(--app-surface-alt)] hover:text-[var(--app-danger)]"
+                                style={{ borderColor: "var(--app-border)" }}
+                                aria-label="Delete update"
+                                onClick={() => {
+                                  flushSync(() => {
+                                    setDeleteTarget(row);
+                                    setDeleteError(null);
+                                  });
+                                  deleteDialogRef.current?.showModal();
+                                }}
+                              >
+                                <TrashIcon />
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                         <p
                           className="mt-1 whitespace-pre-wrap break-words text-sm leading-snug"

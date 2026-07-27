@@ -4,6 +4,7 @@ import { patchProjectIntegrationStatus } from "@/lib/actions/projects";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import {
   formatIntegrationStateLabel,
+  integrationStateShowsReason,
   projectIntegrationStateSelectOptions,
 } from "@/lib/integration-metadata";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -88,7 +89,7 @@ export function IntegrationStatusCard({
 
   const flushReasonSave = useCallback(
     (reasonText: string) => {
-      if (intState !== "blocked" && intState !== "on_hold") return;
+      if (!integrationStateShowsReason(intState)) return;
       runPatch({
         delivery_progress: delivery,
         integration_state: intState,
@@ -121,7 +122,7 @@ export function IntegrationStatusCard({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
 
-  const showReason = intState === "blocked" || intState === "on_hold";
+  const showReason = integrationStateShowsReason(intState);
 
   /** Same light surface as Estimated / Actual tiles in `IntegrationEffortSection` (background via class so hover works). */
   const readonlyCardBase =
@@ -164,10 +165,10 @@ export function IntegrationStatusCard({
               <button
                 type="button"
                 className={`${readonlyCardBase} flex min-h-[5rem] flex-1 flex-col items-stretch overflow-hidden`}
-                aria-label="Edit blocked or on hold reason"
+                aria-label="Edit reason"
                 onClick={openEdit}
               >
-                <p className="self-start text-left text-xs font-medium text-muted-canvas">Blocked / on hold reason</p>
+                <p className="self-start text-left text-xs font-medium text-muted-canvas">Reason</p>
                 <p
                   className="mt-1 min-h-0 flex-1 overflow-y-auto text-left text-sm font-medium leading-relaxed break-words"
                   style={{ color: "var(--app-text)" }}
@@ -193,7 +194,7 @@ export function IntegrationStatusCard({
             </label>
             {showReason ? (
               <label className="flex flex-col gap-1 text-xs" style={{ color: "var(--app-text-muted)" }}>
-                Blocked / on hold reason
+                Reason
                 <textarea
                   className="input-canvas min-h-[4.5rem] resize-y"
                   rows={3}

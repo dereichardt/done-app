@@ -1,6 +1,9 @@
 "use server";
 
-import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
+import {
+  formatIntegrationDefinitionDisplayName,
+  isRemovedFromScope,
+} from "@/lib/integration-metadata";
 import { loadInternalTaskFinishContextWithSupabase } from "@/lib/internal-task-context";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -779,6 +782,17 @@ export async function createIntegrationTask(
 
   const track = await loadOwnedProjectTrack(supabase, user.id, projectTrackId);
   if (!track) return { error: "Not found" };
+
+  if (track.project_integration_id) {
+    const { data: pi } = await supabase
+      .from("project_integrations")
+      .select("integration_state")
+      .eq("id", track.project_integration_id)
+      .maybeSingle();
+    if (pi && isRemovedFromScope(pi.integration_state)) {
+      return { error: "Cannot create tasks for an integration removed from scope" };
+    }
+  }
 
   const title = String(formData.get("title") ?? "").trim();
   const priorityRaw = String(formData.get("priority") ?? "medium").trim();

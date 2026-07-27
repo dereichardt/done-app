@@ -34,6 +34,7 @@ import { loadHomeProjectIntegrationRows, loadProjectBriefForOwner } from "@/lib/
 import { markHomeInboxItemDone } from "@/lib/actions/home-inbox";
 import { submitProvideUpdateBatch } from "@/lib/actions/integration-bulk-updates";
 import { formatInboxTimestamp, staleIntegrationProjectName } from "@/lib/inbox-format";
+import { integrationStateShowsReason } from "@/lib/integration-metadata";
 import type { HomeInboxItemRow } from "@/lib/home-inbox-rules";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
 
@@ -465,7 +466,7 @@ const StaleIntegrationResolverBody = forwardRef(function StaleIntegrationResolve
     if (!integrationRow || !draft || !parsedSt || submitting || pending) return;
     setSubmitting(true);
     setSubmitError(null);
-    const showReason = draft.integration_state === "blocked" || draft.integration_state === "on_hold";
+    const showReason = integrationStateShowsReason(draft.integration_state);
     const result = await submitProvideUpdateBatch(parsedSt.projectId, [
       {
         projectIntegrationId: integrationRow.id,

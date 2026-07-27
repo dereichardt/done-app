@@ -4,7 +4,7 @@
  *
  * | `rule_key` | When it runs | Settings / inputs |
  * |------------|----------------|-------------------|
- * | `stale_integration` | No `integration_latest_updates` (or PI `created_at`) signal in the last 7 days | Not settings-gated; evaluated for every active project integration. |
+ * | `stale_integration` | No `integration_latest_updates` (or PI `created_at`) signal in the last 7 days | Not settings-gated; evaluated for every in-scope project integration (excludes `removed_from_scope`). |
  * | `activity_summary_reminder` | On the user’s **activity summary day** (weekday), if that project has no `project_summaries` row whose `generated_at` falls in the current Mon–Sun calendar week (user TZ) | `UserPreferences.activity_summary_day` |
  * | `forecast_review_reminder` | On the user’s **forecast review day** (weekday), once per week | `UserPreferences.forecast_review_day` |
  * | `variance_review` | Same day as forecast review | prior week + 4-week trend snapshot |
@@ -254,6 +254,7 @@ export async function syncHomeInboxRules(
       id,
       project_id,
       created_at,
+      integration_state,
       integrations (
         integration_code,
         integrating_with,
@@ -262,7 +263,8 @@ export async function syncHomeInboxRules(
       )
     `,
     )
-    .in("project_id", projectIds);
+    .in("project_id", projectIds)
+    .neq("integration_state", "removed_from_scope");
 
   if (piErr) {
     console.error("[home-inbox] project_integrations load failed", piErr);

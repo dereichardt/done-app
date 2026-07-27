@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { formatIntegrationDefinitionDisplayName } from "@/lib/integration-metadata";
+import {
+  formatIntegrationDefinitionDisplayName,
+  isIntegrationCountedInScope,
+} from "@/lib/integration-metadata";
 import {
   currentSundayWeekYmd,
   type ForecastPhaseInput,
@@ -172,6 +175,7 @@ type IntegrationSourceRow = {
   id: string;
   project_id?: string;
   estimated_effort_hours: number | string | null;
+  integration_state?: string | null;
   integrations:
     | {
         name?: string | null;
@@ -273,14 +277,16 @@ function buildProjectDTO(args: {
               : null,
         },
       ]
-    : args.integrations.map((row) => {
-        const hours = row.estimated_effort_hours != null ? Number(row.estimated_effort_hours) : null;
-        return {
-          key: row.id,
-          label: integrationTitle(row),
-          estimatedEffortHours: hours != null && Number.isFinite(hours) ? hours : null,
-        };
-      });
+    : args.integrations
+        .filter((row) => isIntegrationCountedInScope(row.integration_state ?? "active"))
+        .map((row) => {
+          const hours = row.estimated_effort_hours != null ? Number(row.estimated_effort_hours) : null;
+          return {
+            key: row.id,
+            label: integrationTitle(row),
+            estimatedEffortHours: hours != null && Number.isFinite(hours) ? hours : null,
+          };
+        });
   const hours: ForecastHoursCellDTO[] = hoursRows.map((row) => ({
     week_start_date: String(row.week_start_date).slice(0, 10),
     hours: Math.max(0, Math.round(Number(row.hours) || 0)),
@@ -408,6 +414,7 @@ export async function loadForecastProjectDTO(
           `
           id,
           estimated_effort_hours,
+          integration_state,
           integrations (
             name,
             integration_code,
@@ -553,6 +560,7 @@ export async function loadAllActiveForecastProjects(
           id,
           project_id,
           estimated_effort_hours,
+          integration_state,
           created_at,
           integrations (
             name,

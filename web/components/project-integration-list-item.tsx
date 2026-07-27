@@ -1,4 +1,5 @@
 import { IntegrationStatePill } from "@/components/integration-state-pill";
+import { isRemovedFromScope } from "@/lib/integration-metadata";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
 import Link from "next/link";
 
@@ -12,14 +13,18 @@ export function ProjectIntegrationListItem({
   row: SerializedProjectIntegrationRow;
 }) {
   const href = `/projects/${projectId}/integrations/${row.id}`;
+  const removed = isRemovedFromScope(row.integration_state);
   return (
-    <li className="border-t first:border-t-0" style={rowBorder}>
+    <li className={`border-t first:border-t-0 ${removed ? "opacity-55" : ""}`} style={rowBorder}>
       <Link
         href={href}
         className="flex w-full items-center gap-2 px-4 py-4 transition-colors hover:bg-[var(--app-surface-alt)] sm:gap-3"
       >
         <div className="min-w-0 flex-1">
-          <p className="font-medium leading-snug" style={{ color: "var(--app-text)" }}>
+          <p
+            className="font-medium leading-snug"
+            style={{ color: removed ? "var(--app-text-muted)" : "var(--app-text)" }}
+          >
             {row.title}
           </p>
           <p className="mt-1 text-xs text-muted-canvas">{row.deliveryProgressLabel}</p>

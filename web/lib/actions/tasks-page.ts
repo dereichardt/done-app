@@ -251,7 +251,7 @@ export async function loadTasksPageSnapshot(): Promise<{
   const [{ data: piRows, error: piErr }, { data: trackRows, error: trackErr }] = await Promise.all([
     supabase
       .from("project_integrations")
-      .select("id, project_id, integration_id")
+      .select("id, project_id, integration_id, integration_state")
       .in("project_id", projectIds),
     supabase
       .from("project_tracks")
@@ -296,44 +296,59 @@ export async function loadTasksPageSnapshot(): Promise<{
     );
   }
 
-  const integrations: TasksPageIntegration[] = (piRows ?? []).map((row) => {
-    const def = row.integration_id ? integrationDefById[row.integration_id] : undefined;
-    const label = def
-      ? formatIntegrationDefinitionDisplayName({
-          integration_code: def.integration_code,
-          integrating_with: def.integrating_with,
-          name: def.name,
-          direction: def.direction,
-        }) || (def.name ?? "Integration")
-      : "Integration";
-    const itcRaw = def?.internal_time_code != null ? String(def.internal_time_code).trim() : "";
-    return {
-      id: row.id,
-      projectId: row.project_id,
-      label,
-      internalTimeCode: itcRaw.length > 0 ? itcRaw : null,
-    };
-  });
+  const removedPiIds = new Set(
+    (piRows ?? [])
+      .filter((row) => row.integration_state === "removed_from_scope")
+      .map((row) => row.id as string),
+  );
+
+  const integrations: TasksPageIntegration[] = (piRows ?? [])
+    .filter((row) => row.integration_state !== "removed_from_scope")
+    .map((row) => {
+      const def = row.integration_id ? integrationDefById[row.integration_id] : undefined;
+      const label = def
+        ? formatIntegrationDefinitionDisplayName({
+            integration_code: def.integration_code,
+            integrating_with: def.integrating_with,
+            name: def.name,
+            direction: def.direction,
+          }) || (def.name ?? "Integration")
+        : "Integration";
+      const itcRaw = def?.internal_time_code != null ? String(def.internal_time_code).trim() : "";
+      return {
+        id: row.id,
+        projectId: row.project_id,
+        label,
+        internalTimeCode: itcRaw.length > 0 ? itcRaw : null,
+      };
+    });
 
   const integrationLabelByPiId = new Map(integrations.map((i) => [i.id, i.label] as const));
 
-  const projectTracks: TasksPageTrack[] = (trackRows ?? []).map((row) => {
-    const isIntegration = row.kind === "integration";
-    const integrationLabel =
-      row.project_integration_id != null
-        ? integrationLabelByPiId.get(row.project_integration_id) ?? null
-        : null;
-    const name = (row.name ?? "").trim();
-    return {
-      id: row.id,
-      projectId: row.project_id,
-      kind: isIntegration ? "integration" : "project_management",
-      label: isIntegration
-        ? ((integrationLabel ?? name) || "Integration")
-        : name || "Project Management",
-      projectIntegrationId: row.project_integration_id ?? null,
-    };
-  });
+  const projectTracks: TasksPageTrack[] = (trackRows ?? [])
+    .filter((row) => {
+      if (row.kind === "integration" && row.project_integration_id) {
+        return !removedPiIds.has(row.project_integration_id);
+      }
+      return true;
+    })
+    .map((row) => {
+      const isIntegration = row.kind === "integration";
+      const integrationLabel =
+        row.project_integration_id != null
+          ? integrationLabelByPiId.get(row.project_integration_id) ?? null
+          : null;
+      const name = (row.name ?? "").trim();
+      return {
+        id: row.id,
+        projectId: row.project_id,
+        kind: isIntegration ? "integration" : "project_management",
+        label: isIntegration
+          ? ((integrationLabel ?? name) || "Integration")
+          : name || "Project Management",
+        projectIntegrationId: row.project_integration_id ?? null,
+      };
+    });
 
   const internalFilterTracks: TasksPageTrack[] = internalBlock.internalDestinations.map((d) => ({
     id: d.id,

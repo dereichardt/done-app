@@ -1,4 +1,5 @@
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
+import { isRemovedFromScope } from "@/lib/integration-metadata";
 import { buildFunctionalAreaLookupData } from "@/lib/functional-area-grouping";
 import { todayISO } from "@/lib/project-phase-status";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
@@ -338,7 +339,7 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
         updates={updates}
       />
 
-      <section className="mt-8">
+      <section className={`mt-8 ${isRemovedFromScope(row.integration_state) ? "opacity-55" : ""}`}>
         <div className="flex flex-col gap-2">
           <h2 className="section-heading">Tasks</h2>
           <div className="h-[min(40rem,65vh)] max-h-[85vh] min-h-0 shrink-0">
@@ -356,14 +357,20 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
               finishSessionIntegrationLabel={integrationDisplayTitle}
               finishSessionProjectLabel={project.customer_name ?? ""}
               todayIso={userTodayIso}
+              taskCreateDisabled={isRemovedFromScope(row.integration_state)}
             />
           </div>
         </div>
       </section>
 
-      <section className="mt-8 mb-12">
+      <section className={`mt-8 mb-12 ${isRemovedFromScope(row.integration_state) ? "opacity-55" : ""}`}>
         <div className="flex flex-col gap-2">
           <h2 className="section-heading">Effort</h2>
+          {isRemovedFromScope(row.integration_state) ? (
+            <p className="text-sm text-muted-canvas">
+              Effort is locked while this integration is removed from scope. Past actuals remain visible.
+            </p>
+          ) : null}
           <div className="max-h-[85vh] min-h-[min(28rem,55vh)] shrink-0">
             <IntegrationEffortSection
               className="h-full min-h-0 overflow-y-auto"
@@ -375,6 +382,7 @@ export default async function ProjectIntegrationDetailPage({ params }: PageProps
               }}
               initialEstimatedEffortHours={estimatedEffortHoursNorm}
               sessions={effortSessions}
+              readOnly={isRemovedFromScope(row.integration_state)}
             />
           </div>
         </div>

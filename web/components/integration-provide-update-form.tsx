@@ -5,6 +5,7 @@ import { type RefObject } from "react";
 
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import {
+  integrationStateShowsReason,
   projectDeliveryProgressSelectOptions,
   projectIntegrationStateSelectOptions,
 } from "@/lib/integration-metadata";
@@ -76,7 +77,7 @@ export function IntegrationProvideUpdateFormFields({
   submitError,
   hideIntegrationHeading = false,
 }: Props) {
-  const showReason = draft.integration_state === "blocked" || draft.integration_state === "on_hold";
+  const showReason = integrationStateShowsReason(draft.integration_state);
 
   const titleContent = headingAsLinkHref ? (
     <Link
@@ -137,7 +138,7 @@ export function IntegrationProvideUpdateFormFields({
 
         {showReason ? (
           <label className="flex flex-col gap-1 text-xs font-medium" style={{ color: "var(--app-text-muted)" }}>
-            Blocked / on hold reason
+            Reason
             <textarea
               className="input-canvas min-h-[4.5rem] resize-y"
               rows={3}

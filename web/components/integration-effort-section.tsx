@@ -108,11 +108,14 @@ export function IntegrationEffortSection({
   initialEstimatedEffortHours,
   sessions,
   className = "",
+  readOnly = false,
 }: {
   effortTarget: IntegrationEffortTarget;
   initialEstimatedEffortHours: number | null;
   sessions: EffortSessionInput[];
   className?: string;
+  /** When true, estimate and manual-entry editing are disabled (history remains visible). */
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [view, setView] = useState<EffortView>("week");
@@ -243,6 +246,7 @@ export function IntegrationEffortSection({
   } | null>(null);
 
   const openCreateModal = useCallback((dayYmd: string, startSlot: number) => {
+    if (readOnly) return;
     const start = clamp(startSlot, 0, 95);
     const end = clamp(start + 2, 1, 95);
     setCreateDraft({
@@ -258,9 +262,10 @@ export function IntegrationEffortSection({
       error: null,
     });
     requestAnimationFrame(() => createDialogRef.current?.showModal());
-  }, []);
+  }, [readOnly]);
 
   const openEditManualModal = useCallback((b: CalendarBlock) => {
+    if (readOnly) return;
     const startSlot = clamp(Math.round(b.startMsInDay / (15 * 60_000)), 0, 95);
     const endSlot = clamp(Math.round(b.endMsInDay / (15 * 60_000)), 1, 95);
     setCreateDraft({
@@ -276,7 +281,7 @@ export function IntegrationEffortSection({
       error: null,
     });
     requestAnimationFrame(() => createDialogRef.current?.showModal());
-  }, []);
+  }, [readOnly]);
 
   const closeCreateModal = useCallback(() => {
     createDialogRef.current?.close();
@@ -475,7 +480,7 @@ export function IntegrationEffortSection({
                 </div>
               )}
             </div>
-            {!estimateEditing ? (
+            {!estimateEditing && !readOnly ? (
               <button
                 type="button"
                 className="hover-reveal-edit-btn border bg-[var(--app-surface)] text-[var(--app-text-muted)]"

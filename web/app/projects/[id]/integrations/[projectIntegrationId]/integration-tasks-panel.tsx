@@ -2018,6 +2018,7 @@ export function IntegrationTasksPanel({
   surface = "card",
   onClientTaskSnapshotInvalidate,
   internalTaskCreate,
+  taskCreateDisabled = false,
 }: {
   projectIntegrationId?: string;
   projectTrackId: string;
@@ -2044,6 +2045,8 @@ export function IntegrationTasksPanel({
    */
   onClientTaskSnapshotInvalidate?: () => void | Promise<void>;
   internalTaskCreate?: IntegrationTasksPanelInternalCreate;
+  /** When true, hide quick-add (e.g. integration removed from scope). */
+  taskCreateDisabled?: boolean;
 }) {
   const router = useRouter();
 
@@ -2443,13 +2446,19 @@ export function IntegrationTasksPanel({
           {workSessionActionError}
         </p>
       ) : null}
-      <TaskQuickAdd
-        mode="integration"
-        projectTrackId={projectTrackId}
-        internalCreate={internalTaskCreate ? panelInternalCreateToQuickAdd(internalTaskCreate) : undefined}
-        todayIso={todayIso}
-        onCreated={refreshTaskSnapshotAndRoute}
-      />
+      {taskCreateDisabled ? (
+        <p className="mb-2 shrink-0 text-sm text-muted-canvas">
+          Task creation is disabled while this integration is removed from scope.
+        </p>
+      ) : (
+        <TaskQuickAdd
+          mode="integration"
+          projectTrackId={projectTrackId}
+          internalCreate={internalTaskCreate ? panelInternalCreateToQuickAdd(internalTaskCreate) : undefined}
+          todayIso={todayIso}
+          onCreated={refreshTaskSnapshotAndRoute}
+        />
+      )}
 
       <div className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="mb-3 flex shrink-0 items-center justify-between gap-3">

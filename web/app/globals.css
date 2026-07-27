@@ -59,6 +59,8 @@
   --app-state-blocked-fg: #9a3412;
   --app-state-completed-surface: #e0e7ff;
   --app-state-completed-fg: #312e81;
+  --app-state-removed-surface: var(--app-surface-alt);
+  --app-state-removed-fg: var(--app-text-muted);
 
   /* Project color palette (15 choices): hue × shade. Used for project header gradient + pickers. */
   /* Shade tuning: middle = “base”, top = not-too-dark, bottom = pale */
@@ -1541,6 +1543,11 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
 .integration-state-pill--completed {
   background: var(--app-state-completed-surface);
   color: var(--app-state-completed-fg);
+}
+
+.integration-state-pill--removed_from_scope {
+  background: var(--app-state-removed-surface);
+  color: var(--app-state-removed-fg);
 }
 
 /* Task priority pills: base metrics match .integration-state-pill (see above). */

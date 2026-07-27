@@ -124,7 +124,13 @@ export const PROJECT_DELIVERY_PROGRESS_VALUES = [
 ] as const;
 export type ProjectDeliveryProgress = (typeof PROJECT_DELIVERY_PROGRESS_VALUES)[number];
 
-export const PROJECT_INTEGRATION_STATE_VALUES = ["active", "blocked", "on_hold", "completed"] as const;
+export const PROJECT_INTEGRATION_STATE_VALUES = [
+  "active",
+  "blocked",
+  "on_hold",
+  "completed",
+  "removed_from_scope",
+] as const;
 export type ProjectIntegrationState = (typeof PROJECT_INTEGRATION_STATE_VALUES)[number];
 
 const DELIVERY_PROGRESS_LABELS: Record<ProjectDeliveryProgress, string> = {
@@ -146,6 +152,7 @@ const INTEGRATION_STATE_LABELS: Record<ProjectIntegrationState, string> = {
   blocked: "Blocked",
   on_hold: "On Hold",
   completed: "Completed",
+  removed_from_scope: "Removed from scope",
 };
 
 export function isDeliveryProgress(v: string): v is ProjectDeliveryProgress {
@@ -154,6 +161,21 @@ export function isDeliveryProgress(v: string): v is ProjectDeliveryProgress {
 
 export function isIntegrationState(v: string): v is ProjectIntegrationState {
   return (PROJECT_INTEGRATION_STATE_VALUES as readonly string[]).includes(v);
+}
+
+export function isRemovedFromScope(state: string | null | undefined): boolean {
+  return String(state ?? "").trim() === "removed_from_scope";
+}
+
+/** True for states that still count toward in-scope metrics (excludes removed_from_scope). */
+export function isIntegrationCountedInScope(state: string | null | undefined): boolean {
+  return isIntegrationState(String(state ?? "").trim()) && !isRemovedFromScope(state);
+}
+
+/** States that show an optional reason field in status editors. */
+export function integrationStateShowsReason(state: string | null | undefined): boolean {
+  const s = String(state ?? "").trim();
+  return s === "blocked" || s === "on_hold" || s === "removed_from_scope";
 }
 
 export function formatDeliveryProgressLabel(value: string): string {

@@ -10,6 +10,7 @@ import {
   seedIntegrationDrafts,
 } from "@/components/integration-provide-update-form";
 import { submitProvideUpdateBatch, type ProvideUpdateEntry } from "@/lib/actions/integration-bulk-updates";
+import { integrationStateShowsReason } from "@/lib/integration-metadata";
 import type { SerializedProjectIntegrationRow } from "@/lib/project-integration-row";
 
 export function ProvideUpdateWizard({
@@ -81,7 +82,7 @@ export function ProvideUpdateWizard({
 
     const entries: ProvideUpdateEntry[] = integrationRows.map((row) => {
       const d = drafts[row.id] ?? seedIntegrationDrafts([row])[row.id];
-      const showReason = d.integration_state === "blocked" || d.integration_state === "on_hold";
+      const showReason = integrationStateShowsReason(d.integration_state);
       return {
         projectIntegrationId: row.id,
         delivery_progress: d.delivery_progress,

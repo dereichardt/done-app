@@ -16,6 +16,8 @@ type DeliveryTrackProps = {
   value: string;
   transitions: DeliveryProgressTransitionRow[];
   onChange: (next: string) => void;
+  /** When true, show progress as static history (no step changes). */
+  readOnly?: boolean;
 };
 
 export function IntegrationDeliveryProgressTrack({
@@ -25,6 +27,7 @@ export function IntegrationDeliveryProgressTrack({
   value,
   transitions,
   onChange,
+  readOnly = false,
 }: DeliveryTrackProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveGen = useRef(0);
@@ -79,6 +82,7 @@ export function IntegrationDeliveryProgressTrack({
 
   const patchDelivery = useCallback(
     (next: string) => {
+      if (readOnly) return;
       const gen = ++saveGen.current;
       onChange(next);
       setSaveError(null);
@@ -96,10 +100,11 @@ export function IntegrationDeliveryProgressTrack({
         setSaveError(null);
       })();
     },
-    [integrationState, integrationStateReason, onChange, projectIntegrationId, reasonOrNull],
+    [integrationState, integrationStateReason, onChange, projectIntegrationId, readOnly, reasonOrNull],
   );
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (readOnly) return;
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
     event.preventDefault();
     const delta = event.key === "ArrowRight" ? 1 : -1;
@@ -110,13 +115,19 @@ export function IntegrationDeliveryProgressTrack({
   };
 
   return (
-    <section className="mt-8">
+    <section className={`mt-8 ${readOnly ? "opacity-55" : ""}`}>
       <div className="flex flex-col gap-2">
         <h2 className="section-heading">Delivery Progress</h2>
+        {readOnly ? (
+          <p className="text-sm text-muted-canvas">
+            Delivery progress is locked while this integration is removed from scope.
+          </p>
+        ) : null}
         <div className="card-canvas p-3 sm:p-4">
           <div
-            role="radiogroup"
+            role={readOnly ? "group" : "radiogroup"}
             aria-label="Delivery progress timeline"
+            aria-disabled={readOnly || undefined}
             className="relative overflow-x-auto pt-2 pb-1"
             onKeyDown={handleKeyDown}
           >
@@ -144,32 +155,42 @@ export function IntegrationDeliveryProgressTrack({
                       ? `Completed on ${formatIntegrationUpdateWhen(completionMeta.completedAt)}`
                       : "Completed date unavailable";
 
+                  const nodeStyle = {
+                    borderColor: completed
+                      ? "var(--app-text)"
+                      : current
+                        ? "var(--app-action)"
+                        : milestoneUpcoming
+                          ? "var(--app-text-muted)"
+                          : "var(--app-border)",
+                    borderStyle: current ? "dotted" : "solid",
+                    borderWidth: current || milestoneUpcoming ? "2px" : "1px",
+                    background: completed
+                      ? "var(--app-text)"
+                      : current
+                        ? "color-mix(in oklab, var(--app-action) 14%, var(--app-surface) 86%)"
+                        : "var(--app-surface)",
+                  } as const;
+
                   return (
                     <li key={step} className="flex min-w-[7.5rem] flex-col items-center gap-1.5 text-center">
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={current}
-                        aria-label={`${label}. ${stateLabel}.`}
-                        className={`group relative inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] transition-[background-color,border-color,box-shadow] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${current ? "active-work-session-indicator--live focus-visible:outline-[var(--app-action)]" : "focus-visible:outline-[var(--app-focus)]"}`}
-                        style={{
-                          borderColor: completed
-                            ? "var(--app-text)"
-                            : current
-                              ? "var(--app-action)"
-                              : milestoneUpcoming
-                                ? "var(--app-text-muted)"
-                                : "var(--app-border)",
-                          borderStyle: current ? "dotted" : "solid",
-                          borderWidth: current || milestoneUpcoming ? "2px" : "1px",
-                          background: completed
-                            ? "var(--app-text)"
-                            : current
-                              ? "color-mix(in oklab, var(--app-action) 14%, var(--app-surface) 86%)"
-                              : "var(--app-surface)",
-                        }}
-                        onClick={() => patchDelivery(step)}
-                      />
+                      {readOnly ? (
+                        <span
+                          aria-hidden
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-full border bg-[var(--app-surface)]"
+                          style={nodeStyle}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={current}
+                          aria-label={`${label}. ${stateLabel}.`}
+                          className={`group relative inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border bg-[var(--app-surface)] transition-[background-color,border-color,box-shadow] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${current ? "active-work-session-indicator--live focus-visible:outline-[var(--app-action)]" : "focus-visible:outline-[var(--app-focus)]"}`}
+                          style={nodeStyle}
+                          onClick={() => patchDelivery(step)}
+                        />
+                      )}
                       {current ? (
                         <span
                           className="mt-2 inline-flex min-h-[2rem] max-w-full items-center justify-center text-xs leading-tight font-semibold"

@@ -68,7 +68,8 @@ export async function loadHomeSummary(
     const { count: integCount, error: integErr } = await supabase
       .from("project_integrations")
       .select("*", { count: "exact", head: true })
-      .in("project_id", projectIds);
+      .in("project_id", projectIds)
+      .neq("integration_state", "removed_from_scope");
     if (integErr) {
       console.error("[home-summary] integrations count failed", integErr);
     } else {
