@@ -154,3 +154,50 @@ export function EditIcon({ size = 16, className = "shrink-0" }: ActionIconProps)
     </svg>
   );
 }
+
+/** Up arrow — e.g. over estimate. */
+export function ArrowUpIcon({ size = 12, className = "shrink-0" }: ActionIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 19V5m0 0-5 5m5-5 5 5"
+      />
+    </svg>
+  );
+}
+
+/** Down arrow — e.g. under estimate. */
+export function ArrowDownIcon({ size = 12, className = "shrink-0" }: ActionIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 5v14m0 0 5-5m-5 5-5-5"
+      />
+    </svg>
+  );
+}
+
+/** Horizontal line — e.g. on estimate. */
+export function MinusIcon({ size = 12, className = "shrink-0" }: ActionIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        d="M5 12h14"
+      />
+    </svg>
+  );
+}

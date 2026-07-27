@@ -2,7 +2,10 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
+import {
+  EstimateVarianceLabel,
+  ForecastEstimateVariancePanel,
+} from "@/components/forecast-estimate-variance";
 import {
   formatLocalYmd,
   formatEffortHoursLabel,
@@ -200,26 +203,21 @@ export function ProjectForecastCard({
                       ? "Over estimate"
                       : "Estimate"}
                 </span>
-                <div className="flex items-center gap-1">
-                  <span
-                    className={`text-sm font-medium tabular-nums ${
-                      variance.kind === "over"
-                        ? "text-[var(--app-warning)]"
-                        : "text-[var(--app-text)]"
-                    }`}
-                    title={variance.label}
-                  >
-                    {variance.kind === "on" ? "0h" : formatSummaryHours(variance.absHours)}
-                  </span>
-                  {pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
-                    <ForecastEstimateVariancePanel
-                      summary={pastPhaseSummary}
-                      inline
-                      valueOnly
-                      hideValue
-                    />
-                  ) : null}
-                </div>
+                <EstimateVarianceLabel
+                  variance={variance}
+                  className="text-sm"
+                  formatHours={formatSummaryHours}
+                  trailing={
+                    pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
+                      <ForecastEstimateVariancePanel
+                        summary={pastPhaseSummary}
+                        inline
+                        valueOnly
+                        hideValue
+                      />
+                    ) : null
+                  }
+                />
               </div>
             </div>
           </div>

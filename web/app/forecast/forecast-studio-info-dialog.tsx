@@ -199,8 +199,9 @@ export function ForecastStudioInfoDialog() {
                   <div>
                     <dt className="font-medium text-[var(--app-text)]">Estimate variance</dt>
                     <dd>
-                      Estimated − Actuals − Forecast. A positive result is under estimate; a
-                      negative result is over estimate.
+                      Estimated − Actuals − Forecast. A positive result is under estimate (down
+                      arrow); a negative result is over estimate (up arrow). On estimate shows
+                      a horizontal line beside 0h. Hours are shown without a color highlight.
                     </dd>
                   </div>
                 </dl>

@@ -12,7 +12,10 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { PinIcon } from "@/components/action-icons";
-import { ForecastEstimateVariancePanel } from "@/components/forecast-estimate-variance";
+import {
+  EstimateVarianceLabel,
+  ForecastEstimateVariancePanel,
+} from "@/components/forecast-estimate-variance";
 import { GenerateForecastDialog } from "@/components/generate-forecast-dialog";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
 import {
@@ -1316,69 +1319,27 @@ export function ForecastStudio({
                                 ? "Over estimate"
                                 : "Estimate"}
                           </div>
-                          {showSessionTotals &&
-                          originalVariance.label !== liveVariance.label ? (
-                            <div
-                              className={`flex min-w-0 items-center gap-1 truncate text-xs font-medium tabular-nums ${
-                                liveVariance.kind === "over"
-                                  ? "rounded-md bg-[color-mix(in_oklab,var(--app-warning)_16%,var(--app-surface))] px-1 py-0.5 text-[var(--app-warning)]"
-                                  : "text-[var(--app-text)]"
-                              }`}
-                              title={`Original ${originalVariance.label} → ${liveVariance.label}`}
-                              role={liveVariance.kind === "over" ? "status" : undefined}
-                            >
-                              <span className="min-w-0 truncate">
-                                <span className="line-through opacity-70">
-                                  {originalVariance.kind === "on"
-                                    ? "0h"
-                                    : formatSummaryHours(originalVariance.absHours)}
-                                </span>
-                                {" → "}
-                                <span>
-                                  {liveVariance.kind === "on"
-                                    ? "0h"
-                                    : formatSummaryHours(liveVariance.absHours)}
-                                </span>
-                              </span>
-                              {pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
+                          <EstimateVarianceLabel
+                            variance={liveVariance}
+                            previous={
+                              showSessionTotals &&
+                              originalVariance.label !== liveVariance.label
+                                ? originalVariance
+                                : undefined
+                            }
+                            formatHours={formatSummaryHours}
+                            role={liveVariance.kind === "over" ? "status" : undefined}
+                            trailing={
+                              pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
                                 <ForecastEstimateVariancePanel
                                   summary={pastPhaseSummary}
                                   inline
                                   valueOnly
                                   hideValue
                                 />
-                              ) : null}
-                            </div>
-                          ) : (
-                            <div
-                              className={`flex items-center gap-1 ${
-                                liveVariance.kind === "over"
-                                  ? "rounded-md bg-[color-mix(in_oklab,var(--app-warning)_16%,var(--app-surface))] px-1 py-0.5"
-                                  : ""
-                              }`}
-                            >
-                              <span
-                                className={`text-xs font-medium tabular-nums ${
-                                  liveVariance.kind === "over"
-                                    ? "text-[var(--app-warning)]"
-                                    : "text-[var(--app-text)]"
-                                }`}
-                                title={liveVariance.label}
-                              >
-                                {liveVariance.kind === "on"
-                                  ? "0h"
-                                  : formatSummaryHours(liveVariance.absHours)}
-                              </span>
-                              {pastPhaseSummary && pastPhaseSummary.pastPhaseHours > 0 ? (
-                                <ForecastEstimateVariancePanel
-                                  summary={pastPhaseSummary}
-                                  inline
-                                  valueOnly
-                                  hideValue
-                                />
-                              ) : null}
-                            </div>
-                          )}
+                              ) : null
+                            }
+                          />
                         </div>
                       </div>
                     ) : (

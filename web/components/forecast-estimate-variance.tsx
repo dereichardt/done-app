@@ -1,11 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type AriaRole, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { ArrowDownIcon, ArrowUpIcon, MinusIcon } from "@/components/action-icons";
 import type {
   EstimateVariance,
   ForecastPastPhaseSummary,
 } from "@/lib/project-forecast";
+
+function formatVarianceHours(hours: number): string {
+  if (!Number.isFinite(hours) || hours <= 0) return "0h";
+  return `${Math.round(hours)}h`;
+}
+
+function VarianceKindArrow({ kind }: { kind: EstimateVariance["kind"] }) {
+  const iconClass = "shrink-0 text-[var(--app-text-muted)]";
+  if (kind === "over") {
+    return <ArrowUpIcon size={12} className={iconClass} />;
+  }
+  if (kind === "under") {
+    return <ArrowDownIcon size={12} className={iconClass} />;
+  }
+  return <MinusIcon size={12} className={iconClass} />;
+}
 
 function InfoIcon({ className }: { className?: string }) {
   return (
@@ -162,22 +179,59 @@ function PastPhaseInfoHover({ summary }: { summary: ForecastPastPhaseSummary }) 
   );
 }
 
-/** Compact variance label for studio / cards. */
+/**
+ * Compact variance value for studio / cards: muted up/down arrow + neutral hours.
+ * No warning color chrome — direction is conveyed by the arrow and parent subheading.
+ */
 export function EstimateVarianceLabel({
   variance,
+  previous,
   className,
+  trailing,
+  formatHours = formatVarianceHours,
+  role,
 }: {
   variance: EstimateVariance;
+  /** When set and different from live, show struck previous hours → live. */
+  previous?: EstimateVariance;
   className?: string;
+  /** Optional control after hours (e.g. past-phase info). */
+  trailing?: ReactNode;
+  formatHours?: (hours: number) => string;
+  role?: AriaRole;
 }) {
-  const tone =
-    variance.kind === "over"
-      ? "text-[var(--app-warning)]"
-      : "text-[var(--app-text)]";
+  const showPrevious =
+    previous != null && previous.label !== variance.label;
+  const hoursText =
+    variance.kind === "on" ? "0h" : formatHours(variance.absHours);
+  const previousHoursText =
+    previous == null
+      ? null
+      : previous.kind === "on"
+        ? "0h"
+        : formatHours(previous.absHours);
+  const title = showPrevious
+    ? `Original ${previous.label} → ${variance.label}`
+    : variance.label;
+
   return (
-    <span className={`font-medium tabular-nums ${tone} ${className ?? ""}`}>
-      {variance.kind === "on" ? "0h" : `${variance.absHours}h`}
-    </span>
+    <div
+      className={`flex min-w-0 items-center gap-1 font-medium text-[var(--app-text)] ${className ?? "text-xs"}`}
+      title={title}
+      role={role}
+    >
+      <span className="inline-flex min-w-0 items-center gap-1 truncate tabular-nums">
+        {showPrevious ? (
+          <>
+            <span className="line-through opacity-70">{previousHoursText}</span>
+            <span aria-hidden>→</span>
+          </>
+        ) : null}
+        <VarianceKindArrow kind={variance.kind} />
+        <span>{hoursText}</span>
+      </span>
+      {trailing}
+    </div>
   );
 }
 
