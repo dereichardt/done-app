@@ -400,7 +400,26 @@ export function ActualsCalendarGrid({
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    el.scrollTop = normalStartHour * hourHeight;
+
+    const applyWorkdayScroll = () => {
+      el.scrollTop = normalStartHour * hourHeight;
+    };
+
+    // Hidden parents (e.g. keep-alive calendar tab) have zero height; scrollTop is a no-op until visible.
+    let lastObservedHeight = el.clientHeight;
+    if (lastObservedHeight > 0) {
+      applyWorkdayScroll();
+    }
+
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      if (lastObservedHeight === 0 && h > 0) {
+        applyWorkdayScroll();
+      }
+      lastObservedHeight = h;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [dayYmdKey, normalStartHour, hourHeight]);
 
   useEffect(() => {

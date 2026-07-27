@@ -201,10 +201,76 @@ export type MyActiveWorkSessionListItem = {
   project_integration_id: string | null;
   project_id: string | null;
   customer_name: string | null;
+  /** Display line for the task’s track/integration (populated for snapshot indicator mapping). */
+  integration_label: string;
+  /** Display project name (populated for snapshot indicator mapping). */
+  project_name: string;
   started_at: string;
   paused_ms_accumulated: number;
   pause_started_at: string | null;
 };
+
+/** Active timer + labels for integration/project row indicators (at most one per signed-in user). */
+export type ActiveWorkSessionIndicatorDTO = {
+  scope: "integration" | "internal";
+  task_id: string;
+  project_track_id: string | null;
+  project_integration_id: string | null;
+  project_id: string | null;
+  started_at: string;
+  paused_ms_accumulated: number;
+  pause_started_at: string | null;
+  task_title: string;
+  integration_label: string;
+  project_name: string;
+};
+
+function listItemToActiveWorkSessionIndicator(
+  s: MyActiveWorkSessionListItem,
+): ActiveWorkSessionIndicatorDTO {
+  return {
+    scope: s.scope,
+    task_id: s.task_id,
+    project_track_id: s.project_track_id,
+    project_integration_id: s.project_integration_id,
+    project_id: s.project_id,
+    started_at: s.started_at,
+    paused_ms_accumulated: s.paused_ms_accumulated,
+    pause_started_at: s.pause_started_at,
+    task_title: s.task_title,
+    integration_label: s.integration_label,
+    project_name: s.project_name,
+  };
+}
+
+async function integrationLabelForProjectIntegration(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  projectIntegrationId: string | null,
+): Promise<string> {
+  if (!projectIntegrationId) return "Integration";
+  const { data: pi } = await supabase
+    .from("project_integrations")
+    .select("integration_id")
+    .eq("id", projectIntegrationId)
+    .maybeSingle();
+  if (!pi?.integration_id) return "Integration";
+  const { data: def } = await supabase
+    .from("integrations")
+    .select("name, integration_code, integrating_with, direction")
+    .eq("id", pi.integration_id)
+    .maybeSingle();
+  if (!def) return "Integration";
+  return (
+    formatIntegrationDefinitionDisplayName({
+      integration_code: def.integration_code,
+      integrating_with: def.integrating_with,
+      name: def.name,
+      direction: def.direction,
+    }) ||
+    def.name ||
+    "Integration"
+  );
+}
 
 export async function listMyActiveWorkSessions(): Promise<{
   sessions?: MyActiveWorkSessionListItem[];
@@ -239,15 +305,21 @@ export async function listMyActiveWorkSessions(): Promise<{
 
     if (trackErr || !track) return { sessions: [] };
 
-    const { data: project, error: projErr } = await supabase
-      .from("projects")
-      .select("customer_name")
-      .eq("id", track.project_id)
-      .eq("owner_id", user.id)
-      .maybeSingle();
+    const [projectRes, integrationLabel] = await Promise.all([
+      supabase
+        .from("projects")
+        .select("customer_name")
+        .eq("id", track.project_id)
+        .eq("owner_id", user.id)
+        .maybeSingle(),
+      integrationLabelForProjectIntegration(supabase, track.project_integration_id ?? null),
+    ]);
 
+    const { data: project, error: projErr } = projectRes;
     if (projErr) return { error: projErr.message };
     if (!project) return { sessions: [] };
+
+    const projectName = (project.customer_name ?? "").trim() || "Project";
 
     return {
       sessions: [
@@ -259,6 +331,8 @@ export async function listMyActiveWorkSessions(): Promise<{
           project_integration_id: track.project_integration_id ?? null,
           project_id: track.project_id,
           customer_name: project.customer_name ?? null,
+          integration_label: integrationLabel,
+          project_name: projectName,
           started_at: activeRow.started_at,
           paused_ms_accumulated: Number(activeRow.paused_ms_accumulated ?? 0),
           pause_started_at: activeRow.pause_started_at,
@@ -293,6 +367,8 @@ export async function listMyActiveWorkSessions(): Promise<{
         project_integration_id: null,
         project_id: null,
         customer_name: null,
+        integration_label: ctx.integrationLabel,
+        project_name: ctx.projectName,
         started_at: internalActive.started_at,
         paused_ms_accumulated: Number(internalActive.paused_ms_accumulated ?? 0),
         pause_started_at: internalActive.pause_started_at,
@@ -301,57 +377,22 @@ export async function listMyActiveWorkSessions(): Promise<{
   };
 }
 
-/** Active timer + labels for integration/project row indicators (at most one per signed-in user). */
-export type ActiveWorkSessionIndicatorDTO = {
-  scope: "integration" | "internal";
-  task_id: string;
-  project_track_id: string | null;
-  project_integration_id: string | null;
-  project_id: string | null;
-  started_at: string;
-  paused_ms_accumulated: number;
-  pause_started_at: string | null;
-  task_title: string;
-  integration_label: string;
-  project_name: string;
-};
+export async function loadActiveWorkSessionIndicatorForSnapshot(): Promise<{
+  indicator?: ActiveWorkSessionIndicatorDTO | null;
+  error?: string;
+}> {
+  const listRes = await listMyActiveWorkSessions();
+  if (listRes.error) return { error: listRes.error };
+  const sessions = listRes.sessions ?? [];
+  if (sessions.length === 0) return { indicator: null };
+  return { indicator: listItemToActiveWorkSessionIndicator(sessions[0]) };
+}
 
 export async function loadActiveWorkSessionIndicator(): Promise<{
   indicator?: ActiveWorkSessionIndicatorDTO | null;
   error?: string;
 }> {
-  const user = await getCurrentUser();
-  const supabase = await createClient();
-
-  const listRes = await listMyActiveWorkSessions();
-  if (listRes.error) return { error: listRes.error };
-  const sessions = listRes.sessions ?? [];
-  if (sessions.length === 0) return { indicator: null };
-
-  const s = sessions[0];
-  const ctx =
-    s.scope === "integration"
-      ? await loadGlobalActiveIntegrationTaskFinishContext(s.task_id)
-      : user
-        ? await loadInternalTaskFinishContextWithSupabase(supabase, user.id, s.task_id)
-        : null;
-  if (!ctx) return { indicator: null };
-
-  return {
-    indicator: {
-      scope: s.scope,
-      task_id: s.task_id,
-      project_track_id: s.project_track_id,
-      project_integration_id: s.project_integration_id,
-      project_id: s.project_id,
-      started_at: s.started_at,
-      paused_ms_accumulated: s.paused_ms_accumulated,
-      pause_started_at: s.pause_started_at,
-      task_title: ctx.title,
-      integration_label: ctx.integrationLabel,
-      project_name: ctx.projectName,
-    },
-  };
+  return loadActiveWorkSessionIndicatorForSnapshot();
 }
 
 export type IntegrationTaskSnapshotTask = {
@@ -777,7 +818,15 @@ export async function createIntegrationTask(
   return {};
 }
 
-export async function toggleIntegrationTaskCompletion(taskId: string): Promise<{ error?: string }> {
+export type TaskMutationOptions = {
+  /** When false, skip revalidatePath (caller owns optimistic UI). Default true. */
+  revalidate?: boolean;
+};
+
+export async function toggleIntegrationTaskCompletion(
+  taskId: string,
+  opts?: TaskMutationOptions,
+): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -816,13 +865,16 @@ export async function toggleIntegrationTaskCompletion(taskId: string): Promise<{
       .eq("integration_task_id", taskId);
   }
 
-  await revalidateTrackPaths(track);
+  if (opts?.revalidate !== false) {
+    await revalidateTrackPaths(track);
+  }
   return {};
 }
 
 export async function updateIntegrationTaskDueDate(
   taskId: string,
   formData: FormData,
+  opts?: TaskMutationOptions,
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -848,7 +900,9 @@ export async function updateIntegrationTaskDueDate(
 
   if (error) return { error: error.message };
 
-  await revalidateTrackPaths(track);
+  if (opts?.revalidate !== false) {
+    await revalidateTrackPaths(track);
+  }
   return {};
 }
 
@@ -897,7 +951,11 @@ export async function updateIntegrationTask(
   return {};
 }
 
-export async function updateIntegrationTaskTitle(taskId: string, title: string): Promise<{ error?: string }> {
+export async function updateIntegrationTaskTitle(
+  taskId: string,
+  title: string,
+  opts?: TaskMutationOptions,
+): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -922,13 +980,16 @@ export async function updateIntegrationTaskTitle(taskId: string, title: string):
 
   if (error) return { error: error.message };
 
-  await revalidateTrackPaths(track);
+  if (opts?.revalidate !== false) {
+    await revalidateTrackPaths(track);
+  }
   return {};
 }
 
 export async function updateIntegrationTaskPriority(
   taskId: string,
   priority: TaskPriority,
+  opts?: TaskMutationOptions,
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -952,11 +1013,16 @@ export async function updateIntegrationTaskPriority(
   const { error } = await supabase.from("integration_tasks").update({ priority }).eq("id", taskId);
   if (error) return { error: error.message };
 
-  await revalidateTrackPaths(track);
+  if (opts?.revalidate !== false) {
+    await revalidateTrackPaths(track);
+  }
   return {};
 }
 
-export async function deleteIntegrationTask(taskId: string): Promise<{ error?: string }> {
+export async function deleteIntegrationTask(
+  taskId: string,
+  opts?: TaskMutationOptions,
+): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -978,7 +1044,9 @@ export async function deleteIntegrationTask(taskId: string): Promise<{ error?: s
 
   if (error) return { error: error.message };
 
-  await revalidateTrackPaths(track);
+  if (opts?.revalidate !== false) {
+    await revalidateTrackPaths(track);
+  }
   return {};
 }
 
@@ -1050,7 +1118,7 @@ export async function createIntegrationTaskWorkSession(
     if (completeErr) return { error: completeErr.message };
   }
 
-  await revalidateTrackPaths(track);
+  // Skip revalidatePath — finish callers use optimistic UI (same as start/discard).
   return {};
 }
 

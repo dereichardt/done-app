@@ -347,7 +347,7 @@ export async function createInternalTaskWorkSession(
     if (completeErr) return { error: completeErr.message };
   }
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  // Skip revalidatePath — finish callers use optimistic UI (same as start/discard).
   return {};
 }
 
@@ -668,7 +668,10 @@ export async function createInternalTask(
   return {};
 }
 
-export async function toggleInternalTaskCompletion(taskId: string): Promise<{ error?: string }> {
+export async function toggleInternalTaskCompletion(
+  taskId: string,
+  opts?: { revalidate?: boolean },
+): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -697,13 +700,16 @@ export async function toggleInternalTaskCompletion(taskId: string): Promise<{ er
     await supabase.from("internal_task_active_work_sessions").delete().eq("user_id", user.id).eq("internal_task_id", taskId);
   }
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  if (opts?.revalidate !== false) {
+    revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  }
   return {};
 }
 
 export async function updateInternalTaskDueDate(
   taskId: string,
   formData: FormData,
+  opts?: { revalidate?: boolean },
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -720,11 +726,17 @@ export async function updateInternalTaskDueDate(
   const { error } = await supabase.from("internal_tasks").update({ due_date }).eq("id", taskId);
   if (error) return { error: error.message };
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  if (opts?.revalidate !== false) {
+    revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  }
   return {};
 }
 
-export async function updateInternalTaskTitle(taskId: string, title: string): Promise<{ error?: string }> {
+export async function updateInternalTaskTitle(
+  taskId: string,
+  title: string,
+  opts?: { revalidate?: boolean },
+): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -740,13 +752,16 @@ export async function updateInternalTaskTitle(taskId: string, title: string): Pr
   const { error } = await supabase.from("internal_tasks").update({ title: trimmed }).eq("id", taskId);
   if (error) return { error: error.message };
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  if (opts?.revalidate !== false) {
+    revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  }
   return {};
 }
 
 export async function updateInternalTaskPriority(
   taskId: string,
   priority: TaskPriority,
+  opts?: { revalidate?: boolean },
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -762,11 +777,16 @@ export async function updateInternalTaskPriority(
   const { error } = await supabase.from("internal_tasks").update({ priority }).eq("id", taskId);
   if (error) return { error: error.message };
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  if (opts?.revalidate !== false) {
+    revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  }
   return {};
 }
 
-export async function deleteInternalTask(taskId: string): Promise<{ error?: string }> {
+export async function deleteInternalTask(
+  taskId: string,
+  opts?: { revalidate?: boolean },
+): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -779,7 +799,9 @@ export async function deleteInternalTask(taskId: string): Promise<{ error?: stri
   const { error } = await supabase.from("internal_tasks").delete().eq("id", taskId);
   if (error) return { error: error.message };
 
-  revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  if (opts?.revalidate !== false) {
+    revalidateInternalAll(owned.kind === "initiative" ? owned.initiative_id : null);
+  }
   return {};
 }
 

@@ -25,11 +25,17 @@ import {
 import {
   createTasksCalendarManualEntry,
   deleteTasksCalendarManualEntry,
-  loadTasksCalendarSessions,
   rescheduleTasksCalendarSession,
   type TasksCalendarSession,
   updateTasksCalendarManualEntry,
 } from "@/lib/actions/tasks-calendar";
+import {
+  clearCalendarSessionCache,
+  computeCalendarFetchWindow,
+  ensureCalendarSessionsForWindow,
+  getCachedCalendarSessions,
+  subscribeCalendarSessionCacheCleared,
+} from "@/lib/tasks-calendar-session-cache";
 import type { TasksFiltersValue } from "./tasks-filters";
 import {
   type TasksPageProject,
@@ -40,7 +46,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DAY_MS = 86_400_000;
 const SLOT_MS = 15 * 60_000;
 
 function clamp(n: number, a: number, b: number): number {
@@ -268,24 +273,14 @@ export function TasksEffortCalendar({
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Cache by "startIso|endIso" so navigating inside the cached window is instant
-  const sessionCache = useRef<Map<string, TasksCalendarSession[]>>(new Map());
-
-  // Determine the fetch window: current period + one period pad on each side
-  const fetchWindow = useMemo(() => {
-    const padMs = scope === "month" ? 31 * DAY_MS : scope === "week" ? 7 * DAY_MS : DAY_MS;
-    const start = new Date(periodStart.getTime() - padMs);
-    const end = new Date(periodEnd.getTime() + padMs);
-    return {
-      startIso: start.toISOString(),
-      endIso: end.toISOString(),
-      cacheKey: `${start.toISOString()}|${end.toISOString()}`,
-    };
-  }, [periodStart, periodEnd, scope]);
+  const fetchWindow = useMemo(
+    () => computeCalendarFetchWindow(scope, anchorYmd),
+    [scope, anchorYmd],
+  );
 
   useEffect(() => {
-    const { startIso, endIso, cacheKey } = fetchWindow;
-    const cached = sessionCache.current.get(cacheKey);
+    const { cacheKey } = fetchWindow;
+    const cached = getCachedCalendarSessions(cacheKey);
     if (cached) {
       setAllSessions(cached);
       setLoading(false);
@@ -295,22 +290,20 @@ export function TasksEffortCalendar({
     setFetchError(null);
     let cancelled = false;
     void (async () => {
-      const res = await loadTasksCalendarSessions(startIso, endIso);
+      const res = await ensureCalendarSessionsForWindow(scope, anchorYmd);
       if (cancelled) return;
       if (res.error) {
         setFetchError(res.error);
         setLoading(false);
         return;
       }
-      const sessions = res.sessions ?? [];
-      sessionCache.current.set(cacheKey, sessions);
-      setAllSessions(sessions);
+      setAllSessions(res.sessions);
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [fetchWindow]);
+  }, [fetchWindow, scope, anchorYmd]);
 
   // ── Filter sessions ────────────────────────────────────────────────────────
   const filteredSessions = useMemo(() => {
@@ -424,21 +417,39 @@ export function TasksEffortCalendar({
   const [calendarActionError, setCalendarActionError] = useState<string | null>(null);
 
   const resetAndReload = useCallback(async () => {
-    sessionCache.current.clear();
+    clearCalendarSessionCache();
     setLoading(true);
     setFetchError(null);
-    const { startIso, endIso, cacheKey } = fetchWindow;
-    const res = await loadTasksCalendarSessions(startIso, endIso);
+    const res = await ensureCalendarSessionsForWindow(scope, anchorYmd);
     if (res.error) {
       setFetchError(res.error);
       setLoading(false);
       return;
     }
-    const sessions = res.sessions ?? [];
-    sessionCache.current.set(cacheKey, sessions);
-    setAllSessions(sessions);
+    setAllSessions(res.sessions);
     setLoading(false);
-  }, [fetchWindow]);
+  }, [scope, anchorYmd]);
+
+  // Quiet reload when another surface (e.g. finish session on list) clears the shared cache.
+  useEffect(() => {
+    let cancelled = false;
+    const unsubscribe = subscribeCalendarSessionCacheCleared(() => {
+      void (async () => {
+        const res = await ensureCalendarSessionsForWindow(scope, anchorYmd);
+        if (cancelled) return;
+        if (res.error) {
+          setFetchError(res.error);
+          return;
+        }
+        setAllSessions(res.sessions);
+        setFetchError(null);
+      })();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [scope, anchorYmd]);
 
   const resolveDefaultSelection = useCallback((): { selectedProjectId: string; projectTrackId: string } => {
     const fallbackProjectId = scopedProjects[0]?.id ?? "";

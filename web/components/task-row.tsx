@@ -216,14 +216,17 @@ const LONG_PRESS_MS = 500;
 
 export function TaskCompleteButton({
   taskId,
+  taskScope,
   isDone,
   onToggleSuccess,
   onLongPressLog,
 }: {
   taskId: string;
+  /** When known, skips an extra existence probe on the server. */
+  taskScope?: "project" | "internal";
   isDone: boolean;
-  /** When set (e.g. client-cached task list), refetch snapshot after a successful toggle. */
-  onToggleSuccess?: () => void | Promise<void>;
+  /** Called after a successful toggle with the task id. */
+  onToggleSuccess?: (taskId: string) => void | Promise<void>;
   /**
    * When set on an incomplete task, a long-press (~500ms) opens completion logging.
    * The dialog records time and then marks the task complete.
@@ -234,14 +237,14 @@ export function TaskCompleteButton({
     async (prev: { error?: string } | void, formData: FormData) => {
       void prev;
       void formData;
-      return toggleAnyTaskCompletion(taskId);
+      return toggleAnyTaskCompletion(taskId, taskScope);
     },
     {},
   );
 
   const toggleSubmitRef = useRef(false);
   const notifyToggleSuccess = useEffectEvent(() => {
-    void onToggleSuccess?.();
+    void onToggleSuccess?.(taskId);
   });
 
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -339,23 +342,25 @@ export function TaskCompleteButton({
 
 export function TaskUndoButton({
   taskId,
+  taskScope,
   onUndoSuccess,
 }: {
   taskId: string;
-  onUndoSuccess?: () => void | Promise<void>;
+  taskScope?: "project" | "internal";
+  onUndoSuccess?: (taskId: string) => void | Promise<void>;
 }) {
   const [undoState, undoAction, undoPending] = useActionState(
     async (prev: { error?: string } | void, formData: FormData) => {
       void prev;
       void formData;
-      return toggleAnyTaskCompletion(taskId);
+      return toggleAnyTaskCompletion(taskId, taskScope);
     },
     {},
   );
 
   const undoSubmitRef = useRef(false);
   const notifyUndoSuccess = useEffectEvent(() => {
-    void onUndoSuccess?.();
+    void onUndoSuccess?.(taskId);
   });
 
   void undoState;
@@ -472,12 +477,12 @@ export type TaskRowProps = {
     priority: "low" | "medium" | "high",
   ) => Promise<{ error?: string }>;
   onSaveDueDate: (taskId: string, dueDateIso: string) => Promise<{ error?: string }>;
-  /** Forwarded to TaskCompleteButton.onToggleSuccess for snapshot refresh. */
-  onAfterToggleComplete?: () => void | Promise<void>;
+  /** Called after a successful complete toggle with the task id. */
+  onAfterToggleComplete?: (taskId: string) => void | Promise<void>;
   /** Forwarded to TaskCompleteButton.onLongPressLog (open task only). */
   onLongPressCompleteLog?: (task: IntegrationTaskRow) => void;
-  /** Forwarded to TaskUndoButton.onUndoSuccess. */
-  onAfterUndo?: () => void | Promise<void>;
+  /** Called after a successful undo with the task id. */
+  onAfterUndo?: (taskId: string) => void | Promise<void>;
 };
 
 export function TaskRow({
@@ -636,6 +641,7 @@ export function TaskRow({
           <div className="flex shrink-0 items-center gap-2">
             <TaskCompleteButton
               taskId={task.id}
+              taskScope={"scope" in task ? (task as { scope?: "project" | "internal" }).scope : undefined}
               isDone={isDone}
               onToggleSuccess={onAfterToggleComplete}
               onLongPressLog={
@@ -807,7 +813,13 @@ export function TaskRow({
                   History
                 </button>
 
-                {isDone ? <TaskUndoButton taskId={task.id} onUndoSuccess={onAfterUndo} /> : null}
+                {isDone ? (
+                  <TaskUndoButton
+                    taskId={task.id}
+                    taskScope={"scope" in task ? (task as { scope?: "project" | "internal" }).scope : undefined}
+                    onUndoSuccess={onAfterUndo}
+                  />
+                ) : null}
 
                 <button
                   type="button"

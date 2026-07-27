@@ -2,7 +2,7 @@
 
 import {
   deleteIntegrationTask,
-  loadActiveWorkSessionIndicator,
+  loadActiveWorkSessionIndicatorForSnapshot,
   startOrReplaceActiveWorkSession,
   toggleIntegrationTaskCompletion,
   updateIntegrationTaskDueDate,
@@ -27,7 +27,7 @@ import {
   projectColorCssVar,
 } from "@/lib/project-colors";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { devPerfDuration } from "@/lib/dev-perf-log";
 import {
   TASKS_PAGE_INTERNAL_PROJECT_ID,
   type TaskWorkSessionHistoryRow,
@@ -191,19 +191,29 @@ export async function loadTasksPageSnapshot(): Promise<{
   snapshot?: TasksPageSnapshot;
   error?: string;
 }> {
+  const perfStart = typeof performance !== "undefined" ? performance.now() : 0;
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
   const supabase = await createClient();
   const prefsRes = await loadUserPreferences();
   const todayIso = getUserTodayIso(prefsRes.preferences.timezone);
 
-  const { data: projectRows, error: projectErr } = await supabase
-    .from("projects")
-    .select("id, customer_name, active_dashboard_order, project_color_key")
-    .eq("owner_id", user.id)
-    .is("completed_at", null)
-    .order("active_dashboard_order", { ascending: true, nullsFirst: false })
-    .order("customer_name", { ascending: true });
+  const [
+    { data: projectRows, error: projectErr },
+    internalBlock,
+  ] = await Promise.all([
+    supabase
+      .from("projects")
+      .select("id, customer_name, active_dashboard_order, project_color_key")
+      .eq("owner_id", user.id)
+      .is("completed_at", null)
+      .order("active_dashboard_order", { ascending: true, nullsFirst: false })
+      .order("customer_name", { ascending: true }),
+    (async () => {
+      await ensureInternalTracks();
+      return loadInternalWorkTasksForSnapshot(supabase, user.id);
+    })(),
+  ]);
   if (projectErr) return { error: projectErr.message };
 
   const projects: TasksPageProject[] = (projectRows ?? []).map((p) => {
@@ -216,13 +226,12 @@ export async function loadTasksPageSnapshot(): Promise<{
     };
   });
 
-  await ensureInternalTracks();
-  const internalBlock = await loadInternalWorkTasksForSnapshot(supabase, user.id);
   const snapshotProjects: TasksPageProject[] =
     internalBlock.internalProject != null ? [...projects, internalBlock.internalProject] : projects;
 
   if (projects.length === 0) {
-    const { indicator } = await loadActiveWorkSessionIndicator();
+    const { indicator } = await loadActiveWorkSessionIndicatorForSnapshot();
+    devPerfDuration("loadTasksPageSnapshot", perfStart);
     return {
       snapshot: {
         todayIso,
@@ -239,17 +248,18 @@ export async function loadTasksPageSnapshot(): Promise<{
 
   const projectIds = projects.map((p) => p.id);
 
-  const { data: piRows, error: piErr } = await supabase
-    .from("project_integrations")
-    .select("id, project_id, integration_id")
-    .in("project_id", projectIds);
+  const [{ data: piRows, error: piErr }, { data: trackRows, error: trackErr }] = await Promise.all([
+    supabase
+      .from("project_integrations")
+      .select("id, project_id, integration_id")
+      .in("project_id", projectIds),
+    supabase
+      .from("project_tracks")
+      .select("id, project_id, kind, integration_id, project_integration_id, name")
+      .in("project_id", projectIds)
+      .order("sort_order", { ascending: true }),
+  ]);
   if (piErr) return { error: piErr.message };
-
-  const { data: trackRows, error: trackErr } = await supabase
-    .from("project_tracks")
-    .select("id, project_id, kind, integration_id, project_integration_id, name")
-    .in("project_id", projectIds)
-    .order("sort_order", { ascending: true });
   if (trackErr) return { error: trackErr.message };
 
   const integrationDefIds = Array.from(
@@ -338,7 +348,8 @@ export async function loadTasksPageSnapshot(): Promise<{
   const integrationTrackIds = projectTracks.map((t) => t.id);
 
   if (integrationTrackIds.length === 0) {
-    const { indicator } = await loadActiveWorkSessionIndicator();
+    const { indicator } = await loadActiveWorkSessionIndicatorForSnapshot();
+    devPerfDuration("loadTasksPageSnapshot", perfStart);
     return {
       snapshot: {
         todayIso,
@@ -370,7 +381,7 @@ export async function loadTasksPageSnapshot(): Promise<{
       .eq("status", "done")
       .order("completed_at", { ascending: false, nullsFirst: false })
       .limit(RECENTLY_COMPLETED_LIMIT),
-    loadActiveWorkSessionIndicator(),
+    loadActiveWorkSessionIndicatorForSnapshot(),
   ]);
 
   if (openTasksRes.error) return { error: openTasksRes.error.message };
@@ -404,6 +415,7 @@ export async function loadTasksPageSnapshot(): Promise<{
     project_integration_id: trackById.get(t.project_track_id)?.projectIntegrationId ?? null,
   }));
 
+  devPerfDuration("loadTasksPageSnapshot", perfStart);
   return {
     snapshot: {
       todayIso,
@@ -522,6 +534,7 @@ export async function rescheduleTaskByDrag(
   taskId: string,
   /** ISO YYYY-MM-DD or empty string to clear the due date. */
   dueDateIso: string,
+  scope?: "project" | "internal",
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -529,41 +542,42 @@ export async function rescheduleTaskByDrag(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in" };
 
-  const { data: integTask } = await supabase
-    .from("integration_tasks")
-    .select("id, project_track_id")
-    .eq("id", taskId)
-    .maybeSingle();
+  const tryIntegration = scope !== "internal";
+  const tryInternal = scope !== "project";
 
-  if (integTask) {
-    const { data: track } = await supabase
-      .from("project_tracks")
-      .select("id, project_id, project_integration_id")
-      .eq("id", integTask.project_track_id)
+  if (tryIntegration) {
+    const { data: integTask } = await supabase
+      .from("integration_tasks")
+      .select("id, project_track_id")
+      .eq("id", taskId)
       .maybeSingle();
-    if (!track) return { error: "Not found" };
 
-    const { data: project } = await supabase
-      .from("projects")
-      .select("id")
-      .eq("id", track.project_id)
-      .eq("owner_id", user.id)
-      .maybeSingle();
-    if (!project) return { error: "Not found" };
+    if (integTask) {
+      const { data: track } = await supabase
+        .from("project_tracks")
+        .select("id, project_id, project_integration_id")
+        .eq("id", integTask.project_track_id)
+        .maybeSingle();
+      if (!track) return { error: "Not found" };
 
-    const due_date = dueDateIso.trim() === "" ? null : dueDateIso.trim();
-    const { error } = await supabase.from("integration_tasks").update({ due_date }).eq("id", taskId);
-    if (error) return { error: error.message };
+      const { data: project } = await supabase
+        .from("projects")
+        .select("id")
+        .eq("id", track.project_id)
+        .eq("owner_id", user.id)
+        .maybeSingle();
+      if (!project) return { error: "Not found" };
 
-    revalidatePath("/work");
-    revalidatePath("/tasks");
-    revalidatePath("/timesheet");
-    revalidatePath(`/projects/${track.project_id}`);
-    if (track.project_integration_id) {
-      revalidatePath(`/projects/${track.project_id}/integrations/${track.project_integration_id}`);
+      const due_date = dueDateIso.trim() === "" ? null : dueDateIso.trim();
+      const { error } = await supabase.from("integration_tasks").update({ due_date }).eq("id", taskId);
+      if (error) return { error: error.message };
+      // Optimistic Work-page UI; skip revalidatePath.
+      return {};
     }
-    return {};
+    if (scope === "project") return { error: "Not found" };
   }
+
+  if (!tryInternal) return { error: "Not found" };
 
   const { data: internalTask } = await supabase
     .from("internal_tasks")
@@ -595,14 +609,6 @@ export async function rescheduleTaskByDrag(
   const due_date = dueDateIso.trim() === "" ? null : dueDateIso.trim();
   const { error } = await supabase.from("internal_tasks").update({ due_date }).eq("id", taskId);
   if (error) return { error: error.message };
-
-  revalidatePath("/work");
-  revalidatePath("/tasks");
-  revalidatePath("/timesheet");
-  revalidatePath("/internal");
-  if (internalTask.internal_initiative_id) {
-    revalidatePath(`/internal/initiatives/${internalTask.internal_initiative_id}`);
-  }
   return {};
 }
 
@@ -663,8 +669,6 @@ export async function reorderTaskWithinGroup(
     }
   }
 
-  let trackRows: { id: string; project_id: string; project_integration_id: string | null }[] | null =
-    null;
   if (integrationIdsInOrder.length > 0) {
     const integRowsOrdered = integrationIdsInOrder.map((id) => integById.get(id)!);
     const trackIds = Array.from(new Set(integRowsOrdered.map((t) => t.project_track_id)));
@@ -673,7 +677,6 @@ export async function reorderTaskWithinGroup(
       .select("id, project_id, project_integration_id")
       .in("id", trackIds);
     if (!tr) return { error: "Not found" };
-    trackRows = tr;
 
     const projectIds = Array.from(new Set(tr.map((r) => r.project_id)));
     const { data: ownedProjects } = await supabase
@@ -701,60 +704,90 @@ export async function reorderTaskWithinGroup(
     if (error) return { error: error.message };
   }
 
-  revalidatePath("/work");
-  revalidatePath("/tasks");
-  revalidatePath("/timesheet");
-  if (trackRows) {
-    for (const track of trackRows) {
-      revalidatePath(`/projects/${track.project_id}`);
-      if (track.project_integration_id) {
-        revalidatePath(`/projects/${track.project_id}/integrations/${track.project_integration_id}`);
-      }
-    }
-  }
-  if (internalIdsInOrder.length > 0) {
-    revalidatePath("/internal");
-  }
-
+  // Optimistic Work-page UI; skip revalidatePath.
   return {};
 }
 
-export async function toggleAnyTaskCompletion(taskId: string): Promise<{ error?: string }> {
+type TasksPageTaskScope = "project" | "internal";
+
+async function dispatchAnyTaskMutation(
+  taskId: string,
+  scope: TasksPageTaskScope | undefined,
+  onIntegration: () => Promise<{ error?: string }>,
+  onInternal: () => Promise<{ error?: string }>,
+): Promise<{ error?: string }> {
+  if (scope === "project") return onIntegration();
+  if (scope === "internal") return onInternal();
   const supabase = await createClient();
   const { data } = await supabase.from("integration_tasks").select("id").eq("id", taskId).maybeSingle();
-  if (data) return toggleIntegrationTaskCompletion(taskId);
-  return toggleInternalTaskCompletion(taskId);
+  if (data) return onIntegration();
+  return onInternal();
 }
 
-export async function updateAnyTaskTitle(taskId: string, title: string): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("integration_tasks").select("id").eq("id", taskId).maybeSingle();
-  if (data) return updateIntegrationTaskTitle(taskId, title);
-  return updateInternalTaskTitle(taskId, title);
+/** Work-page optimistic edits: skip path revalidation; callers own local state. */
+const WORK_PAGE_MUTATION = { revalidate: false } as const;
+
+export async function toggleAnyTaskCompletion(
+  taskId: string,
+  scope?: TasksPageTaskScope,
+): Promise<{ error?: string }> {
+  return dispatchAnyTaskMutation(
+    taskId,
+    scope,
+    () => toggleIntegrationTaskCompletion(taskId, WORK_PAGE_MUTATION),
+    () => toggleInternalTaskCompletion(taskId, WORK_PAGE_MUTATION),
+  );
+}
+
+export async function updateAnyTaskTitle(
+  taskId: string,
+  title: string,
+  scope?: TasksPageTaskScope,
+): Promise<{ error?: string }> {
+  return dispatchAnyTaskMutation(
+    taskId,
+    scope,
+    () => updateIntegrationTaskTitle(taskId, title, WORK_PAGE_MUTATION),
+    () => updateInternalTaskTitle(taskId, title, WORK_PAGE_MUTATION),
+  );
 }
 
 export async function updateAnyTaskPriority(
   taskId: string,
   priority: "low" | "medium" | "high",
+  scope?: TasksPageTaskScope,
 ): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("integration_tasks").select("id").eq("id", taskId).maybeSingle();
-  if (data) return updateIntegrationTaskPriority(taskId, priority);
-  return updateInternalTaskPriority(taskId, priority);
+  return dispatchAnyTaskMutation(
+    taskId,
+    scope,
+    () => updateIntegrationTaskPriority(taskId, priority, WORK_PAGE_MUTATION),
+    () => updateInternalTaskPriority(taskId, priority, WORK_PAGE_MUTATION),
+  );
 }
 
-export async function updateAnyTaskDueDate(taskId: string, formData: FormData): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("integration_tasks").select("id").eq("id", taskId).maybeSingle();
-  if (data) return updateIntegrationTaskDueDate(taskId, formData);
-  return updateInternalTaskDueDate(taskId, formData);
+export async function updateAnyTaskDueDate(
+  taskId: string,
+  formData: FormData,
+  scope?: TasksPageTaskScope,
+): Promise<{ error?: string }> {
+  return dispatchAnyTaskMutation(
+    taskId,
+    scope,
+    () => updateIntegrationTaskDueDate(taskId, formData, WORK_PAGE_MUTATION),
+    () => updateInternalTaskDueDate(taskId, formData, WORK_PAGE_MUTATION),
+  );
 }
 
-export async function deleteAnyTask(taskId: string): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("integration_tasks").select("id").eq("id", taskId).maybeSingle();
-  if (data) return deleteIntegrationTask(taskId);
-  return deleteInternalTask(taskId);
+export async function deleteAnyTask(
+  taskId: string,
+  scope?: TasksPageTaskScope,
+): Promise<{ error?: string }> {
+  return dispatchAnyTaskMutation(
+    taskId,
+    scope,
+    () => deleteIntegrationTask(taskId, WORK_PAGE_MUTATION),
+    () => deleteInternalTask(taskId, WORK_PAGE_MUTATION),
+  );
 }
 
 export async function startOrReplaceAnyActiveWorkSession(

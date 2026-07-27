@@ -51,9 +51,10 @@ import {
 } from "react";
 import { formatLocalYmd } from "@/lib/integration-effort-buckets";
 import type { EffortView } from "@/lib/integration-effort-buckets";
-import type { HomeActualsVsForecastDTO } from "@/lib/home-actuals-vs-forecast";
-import type { WorkForecastTrackActual } from "@/lib/work-forecast-track-actuals";
-import { WorkForecastActualsFab } from "@/components/work-forecast-actuals-overlay";
+import {
+  clearCalendarSessionCache,
+  prefetchCalendarSessions,
+} from "@/lib/tasks-calendar-session-cache";
 import { TasksEffortCalendar } from "./tasks-effort-calendar";
 
 const EMPTY_TASK_FILTERS: TasksFiltersValue = {
@@ -115,12 +116,8 @@ function DialogHeader({
 
 export function TasksPageClient({
   initialSnapshot,
-  actualsVsForecast,
-  trackActuals,
 }: {
   initialSnapshot: TasksPageSnapshot;
-  actualsVsForecast: HomeActualsVsForecastDTO;
-  trackActuals: WorkForecastTrackActual[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -130,6 +127,18 @@ export function TasksPageClient({
   useEffect(() => {
     setCalendarAnchorFallback(formatLocalYmd(new Date()));
   }, []);
+
+  useEffect(() => {
+    const schedule = () => {
+      void prefetchCalendarSessions("week", calendarAnchorFallback);
+    };
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(schedule, { timeout: 2500 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(schedule, 0);
+    return () => window.clearTimeout(t);
+  }, [calendarAnchorFallback]);
 
   // ── View state (list | calendar) driven by URL params ──────────
   const rawView = searchParams.get("view");
@@ -141,6 +150,10 @@ export function TasksPageClient({
   const calendarAnchor = searchParams.get("date") ?? calendarAnchorFallback;
   const workTab: "list" | "calendar" = rawView === "calendar" ? "calendar" : "list";
   const isCalendar = workTab === "calendar";
+
+  const prefetchCalendarOnTabIntent = useCallback(() => {
+    void prefetchCalendarSessions(calendarView, calendarAnchor);
+  }, [calendarView, calendarAnchor]);
 
   useEffect(() => {
     if (rawView !== "timesheet") return;
@@ -299,18 +312,14 @@ export function TasksPageClient({
       const prevTitle = existing?.title ?? "";
       if (nextTitle === prevTitle) return {};
       updateTaskInState(taskId, { title: nextTitle });
-      try {
-        const res = await updateAnyTaskTitle(taskId, nextTitle);
-        if (res?.error) {
-          updateTaskInState(taskId, { title: prevTitle });
-          return { error: res.error };
-        }
-        return {};
-      } finally {
-        refresh();
+      const res = await updateAnyTaskTitle(taskId, nextTitle, existing?.scope);
+      if (res?.error) {
+        updateTaskInState(taskId, { title: prevTitle });
+        return { error: res.error };
       }
+      return {};
     },
-    [openTasks, recentlyCompleted, updateTaskInState, refresh],
+    [openTasks, recentlyCompleted, updateTaskInState],
   );
 
   const saveTaskPriority = useCallback(
@@ -323,18 +332,14 @@ export function TasksPageClient({
       const prev = existing.priority;
       if (prev === nextPriority) return {};
       updateTaskInState(taskId, { priority: nextPriority });
-      try {
-        const res = await updateAnyTaskPriority(taskId, nextPriority);
-        if (res?.error) {
-          updateTaskInState(taskId, { priority: prev });
-          return { error: res.error };
-        }
-        return {};
-      } finally {
-        refresh();
+      const res = await updateAnyTaskPriority(taskId, nextPriority, existing.scope);
+      if (res?.error) {
+        updateTaskInState(taskId, { priority: prev });
+        return { error: res.error };
       }
+      return {};
     },
-    [openTasks, updateTaskInState, refresh],
+    [openTasks, updateTaskInState],
   );
 
   const saveTaskDueDate = useCallback(
@@ -346,18 +351,53 @@ export function TasksPageClient({
       updateTaskInState(taskId, { due_date: next });
       const fd = new FormData();
       fd.set("due_date", dueDateIso);
-      try {
-        const res = await updateAnyTaskDueDate(taskId, fd);
-        if (res?.error) {
-          updateTaskInState(taskId, { due_date: prev });
-          return { error: res.error };
-        }
-        return {};
-      } finally {
-        refresh();
+      const res = await updateAnyTaskDueDate(taskId, fd, existing.scope);
+      if (res?.error) {
+        updateTaskInState(taskId, { due_date: prev });
+        return { error: res.error };
       }
+      return {};
     },
-    [openTasks, updateTaskInState, refresh],
+    [openTasks, updateTaskInState],
+  );
+
+  const markTaskCompletedLocally = useCallback((taskId: string) => {
+    const completedAt = new Date().toISOString();
+    setOpenTasks((prev) => {
+      const task = prev.find((t) => t.id === taskId);
+      if (!task) return prev;
+      setRecentlyCompleted((recent) => [
+        { ...task, status: "done", completed_at: completedAt },
+        ...recent.filter((t) => t.id !== taskId),
+      ].slice(0, 10));
+      return prev.filter((t) => t.id !== taskId);
+    });
+  }, []);
+
+  const markTaskOpenLocally = useCallback((taskId: string) => {
+    setRecentlyCompleted((prev) => {
+      const task = prev.find((t) => t.id === taskId);
+      if (!task) return prev;
+      setOpenTasks((open) => {
+        if (open.some((t) => t.id === taskId)) return open;
+        return [...open, { ...task, status: "open", completed_at: null }];
+      });
+      return prev.filter((t) => t.id !== taskId);
+    });
+  }, []);
+
+  const afterToggleComplete = useCallback(
+    (taskId: string) => {
+      markTaskCompletedLocally(taskId);
+    },
+    [markTaskCompletedLocally],
+  );
+
+  const afterUndoComplete = useCallback(
+    (taskId: string) => {
+      markTaskOpenLocally(taskId);
+    },
+    [markTaskOpenLocally],
   );
 
   const [workSessionActionError, setWorkSessionActionError] = useState<string | null>(null);
@@ -408,16 +448,13 @@ export function TasksPageClient({
       setActiveWorkSession(null);
       setExpandedWorkTaskId(null);
       if (opts?.completeTask && clearedTaskId) {
-        updateTaskInState(clearedTaskId, {
-          status: "done",
-          completed_at: new Date().toISOString(),
-        });
+        markTaskCompletedLocally(clearedTaskId);
       }
-      if (opts?.refresh !== false) {
+      if (opts?.refresh === true) {
         refresh();
       }
     },
-    [activeWorkSession?.task_id, expandedWorkTaskId, refresh, updateTaskInState],
+    [activeWorkSession?.task_id, expandedWorkTaskId, markTaskCompletedLocally, refresh],
   );
 
   const startWorkOnTask = useCallback(
@@ -468,7 +505,8 @@ export function TasksPageClient({
     async (_prev: { error?: string } | void, formData: FormData) => {
       const id = String(formData.get("task_id") ?? "").trim();
       if (!id) return { error: "No task selected" };
-      const res = await deleteAnyTask(id);
+      const scope = deleteTask?.scope;
+      const res = await deleteAnyTask(id, scope);
       if (!res.error) {
         removeTaskFromState(id);
       }
@@ -484,8 +522,7 @@ export function TasksPageClient({
     if (deleteState?.error) return;
     deleteDialogRef.current?.close();
     deleteSubmitDidRunRef.current = false;
-    refresh();
-  }, [deletePending, deleteState, refresh]);
+  }, [deletePending, deleteState]);
 
   function openDeleteDialog(task: TasksPageTask) {
     setDeleteTask(task);
@@ -539,8 +576,8 @@ export function TasksPageClient({
 
       if (res.error) {
         setWorkSessionActionError(res.error);
+        refresh();
       }
-      refresh();
     },
     [buckets, refresh],
   );
@@ -553,14 +590,13 @@ export function TasksPageClient({
       const nextDue = toBucket.defaultDueDateIso;
       updateTaskInState(taskId, { due_date: nextDue });
 
-      const res = await rescheduleTaskByDrag(taskId, nextDue ?? "");
+      const res = await rescheduleTaskByDrag(taskId, nextDue ?? "", existing.scope);
       if (res.error) {
         updateTaskInState(taskId, { due_date: prevDue });
         setWorkSessionActionError(res.error);
       }
-      refresh();
     },
-    [openTasks, updateTaskInState, refresh],
+    [openTasks, updateTaskInState],
   );
 
   const quickAddProjects: TaskQuickAddProjectOption[] = useMemo(
@@ -622,6 +658,8 @@ export function TasksPageClient({
                 : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
             ].join(" ")}
             onClick={() => setView("calendar")}
+            onMouseEnter={prefetchCalendarOnTabIntent}
+            onFocus={prefetchCalendarOnTabIntent}
           >
             Calendar
           </button>
@@ -664,45 +702,57 @@ export function TasksPageClient({
             </p>
           ) : null}
 
-          {workTab === "list" ? (
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-0">
-              <TaskGroupedList
-                buckets={buckets}
-                crumbForTask={crumbForTask}
-                effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-                expandedWorkTaskId={expandedWorkTaskId}
-                activeWorkSession={activeWorkSession}
-                onActiveWorkSessionChange={setActiveWorkSession}
-                onCloseWorkRow={closeWorkRow}
-                onWorkSessionActionError={setWorkSessionActionError}
-                onStartWork={startWorkOnTask}
-                onOpenHistory={openHistoryDialog}
-                onOpenDelete={openDeleteDialog}
-                onSaveTitle={saveTaskTitle}
-                onSavePriority={saveTaskPriority}
-                onSaveDueDate={saveTaskDueDate}
-                onAfterToggleComplete={refresh}
-                onAfterUndo={refresh}
-                onLongPressCompleteLog={(task) => setManualLogTask(task)}
-                onReorderWithinBucket={reorderWithinBucket}
-                onMoveAcrossBucket={moveAcrossBucket}
-              />
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-              <TasksEffortCalendar
-                scope={calendarView}
-                anchorYmd={calendarAnchor}
-                onScopeChange={setCalendarScope}
-                onAnchorChange={setCalendarAnchor}
-                filters={EMPTY_TASK_FILTERS}
-                projects={projects}
-                tracks={tracks}
-                lastUsedIntegrationId={lastUsedIntegrationId}
-                onRememberIntegration={setLastUsedIntegrationId}
-              />
-            </div>
-          )}
+          <div
+            className={[
+              "min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pt-0",
+              workTab === "list" ? "flex" : "hidden",
+            ].join(" ")}
+            aria-hidden={workTab !== "list"}
+            inert={workTab !== "list"}
+          >
+            <TaskGroupedList
+              buckets={buckets}
+              crumbForTask={crumbForTask}
+              effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+              expandedWorkTaskId={expandedWorkTaskId}
+              activeWorkSession={activeWorkSession}
+              onActiveWorkSessionChange={setActiveWorkSession}
+              onCloseWorkRow={closeWorkRow}
+              onWorkSessionActionError={setWorkSessionActionError}
+              onStartWork={startWorkOnTask}
+              onOpenHistory={openHistoryDialog}
+              onOpenDelete={openDeleteDialog}
+              onSaveTitle={saveTaskTitle}
+              onSavePriority={saveTaskPriority}
+              onSaveDueDate={saveTaskDueDate}
+              onAfterToggleComplete={afterToggleComplete}
+              onAfterUndo={afterUndoComplete}
+              onLongPressCompleteLog={(task) => setManualLogTask(task)}
+              onReorderWithinBucket={reorderWithinBucket}
+              onMoveAcrossBucket={moveAcrossBucket}
+            />
+          </div>
+
+          <div
+            className={[
+              "min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+              workTab === "calendar" ? "flex" : "hidden",
+            ].join(" ")}
+            aria-hidden={workTab !== "calendar"}
+            inert={workTab !== "calendar"}
+          >
+            <TasksEffortCalendar
+              scope={calendarView}
+              anchorYmd={calendarAnchor}
+              onScopeChange={setCalendarScope}
+              onAnchorChange={setCalendarAnchor}
+              filters={EMPTY_TASK_FILTERS}
+              projects={projects}
+              tracks={tracks}
+              lastUsedIntegrationId={lastUsedIntegrationId}
+              onRememberIntegration={setLastUsedIntegrationId}
+            />
+          </div>
         </div>
       </section>
 
@@ -1023,15 +1073,18 @@ export function TasksPageClient({
         }
         initialTitle={manualLogTask?.title ?? ""}
         onClose={() => setManualLogTask(null)}
-        onCompleteTask={(taskId) => toggleAnyTaskCompletion(taskId)}
-        onSaved={refresh}
-      />
-
-      <WorkForecastActualsFab
-        data={actualsVsForecast}
-        trackActuals={trackActuals}
-        projects={projects}
-        tracks={tracks}
+        onCompleteTask={(taskId) => {
+          const task =
+            openTasks.find((t) => t.id === taskId) ?? recentlyCompleted.find((t) => t.id === taskId);
+          return toggleAnyTaskCompletion(taskId, task?.scope);
+        }}
+        onSaved={() => {
+          if (manualLogTask) {
+            markTaskCompletedLocally(manualLogTask.id);
+          }
+          clearCalendarSessionCache();
+          setManualLogTask(null);
+        }}
       />
     </div>
   );

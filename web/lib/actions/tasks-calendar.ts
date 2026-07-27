@@ -8,6 +8,7 @@ import {
 } from "@/lib/project-colors";
 import { TASKS_PAGE_INTERNAL_PROJECT_ID } from "@/lib/tasks-page-shared";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
+import { devPerfDuration } from "@/lib/dev-perf-log";
 import type { GridSessionInput } from "@/components/effort-calendar-grids";
 import { revalidatePath } from "next/cache";
 
@@ -393,6 +394,7 @@ export async function loadTasksCalendarSessions(
   startIso: string,
   endExclusiveIso: string,
 ): Promise<LoadTasksCalendarResult> {
+  const perfStart = typeof performance !== "undefined" ? performance.now() : 0;
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
   const supabase = await createClient();
@@ -430,12 +432,19 @@ export async function loadTasksCalendarSessions(
   );
   const projectIds = Array.from(projectById.keys());
 
-  // 2. Project integrations
-  const { data: piRows, error: piErr } = await supabase
-    .from("project_integrations")
-    .select("id, project_id, integration_id")
-    .in("project_id", projectIds);
+  // 2. Project integrations + tracks (parallel)
+  const [{ data: piRows, error: piErr }, { data: trackRows, error: trackErr }] = await Promise.all([
+    supabase
+      .from("project_integrations")
+      .select("id, project_id, integration_id")
+      .in("project_id", projectIds),
+    supabase
+      .from("project_tracks")
+      .select("id, project_id, kind, name, project_integration_id")
+      .in("project_id", projectIds),
+  ]);
   if (piErr) return { error: piErr.message };
+  if (trackErr) return { error: trackErr.message };
 
   // 3. Integration definition display names
   const integrationDefIds = Array.from(
@@ -489,11 +498,6 @@ export async function loadTasksCalendarSessions(
   );
   const projectIntegrationIds = (piRows ?? []).map((row) => row.id);
 
-  const { data: trackRows, error: trackErr } = await supabase
-    .from("project_tracks")
-    .select("id, project_id, kind, name, project_integration_id")
-    .in("project_id", projectIds);
-  if (trackErr) return { error: trackErr.message };
   const trackMetaById = new Map<
     string,
     {
@@ -665,33 +669,44 @@ export async function loadTasksCalendarSessions(
 
   }
 
-  const internalErr = await appendInternalTaskCalendarSessions(
-    supabase,
-    user.id,
-    startIso,
-    endExclusiveIso,
-    sessions,
-  );
+  const internalTaskSessions: TasksCalendarSession[] = [];
+  const internalInitiativeManualSessions: TasksCalendarSession[] = [];
+  const internalTrackManualSessions: TasksCalendarSession[] = [];
+
+  const [internalErr, internalManualErr, internalTrackManualErr] = await Promise.all([
+    appendInternalTaskCalendarSessions(
+      supabase,
+      user.id,
+      startIso,
+      endExclusiveIso,
+      internalTaskSessions,
+    ),
+    appendInternalInitiativeManualCalendarSessions(
+      supabase,
+      user.id,
+      startIso,
+      endExclusiveIso,
+      internalInitiativeManualSessions,
+    ),
+    appendInternalTrackManualCalendarSessions(
+      supabase,
+      user.id,
+      startIso,
+      endExclusiveIso,
+      internalTrackManualSessions,
+    ),
+  ]);
   if (internalErr.error) return { error: internalErr.error };
-
-  const internalManualErr = await appendInternalInitiativeManualCalendarSessions(
-    supabase,
-    user.id,
-    startIso,
-    endExclusiveIso,
-    sessions,
-  );
   if (internalManualErr.error) return { error: internalManualErr.error };
-
-  const internalTrackManualErr = await appendInternalTrackManualCalendarSessions(
-    supabase,
-    user.id,
-    startIso,
-    endExclusiveIso,
-    sessions,
-  );
   if (internalTrackManualErr.error) return { error: internalTrackManualErr.error };
 
+  sessions.push(
+    ...internalTaskSessions,
+    ...internalInitiativeManualSessions,
+    ...internalTrackManualSessions,
+  );
+
+  devPerfDuration("loadTasksCalendarSessions", perfStart);
   return { sessions };
 }
 

@@ -37,6 +37,7 @@ import {
   type IntegrationTaskRow as IntegrationTaskRowType,
   type IntegrationTaskWorkSessionRow as IntegrationTaskWorkSessionRowType,
 } from "@/lib/integration-task-helpers";
+import { clearCalendarSessionCache } from "@/lib/tasks-calendar-session-cache";
 import {
   deleteAnyTask,
   startOrReplaceAnyActiveWorkSession,
@@ -1194,27 +1195,28 @@ export function TaskWorkRow({
     const startedAtIso = new Date(draftStart).toISOString();
     const finishedAtIso = new Date(effectiveEndMs).toISOString();
     const notes = workAccomplished.trim();
-    try {
-      const payload = {
-        started_at: startedAtIso,
-        finished_at: finishedAtIso,
-        duration_hours: hours,
-        work_accomplished: notes === "" ? null : notes,
-        complete_task: completeTask,
-      };
+    const payload = {
+      started_at: startedAtIso,
+      finished_at: finishedAtIso,
+      duration_hours: hours,
+      work_accomplished: notes === "" ? null : notes,
+      complete_task: completeTask,
+    };
+    // Close immediately (like discard); persist in background without RSC refresh.
+    finishDialogRef.current?.close();
+    onClose({ completeTask, refresh: false });
+    setSavePending(null);
+    void (async () => {
       const res =
         activeSession.scope === "internal"
           ? await createInternalTaskWorkSession(taskId, payload)
           : await createIntegrationTaskWorkSession(taskId, payload);
       if (res?.error) {
-        setFinishError(res.error);
+        onActionError?.(res.error);
         return;
       }
-      finishDialogRef.current?.close();
-      onClose({ completeTask });
-    } finally {
-      setSavePending(null);
-    }
+      clearCalendarSessionCache();
+    })();
   }
 
   if (startMs == null) return null;
@@ -1691,28 +1693,28 @@ export function ActiveWorkSessionDialog({
     const startedAtIso = new Date(draftStart).toISOString();
     const finishedAtIso = new Date(effectiveEndMs).toISOString();
     const notes = workAccomplished.trim();
-    try {
-      const payload = {
-        started_at: startedAtIso,
-        finished_at: finishedAtIso,
-        duration_hours: hours,
-        work_accomplished: notes === "" ? null : notes,
-        complete_task: completeTask,
-      };
+    const payload = {
+      started_at: startedAtIso,
+      finished_at: finishedAtIso,
+      duration_hours: hours,
+      work_accomplished: notes === "" ? null : notes,
+      complete_task: completeTask,
+    };
+    finishDialogRef.current?.close();
+    dialogRef.current?.close();
+    onAfterSessionCleared({ completeTask, refresh: false });
+    setSavePending(null);
+    void (async () => {
       const res =
         activeSession.scope === "internal"
           ? await createInternalTaskWorkSession(taskId, payload)
           : await createIntegrationTaskWorkSession(taskId, payload);
       if (res?.error) {
-        setFinishError(res.error);
+        onActionError?.(res.error);
         return;
       }
-      finishDialogRef.current?.close();
-      dialogRef.current?.close();
-      onAfterSessionCleared({ completeTask });
-    } finally {
-      setSavePending(null);
-    }
+      clearCalendarSessionCache();
+    })();
   }
 
   const finishModalOpen = finishDraftStartMs != null;
@@ -2382,8 +2384,8 @@ export function IntegrationTasksPanel({
           onSaveTitle={saveTaskTitle}
           onSavePriority={saveTaskPriority}
           onSaveDueDate={saveTaskDueDate}
-          onAfterToggleComplete={refreshTaskSnapshotAndRoute}
-          onAfterUndo={refreshTaskSnapshotAndRoute}
+          onAfterToggleComplete={(taskId) => void refreshTaskSnapshotAndRoute()}
+          onAfterUndo={(taskId) => void refreshTaskSnapshotAndRoute()}
           onLongPressCompleteLog={(task) => setManualLogTask(task)}
         />
       </li>

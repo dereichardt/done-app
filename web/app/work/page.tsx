@@ -1,31 +1,15 @@
 import { TasksPageClient } from "../tasks/tasks-page-client";
+import { WorkForecastActualsFabLoader } from "@/components/work-forecast-actuals-fab-loader";
 import { loadTasksPageSnapshot } from "@/lib/actions/tasks-page";
-import { loadUserPreferences } from "@/lib/actions/user-preferences";
-import {
-  loadHomeActualsVsForecast,
-  makeWeekTotals,
-  type HomeActualsVsForecastDTO,
-} from "@/lib/home-actuals-vs-forecast";
-import { createClient, getCurrentUser } from "@/lib/supabase/server";
-import { getUserTodayIso } from "@/lib/user-preferences";
-import {
-  loadWorkForecastTrackActuals,
-  type WorkForecastTrackActual,
-} from "@/lib/work-forecast-track-actuals";
+import { devPerfDuration } from "@/lib/dev-perf-log";
 import { Suspense } from "react";
 
 export const dynamic = "force-dynamic";
 
-const EMPTY_FORECAST: HomeActualsVsForecastDTO = {
-  thisWeek: makeWeekTotals(0, 0),
-  priorWeek: makeWeekTotals(0, 0),
-  weeks: [],
-  projects: [],
-};
-
 export default async function WorkPage() {
-  const user = await getCurrentUser();
+  const perfStart = typeof performance !== "undefined" ? performance.now() : 0;
   const { snapshot, error } = await loadTasksPageSnapshot();
+  devPerfDuration("WorkPage.snapshot", perfStart);
 
   if (error || !snapshot) {
     return (
@@ -53,28 +37,18 @@ export default async function WorkPage() {
     );
   }
 
-  let actualsVsForecast: HomeActualsVsForecastDTO = EMPTY_FORECAST;
-  let trackActuals: WorkForecastTrackActual[] = [];
-
-  if (user) {
-    const supabase = await createClient();
-    const prefsRes = await loadUserPreferences();
-    const todayIso = getUserTodayIso(prefsRes.preferences.timezone);
-    const [forecast, tracks] = await Promise.all([
-      loadHomeActualsVsForecast(supabase, user.id, todayIso),
-      loadWorkForecastTrackActuals(supabase, user.id, todayIso),
-    ]);
-    actualsVsForecast = forecast;
-    trackActuals = tracks;
-  }
-
   return (
-    <Suspense>
-      <TasksPageClient
-        initialSnapshot={snapshot}
-        actualsVsForecast={actualsVsForecast}
-        trackActuals={trackActuals}
-      />
-    </Suspense>
+    <>
+      <Suspense>
+        <TasksPageClient initialSnapshot={snapshot} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <WorkForecastActualsFabLoader
+          todayIso={snapshot.todayIso}
+          projects={snapshot.projects}
+          tracks={snapshot.tracks}
+        />
+      </Suspense>
+    </>
   );
 }

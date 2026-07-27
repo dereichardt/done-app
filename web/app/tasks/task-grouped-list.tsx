@@ -213,8 +213,8 @@ function SortableTaskRow({
     priority: "low" | "medium" | "high",
   ) => Promise<{ error?: string }>;
   onSaveDueDate: (taskId: string, dueDateIso: string) => Promise<{ error?: string }>;
-  onAfterToggleComplete?: () => void | Promise<void>;
-  onAfterUndo?: () => void | Promise<void>;
+  onAfterToggleComplete?: (taskId: string) => void | Promise<void>;
+  onAfterUndo?: (taskId: string) => void | Promise<void>;
   onLongPressCompleteLog?: (task: TasksPageTask) => void;
   isDragOverlay?: boolean;
   dndReady: boolean;
@@ -326,8 +326,8 @@ export function TaskGroupedList({
     priority: "low" | "medium" | "high",
   ) => Promise<{ error?: string }>;
   onSaveDueDate: (taskId: string, dueDateIso: string) => Promise<{ error?: string }>;
-  onAfterToggleComplete?: () => void | Promise<void>;
-  onAfterUndo?: () => void | Promise<void>;
+  onAfterToggleComplete?: (taskId: string) => void | Promise<void>;
+  onAfterUndo?: (taskId: string) => void | Promise<void>;
   onLongPressCompleteLog?: (task: TasksPageTask) => void;
   onReorderWithinBucket: (bucketId: TaskBucketId, orderedTaskIds: string[]) => void | Promise<void>;
   onMoveAcrossBucket: (
