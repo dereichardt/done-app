@@ -1,6 +1,7 @@
 import { VarianceCard } from "@/components/home-actuals-vs-forecast";
 import type { HomeWeekTotals } from "@/lib/home-actuals-vs-forecast";
 import type { HomeProjectForecastStats } from "@/lib/home-project-status";
+import { formatSignedVarianceHours } from "@/lib/project-forecast";
 import {
   formatPhaseDate,
   formatPhaseDaysRemainingLabel,
@@ -36,7 +37,7 @@ function ProjectForecastStatsCard({ stats }: { stats: HomeProjectForecastStats }
       ? "—"
       : stats.varianceKind === "on"
         ? "0h"
-        : formatSummaryHours(stats.varianceHours);
+        : formatSignedVarianceHours(stats.varianceHours);
   const varianceLabel =
     stats.varianceKind === "under"
       ? "Under estimate"

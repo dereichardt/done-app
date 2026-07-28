@@ -229,7 +229,7 @@ export async function loadHomeProjectStatus(
       actualHours,
       forecastedHours,
       varianceKind: variance.kind,
-      varianceHours: variance.absHours,
+      varianceHours: variance.variance,
       varianceLabel: variance.label,
     };
   })();
@@ -467,7 +467,7 @@ export async function loadAllHomeProjectStatuses(): Promise<{
           actualHours,
           forecastedHours,
           varianceKind: variance.kind,
-          varianceHours: variance.absHours,
+          varianceHours: variance.variance,
           varianceLabel: variance.label,
         };
       }

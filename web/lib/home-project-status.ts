@@ -29,6 +29,7 @@ export type HomeProjectForecastStats = {
   actualHours: number;
   forecastedHours: number | null;
   varianceKind: "under" | "over" | "on" | "unavailable";
+  /** Signed: estimated − actuals − forecast (positive = under, negative = over). */
   varianceHours: number | null;
   varianceLabel: string;
 };

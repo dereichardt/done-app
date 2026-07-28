@@ -2,26 +2,72 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type AriaRole, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDownIcon, ArrowUpIcon, MinusIcon } from "@/components/action-icons";
-import type {
-  EstimateVariance,
-  ForecastPastPhaseSummary,
+import {
+  formatSignedVarianceHours,
+  type EstimateVariance,
+  type ForecastPastPhaseSummary,
 } from "@/lib/project-forecast";
 
-function formatVarianceHours(hours: number): string {
+function formatVarianceAbsHours(hours: number): string {
   if (!Number.isFinite(hours) || hours <= 0) return "0h";
   return `${Math.round(hours)}h`;
 }
 
-function VarianceKindArrow({ kind }: { kind: EstimateVariance["kind"] }) {
-  const iconClass = "shrink-0 text-[var(--app-text-muted)]";
-  if (kind === "over") {
-    return <ArrowUpIcon size={12} className={iconClass} />;
-  }
-  if (kind === "under") {
-    return <ArrowDownIcon size={12} className={iconClass} />;
-  }
-  return <MinusIcon size={12} className={iconClass} />;
+/**
+ * Compact meter: fill vs a center target line.
+ * Under = short of line, on = meets line, over = past line.
+ * On-target fill matches portfolio capacity green at 32h.
+ */
+function VarianceTargetBar({
+  kind,
+  size = 20,
+  className = "shrink-0",
+}: {
+  kind: EstimateVariance["kind"];
+  size?: number;
+  className?: string;
+}) {
+  // Track is x=1..21 (width 20). Center target at x=11.
+  // Under/over leave a clear gap on either side of the line.
+  const fillWidth = kind === "over" ? 16 : kind === "under" ? 4 : 10;
+  const fillColor =
+    kind === "on"
+      ? "color-mix(in oklab, var(--app-success) 75%, transparent)"
+      : "var(--app-text)";
+
+  return (
+    <svg
+      viewBox="0 0 22 12"
+      width={size}
+      height={Math.round((size * 12) / 22)}
+      aria-hidden
+      className={`text-[var(--app-text-muted)] ${className}`}
+    >
+      <rect
+        x="1"
+        y="3.5"
+        width="20"
+        height="5"
+        rx="1"
+        fill="currentColor"
+        opacity="0.22"
+      />
+      <rect
+        x="1"
+        y="3.5"
+        width={fillWidth}
+        height="5"
+        rx="1"
+        fill={fillColor}
+      />
+      <path
+        d="M11 1.25v9.5"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 function InfoIcon({ className }: { className?: string }) {
@@ -180,15 +226,16 @@ function PastPhaseInfoHover({ summary }: { summary: ForecastPastPhaseSummary }) 
 }
 
 /**
- * Compact variance value for studio / cards: muted up/down arrow + neutral hours.
- * No warning color chrome — direction is conveyed by the arrow and parent subheading.
+ * Compact variance value for studio / cards: target bar + signed hours.
+ * Hours are signed (+ under / − over). Direction is also conveyed by fill vs the
+ * center target line and the parent subheading — no warning color chrome.
  */
 export function EstimateVarianceLabel({
   variance,
   previous,
   className,
   trailing,
-  formatHours = formatVarianceHours,
+  formatHours = formatVarianceAbsHours,
   role,
 }: {
   variance: EstimateVariance;
@@ -197,19 +244,17 @@ export function EstimateVarianceLabel({
   className?: string;
   /** Optional control after hours (e.g. past-phase info). */
   trailing?: ReactNode;
+  /** Formats magnitude only; sign is applied by the label. */
   formatHours?: (hours: number) => string;
   role?: AriaRole;
 }) {
   const showPrevious =
     previous != null && previous.label !== variance.label;
-  const hoursText =
-    variance.kind === "on" ? "0h" : formatHours(variance.absHours);
+  const hoursText = formatSignedVarianceHours(variance.variance, formatHours);
   const previousHoursText =
     previous == null
       ? null
-      : previous.kind === "on"
-        ? "0h"
-        : formatHours(previous.absHours);
+      : formatSignedVarianceHours(previous.variance, formatHours);
   const title = showPrevious
     ? `Original ${previous.label} → ${variance.label}`
     : variance.label;
@@ -227,7 +272,7 @@ export function EstimateVarianceLabel({
             <span aria-hidden>→</span>
           </>
         ) : null}
-        <VarianceKindArrow kind={variance.kind} />
+        <VarianceTargetBar kind={variance.kind} />
         <span>{hoursText}</span>
       </span>
       {trailing}

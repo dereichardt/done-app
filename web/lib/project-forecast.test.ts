@@ -6,6 +6,7 @@ import {
   buildForecastPhaseWeekSegments,
   computeEstimateVariance,
   diffForecastCells,
+  formatSignedVarianceHours,
   generateForecastHours,
   phaseSpreadShapeFactor,
   sumActualsConsumedHours,
@@ -58,6 +59,13 @@ describe("project-level forecast helpers", () => {
       .toMatchObject({ variance: 10, kind: "under" });
     expect(computeEstimateVariance({ estimated: 100, actuals: 20, forecastTotal: 90 }))
       .toMatchObject({ variance: -10, kind: "over" });
+  });
+
+  it("formats signed estimate variance hours", () => {
+    expect(formatSignedVarianceHours(10)).toBe("+10h");
+    expect(formatSignedVarianceHours(-10)).toBe("\u221210h");
+    expect(formatSignedVarianceHours(0)).toBe("0h");
+    expect(formatSignedVarianceHours(-3, (h) => `${h} hrs`)).toBe("\u22123 hrs");
   });
 });
 

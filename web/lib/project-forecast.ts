@@ -117,6 +117,20 @@ export function computeEstimateVariance(input: {
   return { variance: 0, absHours: 0, kind: "on", label: "On estimate" };
 }
 
+/**
+ * Display signed estimate variance: +Nh under, −Nh over, 0h on.
+ * `formatAbsHours` formats the magnitude only (must not clamp negatives).
+ */
+export function formatSignedVarianceHours(
+  varianceHours: number,
+  formatAbsHours: (hours: number) => string = (h) => `${Math.round(h)}h`,
+): string {
+  const rounded = Math.round(varianceHours);
+  if (!Number.isFinite(varianceHours) || rounded === 0) return "0h";
+  const absText = formatAbsHours(Math.abs(rounded));
+  return rounded > 0 ? `+${absText}` : `\u2212${absText}`;
+}
+
 function dateOnlyYmd(iso: string | null | undefined): string | null {
   if (iso == null || iso.trim() === "") return null;
   const s = iso.trim();

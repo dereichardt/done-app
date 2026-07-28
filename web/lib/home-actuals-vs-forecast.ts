@@ -104,6 +104,12 @@ export function lastSundayWeeksEndingThisWeek(todayIso: string, count = HOME_VAR
   return out;
 }
 
+/** Completed weeks for Variance Trends (drops the in-progress current week). */
+export function varianceTrendWeeks(weeks: string[]): string[] {
+  if (weeks.length <= 1) return [];
+  return weeks.slice(0, -1);
+}
+
 function hoursForSundayWeek(sessions: EffortSessionInput[], weekStartYmd: string): number {
   const { weekStart, weekEndExclusive } = sundayWeekWindowFromAnchorYmd(weekStartYmd);
   const byDay = effortProratedHoursByLocalDay(sessions, weekStart, weekEndExclusive);
@@ -275,7 +281,8 @@ export async function loadHomeActualsVsForecast(
   todayIso: string,
   options?: { projectId?: string },
 ): Promise<HomeActualsVsForecastDTO> {
-  const weeks = lastSundayWeeksEndingThisWeek(todayIso, HOME_VARIANCE_TREND_WEEKS);
+  /** +1 week in the load window so trends can show 12 completed weeks excluding this week. */
+  const weeks = lastSundayWeeksEndingThisWeek(todayIso, HOME_VARIANCE_TREND_WEEKS + 1);
   const currentSunday = weeks[weeks.length - 1]!;
   const priorSunday = weeks.length >= 2 ? weeks[weeks.length - 2]! : addDaysYmd(currentSunday, -7);
   const windowStartYmd = weeks[0]!;
