@@ -2,45 +2,209 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
+import {
+  VARIANCE_BASELINE_FROM_ROW_TOP_PX,
+  VARIANCE_PROJECT_COL_WIDTH,
+  VARIANCE_ROW_MIN_PX,
+  VARIANCE_TOTAL_COL_SURFACE,
+  VarianceSparkCell,
+  varianceSparkCellTitle,
+  weekSparkWithinFive,
+} from "@/components/variance-spark-cell";
 import { loadInboxVarianceReview } from "@/lib/actions/home-inbox";
 import {
   type HomeActualsVsForecastDTO,
+  type HomeActualsVsForecastProject,
   type HomeWeekTotals,
   hasForecastHours,
+  isVarianceWithinPercent,
   makeWeekTotals,
-  variancePercentLabel,
+  sumWeekTotals,
 } from "@/lib/home-actuals-vs-forecast";
-import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
-import { formatForecastSundayDate } from "@/lib/project-forecast";
-
-function MetricRow({ label, totals }: { label: string; totals: HomeWeekTotals }) {
-  const pct = variancePercentLabel(totals.forecast, totals.variance);
-  return (
-    <div
-      className="flex flex-wrap items-baseline justify-between gap-2 rounded-[var(--app-radius)] border px-3 py-2"
-      style={{ borderColor: "var(--app-border)", background: "var(--app-surface-alt)" }}
-    >
-      <span className="text-sm font-medium" style={{ color: "var(--app-text)" }}>
-        {label}
-      </span>
-      <span className="text-sm text-muted-canvas">
-        {formatEffortHoursLabel(totals.forecast)} forecast · {formatEffortHoursLabel(totals.actual)}{" "}
-        actual
-        {pct ? (
-          <span className="ml-1 font-medium" style={{ color: "var(--app-text)" }}>
-            ({pct})
-          </span>
-        ) : null}
-      </span>
-    </div>
-  );
-}
+import { formatSundayWeekLabel } from "@/lib/project-weekly-effort";
 
 function portfolioWeekTotals(data: HomeActualsVsForecastDTO, weekStart: string): HomeWeekTotals {
   return data.projects.reduce((acc, p) => {
     const t = p.byWeek[weekStart] ?? makeWeekTotals(0, 0);
     return makeWeekTotals(acc.forecast + t.forecast, acc.actual + t.actual);
   }, makeWeekTotals(0, 0));
+}
+
+function PortfolioVarianceRow({
+  data,
+  weeks,
+  highlightWeek,
+  currentSunday,
+  chartGridTemplate,
+}: {
+  data: HomeActualsVsForecastDTO;
+  weeks: string[];
+  highlightWeek: string | null;
+  currentSunday: string | null;
+  chartGridTemplate: string;
+}) {
+  const byWeek: Record<string, HomeWeekTotals> = {};
+  for (const week of weeks) {
+    byWeek[week] = portfolioWeekTotals(data, week);
+  }
+  const period = sumWeekTotals(byWeek, weeks);
+
+  return (
+    <>
+      <div
+        className="sticky left-0 z-[1] flex flex-col justify-center border-b border-r px-2 py-3"
+        style={{
+          borderColor: "var(--app-border)",
+          background: "var(--app-surface)",
+          minHeight: VARIANCE_ROW_MIN_PX,
+        }}
+      >
+        <span className="text-sm font-medium leading-snug text-[var(--app-text)]">Portfolio</span>
+      </div>
+      <div
+        className="relative grid min-w-0 border-b"
+        style={{
+          gridTemplateColumns: chartGridTemplate,
+          borderColor: "var(--app-border)",
+          minHeight: VARIANCE_ROW_MIN_PX,
+        }}
+      >
+        <div
+          className="pointer-events-none absolute inset-x-0 z-[0] h-px"
+          style={{
+            top: VARIANCE_BASELINE_FROM_ROW_TOP_PX,
+            background: "var(--app-border)",
+          }}
+          aria-hidden
+        />
+        {weeks.map((week) => {
+          const totals = byWeek[week]!;
+          const emphasized = week === highlightWeek;
+          return (
+            <div
+              key={`portfolio-${week}`}
+              className="relative z-[1] min-h-0 min-w-0"
+              title={varianceSparkCellTitle("Portfolio", totals, formatSundayWeekLabel(week))}
+            >
+              <VarianceSparkCell
+                totals={totals}
+                withinFivePercent={weekSparkWithinFive(totals, week, currentSunday)}
+                emphasized={emphasized}
+              />
+            </div>
+          );
+        })}
+        <div
+          className="relative z-[1] min-h-0 min-w-0 border-l"
+          style={{
+            borderColor: "var(--app-border)",
+            background: VARIANCE_TOTAL_COL_SURFACE,
+          }}
+          title={varianceSparkCellTitle("Portfolio", period, "Total")}
+        >
+          <VarianceSparkCell
+            totals={period}
+            withinFivePercent={
+              hasForecastHours(period.forecast) &&
+              isVarianceWithinPercent(period.forecast, period.variance, 5)
+            }
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ProjectVarianceRow({
+  project,
+  weeks,
+  highlightWeek,
+  currentSunday,
+  chartGridTemplate,
+}: {
+  project: HomeActualsVsForecastProject;
+  weeks: string[];
+  highlightWeek: string | null;
+  currentSunday: string | null;
+  chartGridTemplate: string;
+}) {
+  const period = sumWeekTotals(project.byWeek, weeks);
+
+  return (
+    <>
+      <div
+        className="sticky left-0 z-[1] flex flex-col justify-center border-b border-r px-2 py-3"
+        style={{
+          borderColor: "var(--app-border)",
+          background: "var(--app-surface)",
+          minHeight: VARIANCE_ROW_MIN_PX,
+        }}
+        title={project.name}
+      >
+        <span className="flex items-start gap-1.5">
+          <span className="min-w-0 break-words text-sm font-medium leading-snug text-[var(--app-text)]">
+            {project.name}
+          </span>
+          {project.isIcp ? <InitiativeIcpPill className="mt-0.5 shrink-0" /> : null}
+        </span>
+      </div>
+      <div
+        className="relative grid min-w-0 border-b"
+        style={{
+          gridTemplateColumns: chartGridTemplate,
+          borderColor: "var(--app-border)",
+          minHeight: VARIANCE_ROW_MIN_PX,
+        }}
+      >
+        <div
+          className="pointer-events-none absolute inset-x-0 z-[0] h-px"
+          style={{
+            top: VARIANCE_BASELINE_FROM_ROW_TOP_PX,
+            background: "var(--app-border)",
+          }}
+          aria-hidden
+        />
+        {weeks.map((week) => {
+          const totals = project.byWeek[week] ?? {
+            forecast: 0,
+            actual: 0,
+            variance: 0,
+          };
+          const emphasized = week === highlightWeek;
+          return (
+            <div
+              key={`${project.id}-${week}`}
+              className="relative z-[1] min-h-0 min-w-0"
+              title={varianceSparkCellTitle(project.name, totals, formatSundayWeekLabel(week))}
+            >
+              <VarianceSparkCell
+                totals={totals}
+                withinFivePercent={weekSparkWithinFive(totals, week, currentSunday)}
+                emphasized={emphasized}
+              />
+            </div>
+          );
+        })}
+        <div
+          className="relative z-[1] min-h-0 min-w-0 border-l"
+          style={{
+            borderColor: "var(--app-border)",
+            background: VARIANCE_TOTAL_COL_SURFACE,
+          }}
+          title={varianceSparkCellTitle(project.name, period, "Total")}
+        >
+          <VarianceSparkCell
+            totals={period}
+            withinFivePercent={
+              hasForecastHours(period.forecast) &&
+              isVarianceWithinPercent(period.forecast, period.variance, 5)
+            }
+          />
+        </div>
+      </div>
+    </>
+  );
 }
 
 export function InboxVariancePanel({ fallbackBody }: { fallbackBody: string | null }) {
@@ -71,6 +235,11 @@ export function InboxVariancePanel({ fallbackBody }: { fallbackBody: string | nu
     return data.weeks.slice(-5, -1);
   }, [data]);
 
+  const highlightWeek = trendWeeks.length > 0 ? trendWeeks[trendWeeks.length - 1]! : null;
+  const currentSunday = data?.weeks[data.weeks.length - 1] ?? null;
+  const weekCount = Math.max(trendWeeks.length, 1);
+  const chartGridTemplate = `repeat(${weekCount}, minmax(0, 1fr)) minmax(0, 1fr)`;
+
   if (loading) {
     return <p className="text-sm text-muted-canvas">Loading variance…</p>;
   }
@@ -85,45 +254,96 @@ export function InboxVariancePanel({ fallbackBody }: { fallbackBody: string | nu
     );
   }
 
-  const prior = data.priorWeek;
-  const showPrior = hasForecastHours(prior.forecast) || prior.actual > 0;
-
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-canvas">
-        Portfolio forecast vs actual for last week, plus the prior 4-week trend.
+        Forecast vs actual for the last 4 completed weeks. Last week is highlighted.
       </p>
 
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium" style={{ color: "var(--app-text)" }}>
-          Last week
-        </h3>
-        {showPrior ? (
-          <MetricRow label="Portfolio" totals={prior} />
-        ) : (
-          <p className="text-sm text-muted-canvas">No forecast or actuals for last week.</p>
-        )}
-      </div>
+      {trendWeeks.length === 0 ? (
+        <p className="text-sm text-muted-canvas">Not enough history yet.</p>
+      ) : data.projects.length === 0 ? (
+        <p className="text-sm text-muted-canvas">No active projects.</p>
+      ) : (
+        <div
+          className="overflow-x-auto overflow-y-auto rounded-[10px] border"
+          style={{ borderColor: "var(--app-border)", maxHeight: "min(70vh, 36rem)" }}
+        >
+          <div
+            className="w-full min-w-[36rem]"
+            style={{
+              display: "grid",
+              gridTemplateColumns: `${VARIANCE_PROJECT_COL_WIDTH} minmax(0, 1fr)`,
+            }}
+          >
+            <div
+              className="sticky top-0 left-0 z-[3] border-b border-r px-2 py-2 text-xs font-medium text-muted-canvas"
+              style={{
+                borderColor: "var(--app-border)",
+                background: "var(--app-surface)",
+              }}
+            >
+              Project
+            </div>
+            <div
+              className="sticky top-0 z-[2] grid min-w-0 border-b"
+              style={{
+                gridTemplateColumns: chartGridTemplate,
+                borderColor: "var(--app-border)",
+                background: "var(--app-surface)",
+              }}
+            >
+              {trendWeeks.map((week) => {
+                const isLastWeek = week === highlightWeek;
+                return (
+                  <div
+                    key={week}
+                    className="min-w-0 px-0.5 py-2 text-center text-[0.65rem] font-medium leading-tight"
+                    style={{
+                      color: isLastWeek ? "var(--app-text)" : undefined,
+                      background: isLastWeek
+                        ? "color-mix(in oklab, var(--app-info-surface) 70%, var(--app-surface))"
+                        : undefined,
+                      boxShadow: isLastWeek ? "inset 3px 0 0 0 var(--app-info)" : undefined,
+                    }}
+                  >
+                    <span className={isLastWeek ? "text-[var(--app-text)]" : "text-muted-canvas"}>
+                      {isLastWeek ? "Last week" : formatSundayWeekLabel(week)}
+                    </span>
+                  </div>
+                );
+              })}
+              <div
+                className="min-w-0 border-l px-0.5 py-2 text-center text-[0.65rem] font-medium leading-tight text-muted-canvas"
+                style={{
+                  borderColor: "var(--app-border)",
+                  background: VARIANCE_TOTAL_COL_SURFACE,
+                }}
+              >
+                Total
+              </div>
+            </div>
 
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium" style={{ color: "var(--app-text)" }}>
-          Last 4 weeks
-        </h3>
-        {trendWeeks.length === 0 ? (
-          <p className="text-sm text-muted-canvas">Not enough history yet.</p>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {trendWeeks.map((w) => {
-              const totals = portfolioWeekTotals(data, w);
-              return (
-                <li key={w}>
-                  <MetricRow label={formatForecastSundayDate(w)} totals={totals} />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+            <PortfolioVarianceRow
+              data={data}
+              weeks={trendWeeks}
+              highlightWeek={highlightWeek}
+              currentSunday={currentSunday}
+              chartGridTemplate={chartGridTemplate}
+            />
+            {data.projects.map((p) => (
+              <ProjectVarianceRow
+                key={p.id}
+                project={p}
+                weeks={trendWeeks}
+                highlightWeek={highlightWeek}
+                currentSunday={currentSunday}
+                chartGridTemplate={chartGridTemplate}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

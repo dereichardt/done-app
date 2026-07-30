@@ -4,13 +4,18 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { ForecastWeekCell, TARGET_WEEKLY_FORECAST_HOURS } from "@/app/forecast/forecast-week-cell";
+import { EstimateVarianceLabel } from "@/components/forecast-estimate-variance";
+import { saveInitiativeForecastDraft } from "@/lib/actions/initiative-forecast";
 import {
   loadInboxForecastReviewProjects,
   saveProjectForecastDraft,
 } from "@/lib/actions/project-forecast";
 import type { ForecastProjectDTO } from "@/lib/forecast-data";
+import { INITIATIVE_FORECAST_ROW_KEY } from "@/lib/initiative-forecast";
+import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
 import {
   applyForecastRowEdit,
+  computeEstimateVariance,
   currentSundayWeekYmd,
   formatForecastSundayDate,
   sumActualsConsumedHours,
@@ -47,6 +52,13 @@ function remainingForecastHours(hoursByWeek: WeeklyHours, currentSunday: string)
       weekStart >= currentSunday ? total + Math.max(0, Math.round(hours)) : total,
     0,
   );
+}
+
+function formatSummaryHours(hours: number): string {
+  if (!Number.isFinite(hours) || hours <= 0) return "0h";
+  return formatEffortHoursLabel(hours)
+    .replace(/\s*hrs$/i, "h")
+    .replace(/\s*hr$/i, "h");
 }
 
 function weekInSpan(weekStart: string, startYmd: string | null, endYmd: string | null): boolean {
@@ -213,13 +225,24 @@ export function InboxForecastReviewPanel({
       const reserve = reserveRef.current[p.id] ?? projectReserveHours(p);
       const persistedReserve =
         persistedReserveRef.current[p.id] ?? projectReserveHours(p);
-      const reserveChanged = Math.round(reserve) !== Math.round(persistedReserve);
+      const reserveChanged =
+        p.kind !== "initiative" && Math.round(reserve) !== Math.round(persistedReserve);
       if (cells.length === 0 && !reserveChanged) continue;
-      const res = await saveProjectForecastDraft(p.id, {
-        todayIso: iso,
-        cells,
-        reserveHours: Math.max(0, Math.round(reserve)),
-      });
+
+      const res =
+        p.kind === "initiative"
+          ? await saveInitiativeForecastDraft(p.id, {
+              todayIso: iso,
+              cells: cells.map((cell) => ({
+                ...cell,
+                rowKey: INITIATIVE_FORECAST_ROW_KEY,
+              })),
+            })
+          : await saveProjectForecastDraft(p.id, {
+              todayIso: iso,
+              cells,
+              reserveHours: Math.max(0, Math.round(reserve)),
+            });
       if (res.error) return { error: res.error };
       setPersisted((prev) => ({ ...prev, [p.id]: cloneHours(draft) }));
       setPersistedReserveByProject((prev) => ({ ...prev, [p.id]: reserve }));
@@ -275,7 +298,7 @@ export function InboxForecastReviewPanel({
       </p>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[36rem] border-collapse text-sm">
+        <table className="w-full min-w-[48rem] border-collapse text-sm">
           <thead>
             <tr>
               <th
@@ -283,6 +306,12 @@ export function InboxForecastReviewPanel({
                 style={{ color: "var(--app-text)" }}
               >
                 Project
+              </th>
+              <th
+                className="sticky z-[1] bg-[var(--app-surface)] px-2 py-2 text-left font-medium"
+                style={{ left: "10rem", color: "var(--app-text-muted)", minWidth: "9.5rem" }}
+              >
+                Totals
               </th>
               {weeks.map((w) => (
                 <th
@@ -305,6 +334,10 @@ export function InboxForecastReviewPanel({
               >
                 All projects
               </td>
+              <td
+                className="sticky z-[1] bg-[var(--app-surface)] px-2 py-2"
+                style={{ left: "10rem" }}
+              />
               {weeks.map((w) => (
                 <td key={w} className="px-1 py-2 align-bottom">
                   <ForecastWeekCell
@@ -321,14 +354,65 @@ export function InboxForecastReviewPanel({
             {withForecast.map((project) => {
               const hours = drafts[project.id] ?? project.hoursByWeek;
               const writable = projectWritableWeeks(project, weeks, currentSunday);
+              const estimatedTotal = sumEstimatedRoundedHours(project.integrations);
+              const actualsTotal = sumActualsConsumedHours(project.actualHours);
+              const forecastRemainingTotal = remainingForecastHours(hours, currentSunday);
+              const liveVariance = computeEstimateVariance({
+                estimated: estimatedTotal,
+                actuals: actualsTotal,
+                forecastTotal: forecastRemainingTotal,
+              });
               return (
                 <tr key={project.id} className="border-t" style={{ borderColor: "var(--app-border)" }}>
                   <td
                     className="sticky left-0 z-[1] max-w-[10rem] truncate bg-[var(--app-surface)] px-2 py-2 font-medium"
-                    style={{ color: "var(--app-text)" }}
+                    style={{ color: "var(--app-text)", width: "10rem" }}
                     title={project.customer_name}
                   >
                     {project.customer_name}
+                  </td>
+                  <td
+                    className="sticky z-[1] bg-[var(--app-surface)] px-2 py-2 align-top"
+                    style={{ left: "10rem", minWidth: "9.5rem" }}
+                  >
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-medium text-[var(--app-text-muted)]">
+                          Estimated
+                        </div>
+                        <div className="truncate text-xs font-medium tabular-nums text-[var(--app-text)]">
+                          {formatSummaryHours(estimatedTotal)}
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-medium text-[var(--app-text-muted)]">
+                          Actuals
+                        </div>
+                        <div className="truncate text-xs font-medium tabular-nums text-[var(--app-text)]">
+                          {formatSummaryHours(actualsTotal)}
+                        </div>
+                      </div>
+                      <div className="col-span-2 min-w-0">
+                        <div className="text-[10px] font-medium text-[var(--app-text-muted)]">
+                          Forecast
+                        </div>
+                        <div className="truncate text-xs font-medium tabular-nums text-[var(--app-text)]">
+                          {formatSummaryHours(forecastRemainingTotal)}
+                        </div>
+                        <div className="mt-1 text-[10px] font-medium text-[var(--app-text-muted)]">
+                          {liveVariance.kind === "under"
+                            ? "Under estimate"
+                            : liveVariance.kind === "over"
+                              ? "Over estimate"
+                              : "Estimate"}
+                        </div>
+                        <EstimateVarianceLabel
+                          variance={liveVariance}
+                          formatHours={formatSummaryHours}
+                          role={liveVariance.kind === "over" ? "status" : undefined}
+                        />
+                      </div>
+                    </div>
                   </td>
                   {weeks.map((w) => {
                     const isCurrent = w === currentSunday;

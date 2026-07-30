@@ -3,13 +3,13 @@ import { isRemovedFromScope } from "@/lib/integration-metadata";
 
 /**
  * Side effects when an integration first enters `removed_from_scope`:
- * stop timers on open tasks, hard-delete those open tasks, dismiss stale inbox items.
+ * stop timers on open tasks, hard-delete those open tasks.
  * Done tasks and logged hours are left intact.
  */
 export async function applyEnteringRemovedFromScope(
   supabase: SupabaseClient,
   projectIntegrationId: string,
-  ownerId: string,
+  _ownerId: string,
 ): Promise<{ error?: string }> {
   const { data: tracks, error: trackErr } = await supabase
     .from("project_tracks")
@@ -44,16 +44,6 @@ export async function applyEnteringRemovedFromScope(
       if (deleteErr) return { error: deleteErr.message };
     }
   }
-
-  const { error: inboxErr } = await supabase
-    .from("home_inbox_items")
-    .update({ status: "dismissed", resolved_at: new Date().toISOString() })
-    .eq("owner_id", ownerId)
-    .eq("status", "open")
-    .eq("rule_key", "stale_integration")
-    .like("dedupe_key", `stale_integration:${projectIntegrationId}:%`);
-
-  if (inboxErr) return { error: inboxErr.message };
 
   return {};
 }

@@ -5,6 +5,11 @@ import { CanvasSelect } from "@/components/canvas-select";
 import { FormSwitch } from "@/components/form-switch";
 import { ProjectColorPicker } from "@/components/project-color-picker";
 import { createProject } from "@/lib/actions/projects";
+import {
+  deriveProjectAbbreviation,
+  normalizeProjectAbbreviation,
+  PROJECT_ABBREVIATION_MAX_LENGTH,
+} from "@/lib/project-abbreviation";
 import { EXPERT_ASSIST_SYSTEM_KEY, type ProjectTypeLookup } from "@/lib/project-types";
 import { useActionState, useState } from "react";
 
@@ -19,9 +24,30 @@ export function CreateProjectForm({
 }) {
   const [state, formAction, pending] = useActionState(createProject, {});
   const [projectTypeId, setProjectTypeId] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [abbreviation, setAbbreviation] = useState("");
+  const [abbreviationOverride, setAbbreviationOverride] = useState(false);
   const isExpertAssist =
     projectTypes.find((type) => type.id === projectTypeId)?.system_key ===
     EXPERT_ASSIST_SYSTEM_KEY;
+
+  function handleCustomerNameChange(value: string) {
+    setCustomerName(value);
+    if (!abbreviationOverride) {
+      setAbbreviation(deriveProjectAbbreviation(value));
+    }
+  }
+
+  function handleAbbreviationOverrideChange(checked: boolean) {
+    setAbbreviationOverride(checked);
+    if (!checked) {
+      setAbbreviation(deriveProjectAbbreviation(customerName));
+    }
+  }
+
+  function handleAbbreviationChange(value: string) {
+    setAbbreviation(normalizeProjectAbbreviation(value));
+  }
 
   return (
     <form
@@ -33,10 +59,44 @@ export function CreateProjectForm({
         <input
           name="customer_name"
           required
+          value={customerName}
+          onChange={(e) => handleCustomerNameChange(e.target.value)}
           className="input-canvas mt-1"
           placeholder="Acme Corp"
         />
       </label>
+      <div className="flex items-start gap-4">
+        <div className="min-w-0">
+          <label
+            htmlFor="new-project-abbreviation"
+            className="block text-sm font-medium"
+            style={{ color: "var(--app-text)" }}
+          >
+            Project abbreviation
+          </label>
+          <input
+            id="new-project-abbreviation"
+            name="abbreviation"
+            required
+            value={abbreviation}
+            onChange={(e) => handleAbbreviationChange(e.target.value)}
+            readOnly={!abbreviationOverride}
+            maxLength={PROJECT_ABBREVIATION_MAX_LENGTH}
+            autoComplete="off"
+            spellCheck={false}
+            className="input-canvas mt-1 w-28 uppercase read-only:cursor-not-allowed read-only:opacity-70"
+            placeholder="AC"
+          />
+        </div>
+        <FormSwitch
+          label="Override"
+          checked={abbreviationOverride}
+          onCheckedChange={handleAbbreviationOverrideChange}
+          layout="stack"
+          checkedColor="neutral"
+          className="shrink-0 pt-0.5"
+        />
+      </div>
       <div className="canvas-select-field flex flex-col gap-1">
         <label
           className="block text-sm font-medium"

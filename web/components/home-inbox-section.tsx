@@ -22,7 +22,7 @@ import {
   markHomeInboxItemRead,
   syncHomeInboxNow,
 } from "@/lib/actions/home-inbox";
-import { formatInboxTimestamp, staleIntegrationProjectName } from "@/lib/inbox-format";
+import { formatInboxTimestamp } from "@/lib/inbox-format";
 import type { HomeInboxItemRow } from "@/lib/home-inbox-rules";
 import { getUserTodayIso } from "@/lib/user-preferences";
 import { addDaysYmd, mondayYmdOfWeekContaining } from "@/lib/zoned-datetime";
@@ -491,7 +491,6 @@ export function HomeInboxSection({
                   {visibleItems.map((item) => {
                     const unread = item.read_at == null;
                     const selected = selectedId === item.id;
-                    const projectName = staleIntegrationProjectName(item);
                     return (
                       <li key={item.id} className="m-0 list-none py-0.5">
                         <div
@@ -523,9 +522,6 @@ export function HomeInboxSection({
                               >
                                 {item.title}
                               </span>
-                              {projectName ? (
-                                <span className="mt-0.5 block text-xs text-muted-canvas">{projectName}</span>
-                              ) : null}
                               <span className="mt-0.5 block text-xs text-muted-canvas">
                                 {formatInboxTimestamp(item.created_at, timezone)}
                               </span>
@@ -562,7 +558,7 @@ export function HomeInboxSection({
                   </h2>
                   <p className="mt-3 text-sm text-muted-canvas">
                     This dismisses every open inbox item. They will not regenerate for the same week window.
-                    New items can still appear next week from your Settings cadence and integrations.
+                    New items can still appear next week from your forecast review day in Settings.
                   </p>
                   {deleteAllError ? (
                     <p className="mt-3 text-sm" role="alert" style={{ color: "var(--app-danger)" }}>

@@ -159,7 +159,7 @@ export async function loadOpenHomeInboxCount(): Promise<number> {
   return count ?? 0;
 }
 
-const HOME_INBOX_RULES_VERSION = 1;
+const HOME_INBOX_RULES_VERSION = 2;
 
 export async function syncAndLoadHomeInbox(
   force = false,

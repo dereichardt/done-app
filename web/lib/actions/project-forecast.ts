@@ -15,7 +15,7 @@ import {
 } from "@/lib/project-forecast";
 import { generateExpertAssistForecastHours } from "@/lib/expert-assist-forecast";
 import {
-  loadAllActiveForecastProjects,
+  loadAllActiveForecastItems,
   loadForecastProjectDTO,
   type ForecastProjectDTO,
 } from "@/lib/forecast-data";
@@ -375,7 +375,7 @@ export async function saveProjectForecastDraft(
   return {};
 }
 
-/** Active projects + today for the inbox slim forecast review panel. */
+/** Active projects + initiatives + today for the inbox forecast review panel. */
 export async function loadInboxForecastReviewProjects(): Promise<{
   error?: string;
   todayIso?: string;
@@ -389,7 +389,7 @@ export async function loadInboxForecastReviewProjects(): Promise<{
 
   const prefsRes = await loadUserPreferences();
   const todayIso = getUserTodayIso(prefsRes.preferences.timezone);
-  const projects = await loadAllActiveForecastProjects(supabase, user.id, {
+  const projects = await loadAllActiveForecastItems(supabase, user.id, {
     todayIso,
     timeZone: prefsRes.preferences.timezone,
   });

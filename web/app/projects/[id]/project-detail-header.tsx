@@ -5,6 +5,11 @@ import { CanvasSelect } from "@/components/canvas-select";
 import { FormSwitch } from "@/components/form-switch";
 import { ProjectColorPicker } from "@/components/project-color-picker";
 import { reopenProject, updateProjectDetails } from "@/lib/actions/projects";
+import {
+  deriveProjectAbbreviation,
+  normalizeProjectAbbreviation,
+  PROJECT_ABBREVIATION_MAX_LENGTH,
+} from "@/lib/project-abbreviation";
 import type { ProjectColorKey } from "@/lib/project-colors";
 import {
   EXPERT_ASSIST_SYSTEM_KEY,
@@ -20,6 +25,7 @@ type LookupRow = { id: string; name: string };
 export function ProjectDetailHeader({
   projectId,
   customerName,
+  initialAbbreviation,
   completedAt,
   typeLabel,
   roleLabel,
@@ -35,6 +41,7 @@ export function ProjectDetailHeader({
 }: {
   projectId: string;
   customerName: string;
+  initialAbbreviation: string;
   completedAt: string | null;
   typeLabel: string | null;
   roleLabel: string | null;
@@ -56,6 +63,9 @@ export function ProjectDetailHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [reopening, setReopening] = useState(false);
   const [projectTypeId, setProjectTypeId] = useState(initialProjectTypeId ?? "");
+  const [editCustomerName, setEditCustomerName] = useState(customerName);
+  const [abbreviation, setAbbreviation] = useState(initialAbbreviation);
+  const [abbreviationOverride, setAbbreviationOverride] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const completeDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -80,8 +90,31 @@ export function ProjectDetailHeader({
   function openEditMode() {
     setEditKey((k) => k + 1);
     setProjectTypeId(initialProjectTypeId ?? "");
+    setEditCustomerName(customerName);
+    setAbbreviation(initialAbbreviation);
+    setAbbreviationOverride(
+      initialAbbreviation !== deriveProjectAbbreviation(customerName),
+    );
     setEditing(true);
     setError(null);
+  }
+
+  function handleCustomerNameChange(value: string) {
+    setEditCustomerName(value);
+    if (!abbreviationOverride) {
+      setAbbreviation(deriveProjectAbbreviation(value));
+    }
+  }
+
+  function handleAbbreviationOverrideChange(checked: boolean) {
+    setAbbreviationOverride(checked);
+    if (!checked) {
+      setAbbreviation(deriveProjectAbbreviation(editCustomerName));
+    }
+  }
+
+  function handleAbbreviationChange(value: string) {
+    setAbbreviation(normalizeProjectAbbreviation(value));
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -89,6 +122,7 @@ export function ProjectDetailHeader({
     setError(null);
     const fd = new FormData(e.currentTarget);
     const customer_name = String(fd.get("customer_name") ?? "").trim();
+    const abbreviationValue = String(fd.get("abbreviation") ?? "").trim();
     const project_type_id = String(fd.get("project_type_id") ?? "").trim() || null;
     const primary_role_id = String(fd.get("primary_role_id") ?? "").trim() || null;
     const project_color_key = String(fd.get("project_color_key") ?? "").trim() || null;
@@ -101,6 +135,7 @@ export function ProjectDetailHeader({
     try {
       const result = await updateProjectDetails(projectId, {
         customer_name,
+        abbreviation: abbreviationValue,
         project_type_id,
         primary_role_id,
         project_color_key,
@@ -251,11 +286,44 @@ export function ProjectDetailHeader({
               <input
                 name="customer_name"
                 required
-                defaultValue={customerName}
+                value={editCustomerName}
+                onChange={(e) => handleCustomerNameChange(e.target.value)}
                 className="input-canvas mt-1"
                 placeholder="Customer or project name"
               />
             </label>
+            <div className="flex items-start gap-4">
+              <div className="min-w-0">
+                <label
+                  htmlFor="project-detail-abbreviation"
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--app-text)" }}
+                >
+                  Project abbreviation
+                </label>
+                <input
+                  id="project-detail-abbreviation"
+                  name="abbreviation"
+                  required
+                  value={abbreviation}
+                  onChange={(e) => handleAbbreviationChange(e.target.value)}
+                  readOnly={!abbreviationOverride}
+                  maxLength={PROJECT_ABBREVIATION_MAX_LENGTH}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="input-canvas mt-1 w-28 uppercase read-only:cursor-not-allowed read-only:opacity-70"
+                  placeholder="AC"
+                />
+              </div>
+              <FormSwitch
+                label="Override"
+                checked={abbreviationOverride}
+                onCheckedChange={handleAbbreviationOverrideChange}
+                layout="stack"
+                checkedColor="neutral"
+                className="shrink-0 pt-0.5"
+              />
+            </div>
             <div className="canvas-select-field flex flex-col gap-1">
               <label
                 className="block text-sm font-medium"

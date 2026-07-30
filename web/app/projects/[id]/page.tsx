@@ -48,6 +48,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       `
       id,
       customer_name,
+      abbreviation,
       completed_at,
       project_type_id,
       primary_role_id,
@@ -378,6 +379,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       <ProjectDetailHeader
         projectId={id}
         customerName={project.customer_name}
+        initialAbbreviation={project.abbreviation}
         completedAt={project.completed_at ?? null}
         typeLabel={typeName}
         roleLabel={roleName}

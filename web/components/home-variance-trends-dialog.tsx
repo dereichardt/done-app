@@ -5,181 +5,23 @@ import { useEffect, useRef } from "react";
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
 import {
+  VARIANCE_BASELINE_FROM_ROW_TOP_PX,
+  VARIANCE_PROJECT_COL_WIDTH,
+  VARIANCE_ROW_MIN_PX,
+  VARIANCE_TOTAL_COL_SURFACE,
+  VarianceSparkCell,
+  varianceSparkCellTitle,
+  weekSparkWithinFive,
+} from "@/components/variance-spark-cell";
+import {
   type HomeActualsVsForecastDTO,
   type HomeActualsVsForecastProject,
-  type HomeWeekTotals,
   hasForecastHours,
   isVarianceWithinPercent,
   sumWeekTotals,
-  variancePercentAbs,
-  variancePercentLabel,
   varianceTrendWeeks,
 } from "@/lib/home-actuals-vs-forecast";
-import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
 import { formatSundayWeekLabel } from "@/lib/project-weekly-effort";
-
-/** Narrow label column; week + total columns share remaining width equally. */
-const PROJECT_COL_WIDTH = "minmax(4.75rem, 6.25rem)";
-const CELL_PAD_TOP_PX = 8;
-const FA_BLOCK_PX = 20;
-const LABEL_BAND_PX = 36;
-const PLOT_HEIGHT_PX = 96;
-const BAR_MAX_HALF_PX = PLOT_HEIGHT_PX / 2 - 1;
-/** Vertical center of chart band — shared baseline across week columns in a row. */
-const BASELINE_FROM_ROW_TOP_PX =
-  CELL_PAD_TOP_PX + FA_BLOCK_PX + 2 + LABEL_BAND_PX + PLOT_HEIGHT_PX / 2;
-const ROW_MIN_PX =
-  CELL_PAD_TOP_PX +
-  FA_BLOCK_PX +
-  2 +
-  LABEL_BAND_PX +
-  PLOT_HEIGHT_PX +
-  LABEL_BAND_PX +
-  8;
-const ON_TARGET_EPS = 0.001;
-const TOTAL_COL_SURFACE = "var(--app-surface-alt)";
-
-function formatCompactHours(hours: number): string {
-  if (!Number.isFinite(hours) || Math.abs(hours) < 0.001) return "0";
-  const q = Math.round(hours * 4) / 4;
-  return Number.isInteger(q) ? String(q) : String(parseFloat(q.toFixed(2)));
-}
-
-function formatAbsVarianceHours(variance: number): string {
-  if (!Number.isFinite(variance) || Math.abs(variance) < 0.001) return "0";
-  return formatCompactHours(Math.abs(variance));
-}
-
-function VarianceLabel({
-  variance,
-  pctLabel,
-}: {
-  variance: number;
-  pctLabel: string | null;
-}) {
-  return (
-    <div className="flex w-full flex-col items-center justify-center">
-      <span className="text-[0.7rem] font-medium tabular-nums leading-tight text-[var(--app-text)]">
-        {formatAbsVarianceHours(variance)} hrs
-      </span>
-      {pctLabel ? (
-        <span className="text-[0.625rem] font-normal leading-tight tabular-nums text-muted-canvas">
-          {pctLabel}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function VarianceSparkCell({
-  totals,
-  withinFivePercent,
-}: {
-  totals: HomeWeekTotals;
-  withinFivePercent: boolean;
-}) {
-  const hasForecast = hasForecastHours(totals.forecast);
-  const onTarget = !hasForecast || Math.abs(totals.variance) < ON_TARGET_EPS;
-  /** Over forecast → bar up; under forecast → bar down. */
-  const isOver = hasForecast && totals.variance < -ON_TARGET_EPS;
-  const isUnder = hasForecast && totals.variance > ON_TARGET_EPS;
-  const pctAbs = hasForecast ? variancePercentAbs(totals.forecast, totals.variance) : null;
-  const pctLabel = hasForecast ? variancePercentLabel(totals.forecast, totals.variance) : null;
-  const barHeightPx =
-    pctAbs != null && !onTarget
-      ? Math.min(BAR_MAX_HALF_PX, Math.max(2, (Math.min(pctAbs, 100) / 100) * BAR_MAX_HALF_PX))
-      : 0;
-
-  return (
-    <div
-      className="flex h-full min-h-0 flex-col items-center px-0.5 text-center"
-      style={{
-        paddingTop: CELL_PAD_TOP_PX,
-        paddingBottom: 8,
-        ...(withinFivePercent ? { background: "var(--app-state-active-surface)" } : undefined),
-      }}
-    >
-      <div
-        className="flex w-full shrink-0 items-center justify-center"
-        style={{ height: FA_BLOCK_PX }}
-      >
-        {hasForecast ? (
-          <span className="text-[0.65rem] leading-tight text-muted-canvas tabular-nums">
-            F {formatCompactHours(totals.forecast)} · A {formatCompactHours(totals.actual)}
-          </span>
-        ) : (
-          <span className="text-sm font-medium leading-tight text-muted-canvas">—</span>
-        )}
-      </div>
-
-      <div
-        className="mt-0.5 flex w-full shrink-0 items-end justify-center"
-        style={{ height: LABEL_BAND_PX }}
-      >
-        {isOver ? <VarianceLabel variance={totals.variance} pctLabel={pctLabel} /> : null}
-      </div>
-
-      <div
-        className="relative w-full shrink-0"
-        style={{ height: PLOT_HEIGHT_PX }}
-        aria-hidden={!hasForecast}
-      >
-        {isOver ? (
-          <div
-            className="absolute left-1/2 w-7 -translate-x-1/2 rounded-sm bg-[var(--app-text)]"
-            style={{
-              bottom: "50%",
-              height: barHeightPx,
-            }}
-          />
-        ) : null}
-        {isUnder ? (
-          <div
-            className="absolute left-1/2 w-7 -translate-x-1/2 rounded-sm bg-[var(--app-text)]"
-            style={{
-              top: "50%",
-              height: barHeightPx,
-            }}
-          />
-        ) : null}
-      </div>
-
-      <div
-        className="flex w-full shrink-0 items-start justify-center"
-        style={{ height: LABEL_BAND_PX }}
-      >
-        {isUnder ? <VarianceLabel variance={totals.variance} pctLabel={pctLabel} /> : null}
-      </div>
-    </div>
-  );
-}
-
-function sparkCellTitle(
-  projectName: string,
-  totals: HomeWeekTotals,
-  label: string,
-): string {
-  const hasForecast = hasForecastHours(totals.forecast);
-  const pctLabel = hasForecast ? variancePercentLabel(totals.forecast, totals.variance) : null;
-  if (hasForecast) {
-    return `${projectName} (${label}): variance ${formatEffortHoursLabel(totals.variance)}${
-      pctLabel ? ` (${pctLabel})` : ""
-    }, forecast ${formatEffortHoursLabel(totals.forecast)}, actual ${formatEffortHoursLabel(totals.actual)}`;
-  }
-  return `${projectName} (${label}): no forecast, actual ${formatEffortHoursLabel(totals.actual)}`;
-}
-
-function weekSparkWithinFive(
-  totals: HomeWeekTotals,
-  week: string,
-  currentSunday: string | null,
-): boolean {
-  const hasForecast = hasForecastHours(totals.forecast);
-  const isPastWeek = currentSunday != null && week < currentSunday;
-  return (
-    hasForecast && isPastWeek && isVarianceWithinPercent(totals.forecast, totals.variance, 5)
-  );
-}
 
 function ProjectVarianceRow({
   project,
@@ -201,7 +43,7 @@ function ProjectVarianceRow({
         style={{
           borderColor: "var(--app-border)",
           background: "var(--app-surface)",
-          minHeight: ROW_MIN_PX,
+          minHeight: VARIANCE_ROW_MIN_PX,
         }}
         title={project.name}
       >
@@ -217,13 +59,13 @@ function ProjectVarianceRow({
         style={{
           gridTemplateColumns: chartGridTemplate,
           borderColor: "var(--app-border)",
-          minHeight: ROW_MIN_PX,
+          minHeight: VARIANCE_ROW_MIN_PX,
         }}
       >
         <div
           className="pointer-events-none absolute inset-x-0 z-[0] h-px"
           style={{
-            top: BASELINE_FROM_ROW_TOP_PX,
+            top: VARIANCE_BASELINE_FROM_ROW_TOP_PX,
             background: "var(--app-border)",
           }}
           aria-hidden
@@ -238,7 +80,7 @@ function ProjectVarianceRow({
             <div
               key={`${project.id}-${week}`}
               className="relative z-[1] min-h-0 min-w-0"
-              title={sparkCellTitle(project.name, totals, formatSundayWeekLabel(week))}
+              title={varianceSparkCellTitle(project.name, totals, formatSundayWeekLabel(week))}
             >
               <VarianceSparkCell
                 totals={totals}
@@ -251,9 +93,9 @@ function ProjectVarianceRow({
           className="relative z-[1] min-h-0 min-w-0 border-l"
           style={{
             borderColor: "var(--app-border)",
-            background: TOTAL_COL_SURFACE,
+            background: VARIANCE_TOTAL_COL_SURFACE,
           }}
-          title={sparkCellTitle(project.name, period, "Total")}
+          title={varianceSparkCellTitle(project.name, period, "Total")}
         >
           <VarianceSparkCell
             totals={period}
@@ -325,7 +167,7 @@ export function HomeVarianceTrendsDialog({
                 className="w-full min-w-0"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: `${PROJECT_COL_WIDTH} minmax(0, 1fr)`,
+                  gridTemplateColumns: `${VARIANCE_PROJECT_COL_WIDTH} minmax(0, 1fr)`,
                 }}
               >
                 <div
@@ -357,7 +199,7 @@ export function HomeVarianceTrendsDialog({
                     className="min-w-0 border-l px-0.5 py-2 text-center text-[0.65rem] font-medium leading-tight text-muted-canvas"
                     style={{
                       borderColor: "var(--app-border)",
-                      background: TOTAL_COL_SURFACE,
+                      background: VARIANCE_TOTAL_COL_SURFACE,
                     }}
                   >
                     Total

@@ -9,6 +9,10 @@ import {
   isRemovedFromScope,
 } from "@/lib/integration-metadata";
 import { isProjectColorKey, normalizeProjectColorKey } from "@/lib/project-colors";
+import {
+  isValidProjectAbbreviation,
+  normalizeProjectAbbreviation,
+} from "@/lib/project-abbreviation";
 import { maybeApplyEnteringRemovedFromScope } from "@/lib/project-integration-removed-from-scope";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -72,6 +76,14 @@ export async function createProject(
   const customer_name = String(formData.get("customer_name") ?? "").trim();
   if (!customer_name) return { error: "Customer name is required" };
 
+  const abbreviation = normalizeProjectAbbreviation(
+    String(formData.get("abbreviation") ?? ""),
+  );
+  if (!abbreviation) return { error: "Project abbreviation is required" };
+  if (!isValidProjectAbbreviation(abbreviation)) {
+    return { error: "Project abbreviation must be 1–12 uppercase letters" };
+  }
+
   const project_type_id = String(formData.get("project_type_id") ?? "").trim();
   const primary_role_id = String(formData.get("primary_role_id") ?? "").trim();
   const project_color_key_raw = String(formData.get("project_color_key") ?? "").trim();
@@ -120,6 +132,7 @@ export async function createProject(
     .insert({
       owner_id: user.id,
       customer_name,
+      abbreviation,
       project_type_id: project_type_id || null,
       primary_role_id: primary_role_id || null,
       project_color_key,
@@ -162,6 +175,7 @@ export async function updateProjectDetails(
   projectId: string,
   data: {
     customer_name: string;
+    abbreviation: string;
     project_type_id: string | null;
     primary_role_id: string | null;
     project_color_key: string | null;
@@ -179,6 +193,12 @@ export async function updateProjectDetails(
 
   const customer_name = data.customer_name.trim();
   if (!customer_name) return { error: "Customer name is required" };
+
+  const abbreviation = normalizeProjectAbbreviation(data.abbreviation);
+  if (!abbreviation) return { error: "Project abbreviation is required" };
+  if (!isValidProjectAbbreviation(abbreviation)) {
+    return { error: "Project abbreviation must be 1–12 uppercase letters" };
+  }
 
   const project_type_id = data.project_type_id?.trim() || null;
   const primary_role_id = data.primary_role_id?.trim() || null;
@@ -233,6 +253,7 @@ export async function updateProjectDetails(
 
   const detailUpdates = {
     customer_name,
+    abbreviation,
     project_type_id,
     primary_role_id,
     project_color_key,
