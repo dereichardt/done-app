@@ -21,6 +21,7 @@ import {
   type ActiveWorkSessionIndicatorDTO,
 } from "@/lib/actions/integration-tasks";
 import { startOrReplaceInternalActiveWorkSession } from "@/lib/actions/internal-tasks";
+import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import {
   deleteAnyTask,
   loadTaskWorkSessionHistory,
@@ -417,8 +418,7 @@ export function TasksPageClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialSnapshot` read when `activeWorkIndicatorSyncKey` changes
   }, [activeWorkIndicatorSyncKey]);
 
-  const effectiveGlobalActiveTaskId =
-    activeWorkSession?.task_id ?? initialSnapshot.activeWorkSessionIndicator?.task_id ?? null;
+  const effectiveGlobalActiveTaskId = activeWorkSession?.task_id ?? null;
 
   const [expandedWorkTaskId, setExpandedWorkTaskId] = useState<string | null>(null);
 
@@ -447,6 +447,7 @@ export function TasksPageClient({
       const clearedTaskId = activeWorkSession?.task_id ?? expandedWorkTaskId;
       setActiveWorkSession(null);
       setExpandedWorkTaskId(null);
+      notifyActiveWorkSessionChanged({ cleared: true });
       if (opts?.completeTask && clearedTaskId) {
         markTaskCompletedLocally(clearedTaskId);
       }
@@ -482,11 +483,13 @@ export function TasksPageClient({
           setActiveWorkSession(null);
           setExpandedWorkTaskId(null);
           setWorkSessionActionError(res.error);
+          notifyActiveWorkSessionChanged({ cleared: true });
           return;
         }
         if (res.session) {
           setActiveWorkSession(res.session);
           setExpandedWorkTaskId(task.id);
+          notifyActiveWorkSessionChanged();
         }
       })();
     },

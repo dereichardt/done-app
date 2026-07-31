@@ -12,6 +12,7 @@ import {
   type ActiveWorkSessionIndicatorDTO,
   type IntegrationTaskSnapshot,
 } from "@/lib/actions/integration-tasks";
+import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { ProjectIntegrationListRow } from "@/components/project-integration-list-row";
 import { isRemovedFromScope } from "@/lib/integration-metadata";
@@ -122,6 +123,7 @@ export function ProjectIntegrationsSection({
   const afterActiveWorkSessionCleared = useCallback(
     (opts?: { completeTask?: boolean; refresh?: boolean }) => {
       setActiveSessionIndicator(null);
+      notifyActiveWorkSessionChanged({ cleared: true });
       if (opts?.refresh !== false) {
         router.refresh();
       }
@@ -138,6 +140,7 @@ export function ProjectIntegrationsSection({
       paused_ms_accumulated: session.paused_ms_accumulated,
       pause_started_at: session.pause_started_at,
     });
+    notifyActiveWorkSessionChanged();
     requestAnimationFrame(() => activeWorkSessionDialogRef.current?.showModal());
   }, []);
 

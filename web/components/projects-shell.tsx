@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { HeaderActiveWorkSession } from "@/components/header-active-work-session";
 import { loadOpenHomeInboxCount } from "@/lib/actions/home-inbox";
 import { loadProjectHeader, signOut } from "@/lib/actions/projects";
 import { projectColorCssVar, type ProjectColorKey } from "@/lib/project-colors";
@@ -459,6 +460,7 @@ export function ProjectsShell({
               )}
             </Link>
             <div className="shell-header-actions">
+              <HeaderActiveWorkSession />
               <Link
                 href="/inbox"
                 className={`shell-inbox-btn${isInboxRoute ? " shell-inbox-btn--active" : ""}${inboxOpenCount > 0 ? " shell-inbox-btn--has-items" : ""}`}

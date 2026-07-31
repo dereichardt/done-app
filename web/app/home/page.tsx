@@ -1,7 +1,8 @@
 import { HomeActualsVsForecast } from "@/components/home-actuals-vs-forecast";
 import { HomeInboxGate } from "@/components/home-inbox-gate";
-import { HomeSummaryStrip } from "@/components/home-summary-strip";
+import { HomeTopDashboard } from "@/components/home-top-dashboard";
 import { loadHomeProjectPickerRows } from "@/lib/actions/home";
+import { loadTasksPageSnapshot } from "@/lib/actions/tasks-page";
 import { loadUserPreferences } from "@/lib/actions/user-preferences";
 import { loadHomeActualsVsForecast } from "@/lib/home-actuals-vs-forecast";
 import { loadHomeSummary } from "@/lib/home-summary";
@@ -16,16 +17,21 @@ export default async function HomePage() {
 
   const prefsRes = await loadUserPreferences();
   const todayIso = getUserTodayIso(prefsRes.preferences.timezone);
-  const [inboxItems, projects, summary, actualsVsForecast] = await Promise.all([
+  const [inboxItems, projects, summary, actualsVsForecast, tasksRes] = await Promise.all([
     loadOpenHomeInboxItems(supabase, user.id),
     loadHomeProjectPickerRows(),
     loadHomeSummary(supabase, user.id, prefsRes.preferences),
     loadHomeActualsVsForecast(supabase, user.id, todayIso),
+    loadTasksPageSnapshot(),
   ]);
 
   return (
     <div>
-      <HomeSummaryStrip summary={summary} />
+      <HomeTopDashboard
+        summary={summary}
+        tasksSnapshot={tasksRes.snapshot ?? null}
+        todayIso={todayIso}
+      />
 
       <HomeActualsVsForecast data={actualsVsForecast} />
 

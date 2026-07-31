@@ -11,6 +11,8 @@ export const TASKS_PAGE_INTERNAL_PROJECT_ID = "__internal__";
 export type TasksPageProject = {
   id: string;
   name: string;
+  /** Uppercase project abbreviation (1–12 letters) for compact UI. */
+  abbreviation: string;
   /** Resolved color key (normalized) for the project — drives row tinting on the Tasks page. */
   colorKey: ProjectColorKey | null;
   /** Pre-resolved CSS custom property name (e.g. `--project-color-blue-medium`) for convenience. */

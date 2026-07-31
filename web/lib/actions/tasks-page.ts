@@ -175,6 +175,7 @@ async function loadInternalWorkTasksForSnapshot(
   const internalProject: TasksPageProject = {
     id: TASKS_PAGE_INTERNAL_PROJECT_ID,
     name: "Internal",
+    abbreviation: "INT",
     colorKey: null,
     colorVar: null,
   };
@@ -204,7 +205,7 @@ export async function loadTasksPageSnapshot(): Promise<{
   ] = await Promise.all([
     supabase
       .from("projects")
-      .select("id, customer_name, active_dashboard_order, project_color_key")
+      .select("id, customer_name, abbreviation, active_dashboard_order, project_color_key")
       .eq("owner_id", user.id)
       .is("completed_at", null)
       .order("active_dashboard_order", { ascending: true, nullsFirst: false })
@@ -218,9 +219,14 @@ export async function loadTasksPageSnapshot(): Promise<{
 
   const projects: TasksPageProject[] = (projectRows ?? []).map((p) => {
     const colorKey = normalizeProjectColorKey(p.project_color_key);
+    const name = (p.customer_name ?? "").trim() || "Untitled project";
+    const abbreviation = String(p.abbreviation ?? "")
+      .trim()
+      .toUpperCase() || name.slice(0, 3).toUpperCase() || "PRJ";
     return {
       id: p.id,
-      name: (p.customer_name ?? "").trim() || "Untitled project",
+      name,
+      abbreviation,
       colorKey,
       colorVar: colorKey ? projectColorCssVar(colorKey) : null,
     };

@@ -4,6 +4,7 @@ import { ActiveWorkSessionDialog } from "@/components/integration-tasks-panel";
 import { ProjectRowSummaryMetrics } from "@/components/project-row-summary-metrics";
 import { reorderActiveProjects } from "@/lib/actions/projects";
 import type { ActiveWorkSessionDTO, ActiveWorkSessionIndicatorDTO } from "@/lib/actions/integration-tasks";
+import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import type { ProjectListRowSummary } from "@/lib/load-project-list-summaries";
 import {
   DndContext,
@@ -325,6 +326,7 @@ export function ProjectsActiveSessionList({
   const afterActiveWorkSessionCleared = useCallback(
     (opts?: { completeTask?: boolean; refresh?: boolean }) => {
       setActiveSessionIndicator(null);
+      notifyActiveWorkSessionChanged({ cleared: true });
       if (opts?.refresh !== false) {
         router.refresh();
       }
@@ -341,6 +343,7 @@ export function ProjectsActiveSessionList({
       paused_ms_accumulated: session.paused_ms_accumulated,
       pause_started_at: session.pause_started_at,
     });
+    notifyActiveWorkSessionChanged();
     requestAnimationFrame(() => activeWorkSessionDialogRef.current?.showModal());
   }, []);
 

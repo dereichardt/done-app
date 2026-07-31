@@ -37,6 +37,7 @@ import {
   type IntegrationTaskRow as IntegrationTaskRowType,
   type IntegrationTaskWorkSessionRow as IntegrationTaskWorkSessionRowType,
 } from "@/lib/integration-task-helpers";
+import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import { clearCalendarSessionCache } from "@/lib/tasks-calendar-session-cache";
 import {
   deleteAnyTask,
@@ -910,6 +911,7 @@ function OffListWorkSessionFinishDialog({
         return;
       }
       dialogRef.current?.close();
+      notifyActiveWorkSessionChanged({ cleared: true });
       onSuccess();
     } finally {
       setSavePending(null);
@@ -1400,6 +1402,7 @@ export function TaskWorkRow({
                       : await discardActiveWorkSession(taskId);
                   if (res?.error) {
                     onActiveSessionChange(snapshot);
+                    notifyActiveWorkSessionChanged();
                     onActionError?.(res.error);
                     return;
                   }
@@ -1876,6 +1879,7 @@ export function ActiveWorkSessionDialog({
                       : await discardActiveWorkSession(taskId);
                   if (res?.error) {
                     onRestoreSession?.(snapshot);
+                    notifyActiveWorkSessionChanged();
                     onActionError?.(res.error);
                     return;
                   }
@@ -2130,6 +2134,7 @@ export function IntegrationTasksPanel({
     const clearedTaskId = activeWorkSession?.task_id ?? expandedWorkTaskId;
     setActiveWorkSession(null);
     setExpandedWorkTaskId(null);
+    notifyActiveWorkSessionChanged({ cleared: true });
     if (opts?.completeTask && clearedTaskId) {
       const completedAt = new Date().toISOString();
       setOptimisticTasks((prev) =>
@@ -2289,11 +2294,13 @@ export function IntegrationTasksPanel({
         setActiveWorkSession(null);
         setExpandedWorkTaskId(null);
         setWorkSessionActionError(res.error);
+        notifyActiveWorkSessionChanged({ cleared: true });
         return;
       }
       if (res.session) {
         setActiveWorkSession(res.session);
         setExpandedWorkTaskId(task.id);
+        notifyActiveWorkSessionChanged();
       }
     })();
   }

@@ -2,27 +2,43 @@ import Link from "next/link";
 
 import type { HomeSummary } from "@/lib/home-summary";
 
-const labelSm = "text-sm font-medium text-muted-canvas";
-const valueCenter = "text-2xl font-semibold leading-tight tracking-tight sm:text-3xl";
+type SummaryMetric = {
+  href: string;
+  label: string;
+  value: string;
+  aria: string;
+};
 
-const cardShell =
-  "card-canvas flex min-h-[10.5rem] flex-col px-4 py-5 sm:min-h-[11rem] transition-colors hover:bg-[var(--app-surface-alt)]";
-const topLeft = "shrink-0 self-start text-left";
-const valueRegion = "flex min-h-[2.5rem] flex-1 flex-col items-center justify-center px-1 text-center";
-
-function formatWeekHours(h: number): string {
-  if (!Number.isFinite(h) || h <= 0) return "0";
-  const q = Math.round(h * 100) / 100;
-  return Number.isInteger(q) ? String(q) : String(parseFloat(q.toFixed(2)));
+function MetricRow({ metric }: { metric: SummaryMetric }) {
+  return (
+    <li className="min-w-0">
+      <Link
+        href={metric.href}
+        className="flex items-center justify-between gap-3 rounded-[8px] px-1 py-1 no-underline transition-colors hover:bg-[var(--app-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+        aria-label={metric.aria}
+      >
+        <span className="min-w-0 truncate text-sm font-normal text-muted-canvas">{metric.label}</span>
+        <span className="shrink-0 text-sm font-bold tabular-nums" style={{ color: "var(--app-text)" }}>
+          {metric.value}
+        </span>
+      </Link>
+    </li>
+  );
 }
 
-export function HomeSummaryStrip({ summary }: { summary: HomeSummary }) {
-  const tiles: Array<{
-    href: string;
-    label: string;
-    value: string;
-    aria: string;
-  }> = [
+/** Single Summary card with home metrics (used inside HomeTopDashboard). */
+export function HomeSummaryCard({
+  summary,
+  openTasksCount = 0,
+  dueTodayCount = 0,
+  pastDueCount = 0,
+}: {
+  summary: HomeSummary;
+  openTasksCount?: number;
+  dueTodayCount?: number;
+  pastDueCount?: number;
+}) {
+  const scopeMetrics: SummaryMetric[] = [
     {
       href: "/projects",
       label: "Active projects",
@@ -41,36 +57,52 @@ export function HomeSummaryStrip({ summary }: { summary: HomeSummary }) {
       value: String(summary.activeInitiatives),
       aria: `Active initiatives: ${summary.activeInitiatives}. Go to internal.`,
     },
+  ];
+
+  const taskMetrics: SummaryMetric[] = [
     {
       href: "/work",
-      label: "Hours this week",
-      value: `${formatWeekHours(summary.weekHours)} h`,
-      aria: `Hours recorded this week: ${formatWeekHours(summary.weekHours)}. Go to work.`,
+      label: "Open tasks",
+      value: String(openTasksCount),
+      aria: `Open tasks: ${openTasksCount}. Go to work.`,
+    },
+    {
+      href: "/work",
+      label: "Due today",
+      value: String(dueTodayCount),
+      aria: `Tasks due today: ${dueTodayCount}. Go to work.`,
+    },
+    {
+      href: "/work",
+      label: "Past due",
+      value: String(pastDueCount),
+      aria: `Past due tasks: ${pastDueCount}. Go to work.`,
     },
   ];
 
   return (
-    <section aria-label="Home summary">
-      <h2 className="section-heading">Summary</h2>
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch xl:grid-cols-4">
-        {tiles.map((t) => (
-          <Link
-            key={t.label}
-            href={t.href}
-            className={`${cardShell} block min-h-0 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]`}
-            aria-label={t.aria}
-          >
-            <div className={topLeft}>
-              <p className={labelSm}>{t.label}</p>
-            </div>
-            <div className={valueRegion}>
-              <p className={valueCenter} style={{ color: "var(--app-text)" }}>
-                {t.value}
-              </p>
-            </div>
-          </Link>
-        ))}
+    <section aria-label="Home summary" className="flex min-h-0 flex-col">
+      <div className="flex h-8 shrink-0 items-center justify-between gap-2">
+        <h2 className="section-heading">Summary</h2>
+      </div>
+      <div className="card-canvas mt-3 flex flex-col px-4 py-2.5">
+        <ul className="flex list-none flex-col gap-0.5">
+          {scopeMetrics.map((t) => (
+            <MetricRow key={t.label} metric={t} />
+          ))}
+        </ul>
+        <div className="my-1.5 border-t" style={{ borderColor: "var(--app-border)" }} role="separator" />
+        <ul className="flex list-none flex-col gap-0.5">
+          {taskMetrics.map((t) => (
+            <MetricRow key={t.label} metric={t} />
+          ))}
+        </ul>
       </div>
     </section>
   );
+}
+
+/** @deprecated Prefer HomeSummaryCard inside HomeTopDashboard. Kept for any stray imports. */
+export function HomeSummaryStrip({ summary }: { summary: HomeSummary }) {
+  return <HomeSummaryCard summary={summary} />;
 }
