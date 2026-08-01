@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 
 import { ProjectSummaryStrip } from "@/app/projects/[id]/project-summary-strip";
-import { DialogCloseButton } from "@/components/dialog-close-button";
 import { HomeProgressKanban } from "@/components/home-progress-kanban";
 import { HomeProgressTimeline } from "@/components/home-progress-timeline";
 import type { HomeProjectStatusCacheEntry } from "@/lib/actions/home-project-status";
@@ -19,7 +18,6 @@ export function HomeProgressSection({
   onRetry,
   onPayloadChange,
   sectionId,
-  onRequestClose,
 }: {
   projects: HomeProjectPickerRow[];
   entries: Record<string, HomeProjectStatusCacheEntry>;
@@ -27,7 +25,6 @@ export function HomeProgressSection({
   onRetry: (projectId: string) => void;
   onPayloadChange: (projectId: string, payload: HomeProjectStatusPayload) => void;
   sectionId?: string;
-  onRequestClose?: () => void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const activeProjectId = projects[activeIndex]?.id ?? "";
@@ -48,12 +45,7 @@ export function HomeProgressSection({
 
   return (
     <section id={sectionId} aria-label="Project progress" className="mt-10">
-      <div className="flex w-full min-w-0 items-center justify-between gap-2">
-        <h2 className="section-heading shrink-0">Progress</h2>
-        {onRequestClose ? (
-          <DialogCloseButton aria-label="Close progress" className="shrink-0" onClick={onRequestClose} />
-        ) : null}
-      </div>
+      <h2 className="section-heading">Progress</h2>
 
       <div className="mt-4 overflow-x-auto pb-1">
         <div

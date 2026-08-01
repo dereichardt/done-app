@@ -1,5 +1,5 @@
 /**
- * Portfolio capacity gap synthesis for Home inbox (weeks +4…+8 vs weekly target).
+ * Portfolio capacity gap synthesis for Home Insights (weeks +4…+8 vs weekly target).
  * Matches Forecast Studio’s {@link TARGET_WEEKLY_FORECAST_HOURS} (32h).
  */
 
@@ -14,7 +14,7 @@ export type CapacityWeekGap = {
 
 export type CapacityGapsSynthesis = {
   weeks: CapacityWeekGap[];
-  /** Short body for inbox list / insert. */
+  /** Short availability caption for Insights. */
   body: string;
   /** Representative free hours/week when a gap stretch exists. */
   freeHoursPerWeek: number | null;
@@ -117,7 +117,7 @@ export function synthesizeCapacityGaps(input: {
 
   return {
     weeks,
-    body: `You may be able to take on ${suggestion}.`,
+    body: `You may have ${suggestion}.`,
     freeHoursPerWeek: hrs,
     freeStartingWeek,
   };

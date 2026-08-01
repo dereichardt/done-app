@@ -195,7 +195,7 @@ export async function loadGlobalActiveIntegrationTaskFinishContext(
   return loadIntegrationTaskFinishContext(supabase, user.id, integrationTaskId);
 }
 
-/** For a future inbox / activity screen: one row per user when a timer is running. */
+/** One row per user when a timer is running (active work session). */
 export type MyActiveWorkSessionListItem = {
   scope: "integration" | "internal";
   task_id: string;

@@ -96,6 +96,7 @@ function ProjectForecastRow({
       ? Math.min(100, (totals.actual / totals.forecast) * 100)
       : 0;
   const showActualInBar = totals.actual > 0 && fillPct > 0;
+  const metOrExceededForecast = hasForecast && totals.actual + 1e-9 >= totals.forecast;
 
   return (
     <article
@@ -130,10 +131,19 @@ function ProjectForecastRow({
               className="absolute inset-y-0 left-0 flex items-center overflow-hidden rounded-full px-2.5"
               style={{
                 width: `${fillPct}%`,
-                background: "var(--app-cta-dark-fill)",
+                background: metOrExceededForecast
+                  ? "var(--app-success)"
+                  : "var(--app-cta-dark-fill)",
               }}
             >
-              <span className="text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-cta-dark-fg)]">
+              <span
+                className={[
+                  "text-[0.7rem] font-medium leading-none tabular-nums",
+                  metOrExceededForecast
+                    ? "text-[var(--app-surface)]"
+                    : "text-[var(--app-cta-dark-fg)]",
+                ].join(" ")}
+              >
                 {formatBarHours(totals.actual)}
               </span>
             </div>

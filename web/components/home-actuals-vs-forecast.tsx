@@ -16,8 +16,12 @@ import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
 type WeekMode = "this" | "prior";
 
 const SEG_WIDTH = 96;
-/** Matches Tailwind `gap-3` (0.75rem); four slots → three gaps across the full row. */
-const SLOT_GAP = "0.75rem";
+/**
+ * Grid is 4 columns including the Total card. With 7 projects, Total + 7 fill two rows.
+ * At 8+ projects, collapse to Total + 6 projects + Show More (8 cells), then expand.
+ */
+const COLLAPSED_PROJECT_COUNT = 6;
+const SHOW_MORE_THRESHOLD = 8;
 
 function formatBarHours(hours: number): string {
   if (!Number.isFinite(hours) || hours === 0) return "0h";
@@ -104,6 +108,7 @@ export function VarianceCard({
       ? Math.min(100, (totals.actual / totals.forecast) * 100)
       : 0;
   const showActualInBar = totals.actual > 0 && fillPct > 0;
+  const metOrExceededForecast = hasForecast && totals.actual + 1e-9 >= totals.forecast;
 
   return (
     <article
@@ -157,10 +162,19 @@ export function VarianceCard({
               className="absolute inset-y-0 left-0 flex items-center overflow-hidden rounded-full px-2.5"
               style={{
                 width: `${fillPct}%`,
-                background: "var(--app-cta-dark-fill)",
+                background: metOrExceededForecast
+                  ? "var(--app-success)"
+                  : "var(--app-cta-dark-fill)",
               }}
             >
-              <span className="text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-cta-dark-fg)]">
+              <span
+                className={[
+                  "text-[0.7rem] font-medium leading-none tabular-nums",
+                  metOrExceededForecast
+                    ? "text-[var(--app-surface)]"
+                    : "text-[var(--app-cta-dark-fg)]",
+                ].join(" ")}
+              >
                 {formatBarHours(totals.actual)}
               </span>
             </div>
@@ -192,6 +206,38 @@ export function VarianceCard({
   );
 }
 
+function ExpandCollapseCard({
+  expanded,
+  hiddenCount,
+  onToggle,
+}: {
+  expanded: boolean;
+  hiddenCount: number;
+  onToggle: () => void;
+}) {
+  const label = expanded
+    ? "Show less"
+    : hiddenCount === 1
+      ? "Show 1 more"
+      : `Show ${hiddenCount} more`;
+
+  return (
+    <button
+      type="button"
+      className="card-canvas flex min-h-[10.5rem] w-full cursor-pointer flex-col items-center justify-center gap-1 px-4 py-4 text-center transition-colors hover:bg-[var(--app-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+      onClick={onToggle}
+      aria-expanded={expanded}
+    >
+      <span className="text-sm font-medium" style={{ color: "var(--app-text)" }}>
+        {label}
+      </span>
+      {!expanded ? (
+        <span className="text-xs text-muted-canvas">View all projects</span>
+      ) : null}
+    </button>
+  );
+}
+
 export function HomeActualsVsForecast({
   data,
 }: {
@@ -199,6 +245,7 @@ export function HomeActualsVsForecast({
 }) {
   const [mode, setMode] = useState<WeekMode>("this");
   const [trendsOpen, setTrendsOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const currentSunday = data.weeks[data.weeks.length - 1] ?? "";
   const priorSunday =
@@ -213,10 +260,12 @@ export function HomeActualsVsForecast({
     totals: p.byWeek[weekKey] ?? makeWeekTotals(0, 0),
   }));
 
-  /** One of four equal slots across the row (accounting for three gaps). */
-  const totalSlotWidth = `calc((100% - 3 * ${SLOT_GAP}) / 4)`;
-  /** Three equal cards in the scroll viewport (accounting for two gaps between them). */
-  const projectCardWidth = `calc((100% - 2 * ${SLOT_GAP}) / 3)`;
+  const needsCollapse = projectTotals.length >= SHOW_MORE_THRESHOLD;
+  const visibleProjects =
+    needsCollapse && !expanded
+      ? projectTotals.slice(0, COLLAPSED_PROJECT_COUNT)
+      : projectTotals;
+  const hiddenCount = Math.max(0, projectTotals.length - COLLAPSED_PROJECT_COUNT);
 
   return (
     <>
@@ -236,28 +285,28 @@ export function HomeActualsVsForecast({
         </div>
 
         <div
-          className="mt-3 flex items-start gap-3"
+          className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
           aria-label={mode === "this" ? "This week by project" : "Prior week by project"}
         >
-          <div className="shrink-0 pb-2" style={{ width: totalSlotWidth }}>
-            <VarianceCard title="Total" totals={totals} />
-          </div>
+          <VarianceCard title="Total" totals={totals} />
 
-          <div className="flex min-w-0 flex-1 items-start gap-3 overflow-x-auto pb-2">
-            {projectTotals.map((p) => (
-              <div
-                key={p.id}
-                className="min-w-0 shrink-0"
-                style={{ flex: `0 0 ${projectCardWidth}`, width: projectCardWidth }}
-              >
-                <VarianceCard title={p.name} totals={p.totals} isIcp={p.isIcp} />
-              </div>
-            ))}
+          {visibleProjects.map((p) => (
+            <VarianceCard key={p.id} title={p.name} totals={p.totals} isIcp={p.isIcp} />
+          ))}
 
-            {projectTotals.length === 0 ? (
-              <p className="flex items-center text-sm text-muted-canvas">No active projects</p>
-            ) : null}
-          </div>
+          {needsCollapse ? (
+            <ExpandCollapseCard
+              expanded={expanded}
+              hiddenCount={hiddenCount}
+              onToggle={() => setExpanded((v) => !v)}
+            />
+          ) : null}
+
+          {projectTotals.length === 0 ? (
+            <p className="flex items-center text-sm text-muted-canvas sm:col-span-2 xl:col-span-3">
+              No active projects
+            </p>
+          ) : null}
         </div>
       </section>
 

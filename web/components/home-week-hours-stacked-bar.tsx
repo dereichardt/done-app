@@ -265,9 +265,12 @@ function SegmentBreakdownPopover({
 export function HomeWeekHoursStackedBar({
   todayIso,
   projectById,
+  reloadKey = 0,
 }: {
   todayIso: string;
   projectById: Map<string, HomeWeekBarProjectMeta>;
+  /** Increment to refetch week sessions (e.g. after a home calendar create). */
+  reloadKey?: number;
 }) {
   const [sessions, setSessions] = useState<TasksCalendarSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,7 +306,7 @@ export function HomeWeekHoursStackedBar({
     return () => {
       cancelled = true;
     };
-  }, [rangeStart, rangeEndExclusive]);
+  }, [rangeStart, rangeEndExclusive, reloadKey]);
 
   const segments = useMemo(
     () => buildSegments(sessions, rangeStart, rangeEndExclusive, projectById),

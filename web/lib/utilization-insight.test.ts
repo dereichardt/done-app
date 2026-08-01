@@ -33,8 +33,8 @@ describe("buildInsight", () => {
     expect(insight.status).toBe("shortfall");
     expect(insight.message).toMatch(/82h short/i);
     // 3 remaining work weeks (Aug 2, 9, 16) → 82/3 ≈ 27.25h/week
-    expect(insight.message).toMatch(/27\.25h\/week/i);
-    expect(insight.message).toMatch(/remaining 3 work weeks/i);
+    expect(insight.detail).toMatch(/27\.25h\/week/i);
+    expect(insight.detail).toMatch(/remaining 3 work weeks/i);
   });
 
   it("says on track when forecast covers target and actuals match pace", () => {

@@ -754,6 +754,7 @@ export function TasksPageClient({
               tracks={tracks}
               lastUsedIntegrationId={lastUsedIntegrationId}
               onRememberIntegration={setLastUsedIntegrationId}
+              active={workTab === "calendar"}
             />
           </div>
         </div>

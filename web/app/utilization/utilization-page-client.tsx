@@ -495,6 +495,9 @@ export function UtilizationPageClient({
         <div className="min-w-0">
           <p className="text-sm font-medium text-[var(--app-text)]">{tone.label}</p>
           <p className="mt-1 text-sm text-muted-canvas">{data.insight.message}</p>
+          {data.insight.detail ? (
+            <p className="mt-1 text-sm text-muted-canvas">{data.insight.detail}</p>
+          ) : null}
         </div>
       </div>
 

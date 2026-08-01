@@ -1,5 +1,7 @@
 "use client";
 
+import { DialogCloseButton } from "@/components/dialog-close-button";
+import { HomeCardFab } from "@/components/home-card-fab";
 import { TaskWorkRow } from "@/components/integration-tasks-panel";
 import {
   HomeSkinnyTaskRow,
@@ -7,6 +9,11 @@ import {
   type HomeSkinnyTaskMeta,
 } from "@/components/home-skinny-task-row";
 import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
+import {
+  TaskQuickAdd,
+  type TaskQuickAddIntegrationOption,
+  type TaskQuickAddProjectOption,
+} from "@/components/task-quick-add";
 import type { TaskRowCrumb } from "@/components/task-row";
 import {
   startOrReplaceActiveWorkSession,
@@ -24,7 +31,8 @@ import {
 import { deriveProjectAbbreviation } from "@/lib/project-abbreviation";
 import type { TasksPageSnapshot, TasksPageTask } from "@/lib/tasks-page-shared";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function indicatorToActiveSessionDto(
   i: ActiveWorkSessionIndicatorDTO | null | undefined,
@@ -46,14 +54,20 @@ function internalAbbreviation(task: Extract<TasksPageTask, { scope: "internal" }
   return fromLabel || "INT";
 }
 
+const addTaskDialogClass =
+  "app-catalog-dialog fixed left-1/2 top-1/2 z-[220] max-h-[min(92dvh,52rem)] w-[min(100vw-2rem,44rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden border-0 p-0 shadow-xl";
+
 export function HomeOpenTasksCard({
   snapshot,
 }: {
   snapshot: TasksPageSnapshot | null;
   error?: string | null;
 }) {
+  const router = useRouter();
+  const addTaskDialogRef = useRef<HTMLDialogElement | null>(null);
   const todayIso = snapshot?.todayIso ?? new Date().toISOString().slice(0, 10);
   const [mode, setMode] = useState<HomeTasksMode>("today");
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [openTasks, setOpenTasks] = useState<TasksPageTask[]>(() =>
     (snapshot?.tasks ?? []).filter((t) => t.status !== "done"),
   );
@@ -284,6 +298,31 @@ export function HomeOpenTasksCard({
   const taskCountLabel =
     visibleTaskCount === 1 ? "1 task" : `${visibleTaskCount} tasks`;
 
+  const quickAddProjects: TaskQuickAddProjectOption[] = useMemo(
+    () => (snapshot?.projects ?? []).map((p) => ({ id: p.id, label: p.name, colorVar: p.colorVar })),
+    [snapshot?.projects],
+  );
+  const quickAddIntegrations: TaskQuickAddIntegrationOption[] = useMemo(
+    () =>
+      (snapshot?.tracks ?? []).map((t) => ({
+        id: t.id,
+        projectId: t.projectId,
+        label: t.label,
+      })),
+    [snapshot?.tracks],
+  );
+
+  const openAddTask = useCallback(() => {
+    setAddTaskOpen(true);
+    requestAnimationFrame(() => {
+      if (!addTaskDialogRef.current?.open) addTaskDialogRef.current?.showModal();
+    });
+  }, []);
+
+  const closeAddTask = useCallback(() => {
+    addTaskDialogRef.current?.close();
+  }, []);
+
   return (
     <section aria-label="Open tasks" className="flex min-h-0 flex-col">
       <div className="flex h-8 shrink-0 items-center justify-between gap-2">
@@ -293,126 +332,184 @@ export function HomeOpenTasksCard({
         </Link>
       </div>
 
-      {/* Fixed height; list scrolls when content overflows. */}
-      <div className="card-canvas mt-3 flex h-[22rem] min-h-0 flex-col overflow-hidden">
-        <div
-          className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3"
-          style={{ borderColor: "var(--app-border)" }}
-        >
+      {/* Fixed height; list scrolls when content overflows. FAB sits outside overflow clip. */}
+      <div className="relative mt-3 h-[22rem]">
+        <div className="card-canvas flex h-full min-h-0 flex-col overflow-hidden">
           <div
-            role="tablist"
-            aria-label="Task date range"
-            className="inline-flex overflow-hidden rounded-[10px] border"
-            style={{ borderColor: "var(--app-border)", background: "var(--app-surface-alt)" }}
+            className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3"
+            style={{ borderColor: "var(--app-border)" }}
           >
-            {(
-              [
-                { id: "today", label: "Today" },
-                { id: "this_week", label: "This week" },
-              ] as const
-            ).map((opt) => {
-              const active = mode === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={[
-                    "inline-flex h-7 items-center px-2.5 text-xs transition-colors cursor-pointer",
-                    active
-                      ? "font-semibold bg-[var(--app-text)] text-[var(--app-surface)]"
-                      : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
-                  ].join(" ")}
-                  onClick={() => setMode(opt.id)}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
+            <div
+              role="tablist"
+              aria-label="Task date range"
+              className="inline-flex overflow-hidden rounded-[10px] border"
+              style={{ borderColor: "var(--app-border)", background: "var(--app-surface-alt)" }}
+            >
+              {(
+                [
+                  { id: "today", label: "Today" },
+                  { id: "this_week", label: "This week" },
+                ] as const
+              ).map((opt) => {
+                const active = mode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={[
+                      "inline-flex h-7 items-center px-2.5 text-xs transition-colors cursor-pointer",
+                      active
+                        ? "font-semibold bg-[var(--app-text)] text-[var(--app-surface)]"
+                        : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
+                    ].join(" ")}
+                    onClick={() => setMode(opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="shrink-0 text-xs tabular-nums text-muted-canvas">{taskCountLabel}</p>
           </div>
-          <p className="shrink-0 text-xs tabular-nums text-muted-canvas">{taskCountLabel}</p>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
-          {!snapshot ? (
-            <p className="text-sm text-muted-canvas">Could not load tasks.</p>
-          ) : groups.length === 0 && !activeTaskOutsideFilter ? (
-            <p className="text-sm text-muted-canvas">{emptyMessage}</p>
-          ) : (
-            <ul className="flex list-none flex-col gap-3">
-              {activeTaskOutsideFilter && activeWorkSession ? (
-                <li className="min-w-0">
-                  <p className="mb-1.5 text-xs font-medium text-muted-canvas">In progress</p>
-                  <TaskWorkRow
-                    taskId={activeTaskOutsideFilter.id}
-                    taskTitle={activeTaskOutsideFilter.title}
-                    finishSessionIntegrationLabel={crumbForTask(activeTaskOutsideFilter).integrationLabel}
-                    finishSessionProjectLabel={crumbForTask(activeTaskOutsideFilter).projectName}
-                    activeSession={activeWorkSession}
-                    onActiveSessionChange={setActiveWorkSession}
-                    onClose={closeWorkRow}
-                    onActionError={setWorkSessionActionError}
-                    compact
-                    compactBadge={
-                      <IntegrationIdBadge meta={metaForTask(activeTaskOutsideFilter)} />
-                    }
-                  />
-                </li>
-              ) : null}
-              {groups.map((group) => (
-                <li key={group.id} className="min-w-0">
-                  <p className="mb-1.5 text-xs font-medium text-muted-canvas">{group.title}</p>
-                  <ul className="flex list-none flex-col gap-1.5">
-                    {group.tasks.map((task) => {
-                      const isExpanded =
-                        expandedWorkTaskId === task.id && activeWorkSession?.task_id === task.id;
-                      if (isExpanded && activeWorkSession) {
-                        const crumb = crumbForTask(task);
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 pb-12">
+            {!snapshot ? (
+              <p className="text-sm text-muted-canvas">Could not load tasks.</p>
+            ) : groups.length === 0 && !activeTaskOutsideFilter ? (
+              <p className="text-sm text-muted-canvas">{emptyMessage}</p>
+            ) : (
+              <ul className="flex list-none flex-col gap-3">
+                {activeTaskOutsideFilter && activeWorkSession ? (
+                  <li className="min-w-0">
+                    <p className="mb-1.5 text-xs font-medium text-muted-canvas">In progress</p>
+                    <TaskWorkRow
+                      taskId={activeTaskOutsideFilter.id}
+                      taskTitle={activeTaskOutsideFilter.title}
+                      finishSessionIntegrationLabel={crumbForTask(activeTaskOutsideFilter).integrationLabel}
+                      finishSessionProjectLabel={crumbForTask(activeTaskOutsideFilter).projectName}
+                      activeSession={activeWorkSession}
+                      onActiveSessionChange={setActiveWorkSession}
+                      onClose={closeWorkRow}
+                      onActionError={setWorkSessionActionError}
+                      compact
+                      compactBadge={
+                        <IntegrationIdBadge meta={metaForTask(activeTaskOutsideFilter)} />
+                      }
+                    />
+                  </li>
+                ) : null}
+                {groups.map((group) => (
+                  <li key={group.id} className="min-w-0">
+                    <p className="mb-1.5 text-xs font-medium text-muted-canvas">{group.title}</p>
+                    <ul className="flex list-none flex-col gap-1.5">
+                      {group.tasks.map((task) => {
+                        const isExpanded =
+                          expandedWorkTaskId === task.id && activeWorkSession?.task_id === task.id;
+                        if (isExpanded && activeWorkSession) {
+                          const crumb = crumbForTask(task);
+                          return (
+                            <li key={task.id} className="min-w-0">
+                              <TaskWorkRow
+                                taskId={task.id}
+                                taskTitle={task.title}
+                                finishSessionIntegrationLabel={crumb.integrationLabel}
+                                finishSessionProjectLabel={crumb.projectName}
+                                activeSession={activeWorkSession}
+                                onActiveSessionChange={setActiveWorkSession}
+                                onClose={closeWorkRow}
+                                onActionError={setWorkSessionActionError}
+                                compact
+                                compactBadge={<IntegrationIdBadge meta={metaForTask(task)} />}
+                              />
+                            </li>
+                          );
+                        }
                         return (
                           <li key={task.id} className="min-w-0">
-                            <TaskWorkRow
-                              taskId={task.id}
-                              taskTitle={task.title}
-                              finishSessionIntegrationLabel={crumb.integrationLabel}
-                              finishSessionProjectLabel={crumb.projectName}
-                              activeSession={activeWorkSession}
-                              onActiveSessionChange={setActiveWorkSession}
-                              onClose={closeWorkRow}
-                              onActionError={setWorkSessionActionError}
-                              compact
-                              compactBadge={<IntegrationIdBadge meta={metaForTask(task)} />}
+                            <HomeSkinnyTaskRow
+                              task={task}
+                              meta={metaForTask(task)}
+                              todayIso={todayIso}
+                              effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+                              starting={startingTaskId === task.id}
+                              onStartWork={startWorkOnTask}
+                              onSaveDueDate={saveTaskDueDate}
+                              onToggleCompleteSuccess={markTaskCompletedLocally}
+                              onLongPressCompleteLog={(t) => setManualLogTask(t)}
                             />
                           </li>
                         );
-                      }
-                      return (
-                        <li key={task.id} className="min-w-0">
-                          <HomeSkinnyTaskRow
-                            task={task}
-                            meta={metaForTask(task)}
-                            todayIso={todayIso}
-                            effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-                            starting={startingTaskId === task.id}
-                            onStartWork={startWorkOnTask}
-                            onSaveDueDate={saveTaskDueDate}
-                            onToggleCompleteSuccess={markTaskCompletedLocally}
-                            onLongPressCompleteLog={(t) => setManualLogTask(t)}
-                          />
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </li>
-              ))}
-            </ul>
-          )}
-          {workSessionActionError ? (
-            <p className="mt-2 text-sm" style={{ color: "var(--app-danger)" }} role="alert">
-              {workSessionActionError}
-            </p>
-          ) : null}
+                      })}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {workSessionActionError ? (
+              <p className="mt-2 text-sm" style={{ color: "var(--app-danger)" }} role="alert">
+                {workSessionActionError}
+              </p>
+            ) : null}
+          </div>
         </div>
+
+        <HomeCardFab
+          className="absolute bottom-3 right-3 z-10"
+          aria-label="Add task"
+          onClick={openAddTask}
+        />
       </div>
+
+      <dialog
+        ref={addTaskDialogRef}
+        aria-labelledby="home-add-task-title"
+        className={addTaskDialogClass}
+        style={{
+          borderRadius: "12px",
+          background: "var(--app-surface)",
+          color: "var(--app-text)",
+        }}
+        onClose={() => setAddTaskOpen(false)}
+      >
+        <div className="flex max-h-[min(92dvh,48rem)] flex-col overflow-hidden">
+          <div
+            className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3"
+            style={{ borderColor: "var(--app-border)" }}
+          >
+            <div className="min-w-0 flex-1 pr-2">
+              <h2
+                id="home-add-task-title"
+                className="text-base font-semibold"
+                style={{ color: "var(--app-text)" }}
+              >
+                Add Task
+              </h2>
+              <p className="mt-0.5 truncate text-sm text-muted-canvas">
+                Pick a project and track (or Internal and a destination), then describe the task.
+              </p>
+            </div>
+            <DialogCloseButton onClick={closeAddTask} />
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {addTaskOpen ? (
+              <TaskQuickAdd
+                mode="global"
+                layout="dialog"
+                todayIso={todayIso}
+                projects={quickAddProjects}
+                integrations={quickAddIntegrations}
+                internalDestinations={snapshot?.internalDestinations ?? []}
+                onCancel={closeAddTask}
+                onCreated={() => {
+                  closeAddTask();
+                  router.refresh();
+                }}
+              />
+            ) : null}
+          </div>
+        </div>
+      </dialog>
 
       <TaskOnlyManualLogDialog
         open={manualLogTask != null}

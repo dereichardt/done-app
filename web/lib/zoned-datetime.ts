@@ -16,7 +16,7 @@ export function addDaysYmd(ymd: string, delta: number): string {
   return t.toISOString().slice(0, 10);
 }
 
-/** Monday `YYYY-MM-DD` of the week containing `todayYmd` (proleptic Gregorian, same as Home inbox rules). */
+/** Monday `YYYY-MM-DD` of the week containing `todayYmd` (proleptic Gregorian). */
 export function mondayYmdOfWeekContaining(todayYmd: string): string {
   const mon0 = weekdayMon0FromYmd(todayYmd);
   return addDaysYmd(todayYmd, -mon0);

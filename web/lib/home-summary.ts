@@ -13,8 +13,6 @@ export type HomeSummaryUtilization = {
   targetHours: number | null;
   actualHours: number;
   forecastHours: number;
-  /** Actuals + forecast for the quarter. */
-  actualPlusForecast: number;
   /** Actuals ÷ target × 100; null when no target. */
   attainmentPct: number | null;
 };
@@ -105,7 +103,6 @@ export async function loadHomeSummary(
     todayYmd,
     { startMonth: preferences.effort_quarter_start_month },
   );
-  const actualPlusForecast = Math.round((utilizationDto.actualHours + utilizationDto.forecastHours) * 4) / 4;
 
   return {
     activeProjects,
@@ -117,7 +114,6 @@ export async function loadHomeSummary(
       targetHours: utilizationDto.targetHours,
       actualHours: utilizationDto.actualHours,
       forecastHours: utilizationDto.forecastHours,
-      actualPlusForecast,
       attainmentPct: utilizationDto.utilizationPct,
     },
   };

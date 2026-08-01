@@ -14,12 +14,7 @@ import {
   type ForecastStartMode,
 } from "@/lib/project-forecast";
 import { generateExpertAssistForecastHours } from "@/lib/expert-assist-forecast";
-import {
-  loadAllActiveForecastItems,
-  loadForecastProjectDTO,
-  type ForecastProjectDTO,
-} from "@/lib/forecast-data";
-import { getUserTodayIso } from "@/lib/user-preferences";
+import { loadForecastProjectDTO } from "@/lib/forecast-data";
 
 function isValidYmd(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -373,25 +368,4 @@ export async function saveProjectForecastDraft(
   revalidatePath("/forecast");
   revalidatePath("/home");
   return {};
-}
-
-/** Active projects + initiatives + today for the inbox forecast review panel. */
-export async function loadInboxForecastReviewProjects(): Promise<{
-  error?: string;
-  todayIso?: string;
-  projects?: ForecastProjectDTO[];
-}> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not signed in" };
-
-  const prefsRes = await loadUserPreferences();
-  const todayIso = getUserTodayIso(prefsRes.preferences.timezone);
-  const projects = await loadAllActiveForecastItems(supabase, user.id, {
-    todayIso,
-    timeZone: prefsRes.preferences.timezone,
-  });
-  return { todayIso, projects };
 }

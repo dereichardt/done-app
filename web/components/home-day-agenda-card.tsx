@@ -1,5 +1,7 @@
 "use client";
 
+import { HomeCalendarEntryDialog } from "@/components/home-calendar-entry-dialog";
+import { HomeCardFab } from "@/components/home-card-fab";
 import {
   loadTasksCalendarSessions,
   type TasksCalendarSession,
@@ -9,8 +11,13 @@ import {
   localDayStart,
   parseLocalYmd,
 } from "@/lib/integration-effort-buckets";
-import { TASKS_PAGE_INTERNAL_PROJECT_ID } from "@/lib/tasks-page-shared";
+import {
+  TASKS_PAGE_INTERNAL_PROJECT_ID,
+  type TasksPageProject,
+  type TasksPageTrack,
+} from "@/lib/tasks-page-shared";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 function formatSessionTimeRange(session: TasksCalendarSession): string {
@@ -49,16 +56,25 @@ export function HomeDayAgendaCard({
   todayIso,
   heightPx = null,
   projectAbbreviationById,
+  projects = [],
+  tracks = [],
+  onCalendarEntryCreated,
 }: {
   todayIso: string;
   /** Total section height (header + card), aligned to left stack including Hours this week. */
   heightPx?: number | null;
   /** Project id → abbreviation for compact agenda rows. */
   projectAbbreviationById?: Map<string, string>;
+  projects?: TasksPageProject[];
+  tracks?: TasksPageTrack[];
+  /** Notifies parent so Hours this week (and related metrics) can reload. */
+  onCalendarEntryCreated?: () => void;
 }) {
+  const router = useRouter();
   const [sessions, setSessions] = useState<TasksCalendarSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const loadDay = useCallback(async (ymd: string) => {
     setLoading(true);
@@ -113,93 +129,115 @@ export function HomeDayAgendaCard({
         </Link>
       </div>
 
-      <div className="card-canvas mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div
-          className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3"
-          style={{ borderColor: "var(--app-border)" }}
-        >
-          <p className="text-sm font-medium" style={{ color: "var(--app-text)" }}>
-            {dateLabel}
-          </p>
-          <p className="shrink-0 text-xs tabular-nums text-muted-canvas">
-            {loading ? "…" : formatEffortHoursLabel(dayHours)}
-          </p>
+      <div className="relative mt-3 min-h-0 flex-1">
+        <div className="card-canvas flex h-full min-h-0 flex-col overflow-hidden">
+          <div
+            className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3"
+            style={{ borderColor: "var(--app-border)" }}
+          >
+            <p className="text-sm font-medium" style={{ color: "var(--app-text)" }}>
+              {dateLabel}
+            </p>
+            <p className="shrink-0 text-xs tabular-nums text-muted-canvas">
+              {loading ? "…" : formatEffortHoursLabel(dayHours)}
+            </p>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 pb-12">
+            {error ? (
+              <p className="text-sm" style={{ color: "var(--app-danger)" }}>
+                Could not load sessions: {error}
+              </p>
+            ) : loading ? (
+              <p className="text-sm text-muted-canvas">Loading…</p>
+            ) : sessions.length === 0 ? (
+              <p className="text-sm text-muted-canvas">No sessions logged</p>
+            ) : (
+              <ul className="flex list-none flex-col gap-1">
+                {sessions.map((s) => {
+                  const colorVar = s.colorMeta?.colorVar ?? null;
+                  const typeLabel = sessionTypeLabel(s);
+                  const abbr =
+                    s.project_id === TASKS_PAGE_INTERNAL_PROJECT_ID
+                      ? "INT"
+                      : (projectAbbreviationById?.get(s.project_id) ?? "").trim() || "PRJ";
+                  const timeLine = [
+                    formatSessionTimeRange(s),
+                    Number.isFinite(Number(s.duration_hours)) && Number(s.duration_hours) > 0
+                      ? formatEffortHoursLabel(Number(s.duration_hours))
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <li
+                      key={s.source_id}
+                      className="rounded-[8px] border px-2 py-1"
+                      style={{
+                        borderColor: "var(--app-border)",
+                        background: colorVar
+                          ? `color-mix(in oklab, var(${colorVar}) 10%, var(--app-surface))`
+                          : "var(--app-surface)",
+                      }}
+                    >
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <p className="min-w-0 truncate text-[11px] tabular-nums text-muted-canvas">
+                          {timeLine}
+                        </p>
+                        <span
+                          className="inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium"
+                          style={{
+                            borderColor: "var(--app-border)",
+                            background: "var(--app-surface-alt)",
+                            color: "var(--app-text-muted)",
+                          }}
+                        >
+                          {typeLabel}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 flex min-w-0 items-center justify-between gap-2">
+                        <p
+                          className="min-w-0 flex-1 truncate text-sm font-medium"
+                          style={{ color: "var(--app-text)" }}
+                          title={s.title}
+                        >
+                          {s.title || "Untitled"}
+                        </p>
+                        <p
+                          className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-canvas"
+                          title={s.project_name || undefined}
+                        >
+                          {abbr}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
-          {error ? (
-            <p className="text-sm" style={{ color: "var(--app-danger)" }}>
-              Could not load sessions: {error}
-            </p>
-          ) : loading ? (
-            <p className="text-sm text-muted-canvas">Loading…</p>
-          ) : sessions.length === 0 ? (
-            <p className="text-sm text-muted-canvas">No sessions logged</p>
-          ) : (
-            <ul className="flex list-none flex-col gap-1">
-              {sessions.map((s) => {
-                const colorVar = s.colorMeta?.colorVar ?? null;
-                const typeLabel = sessionTypeLabel(s);
-                const abbr =
-                  s.project_id === TASKS_PAGE_INTERNAL_PROJECT_ID
-                    ? "INT"
-                    : (projectAbbreviationById?.get(s.project_id) ?? "").trim() || "PRJ";
-                const timeLine = [
-                  formatSessionTimeRange(s),
-                  Number.isFinite(Number(s.duration_hours)) && Number(s.duration_hours) > 0
-                    ? formatEffortHoursLabel(Number(s.duration_hours))
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
-                return (
-                  <li
-                    key={s.source_id}
-                    className="rounded-[8px] border px-2 py-1"
-                    style={{
-                      borderColor: "var(--app-border)",
-                      background: colorVar
-                        ? `color-mix(in oklab, var(${colorVar}) 10%, var(--app-surface))`
-                        : "var(--app-surface)",
-                    }}
-                  >
-                    <div className="flex min-w-0 items-center justify-between gap-2">
-                      <p className="min-w-0 truncate text-[11px] tabular-nums text-muted-canvas">
-                        {timeLine}
-                      </p>
-                      <span
-                        className="inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium"
-                        style={{
-                          borderColor: "var(--app-border)",
-                          background: "var(--app-surface-alt)",
-                          color: "var(--app-text-muted)",
-                        }}
-                      >
-                        {typeLabel}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex min-w-0 items-center justify-between gap-2">
-                      <p
-                        className="min-w-0 flex-1 truncate text-sm font-medium"
-                        style={{ color: "var(--app-text)" }}
-                        title={s.title}
-                      >
-                        {s.title || "Untitled"}
-                      </p>
-                      <p
-                        className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-canvas"
-                        title={s.project_name || undefined}
-                      >
-                        {abbr}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <HomeCardFab
+          className="absolute bottom-3 right-3 z-10"
+          aria-label="Add calendar entry"
+          onClick={() => setCreateOpen(true)}
+        />
       </div>
+
+      <HomeCalendarEntryDialog
+        open={createOpen}
+        todayIso={todayIso}
+        projects={projects}
+        tracks={tracks}
+        onClose={() => setCreateOpen(false)}
+        onCreated={async () => {
+          setCreateOpen(false);
+          await loadDay(todayIso);
+          onCalendarEntryCreated?.();
+          router.refresh();
+        }}
+      />
     </section>
   );
 }

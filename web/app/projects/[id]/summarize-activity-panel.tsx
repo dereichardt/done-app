@@ -118,11 +118,11 @@ export type SummarizeActivityPanelHandle = {
 export type SummarizeActivityPanelProps = {
   projectId: string;
   projectCustomerName: string;
-  /** `modal`: title row + close. `embedded`: body/foot only (e.g. home inbox detail). */
+  /** `modal`: title row + close. `embedded`: body/foot only. */
   variant?: "modal" | "embedded";
   /** Cancel in picker / closes modal. Omit in embedded to hide footer Cancel. */
   onDismiss?: () => void;
-  /** Home inbox: hide internal footer + recent summaries; parent drives primary actions. */
+  /** When embedded: hide internal footer + recent summaries; parent drives primary actions. */
   embedInbox?: boolean;
   onEmbedUiChange?: (ui: SummarizeActivityEmbedUi) => void;
 };

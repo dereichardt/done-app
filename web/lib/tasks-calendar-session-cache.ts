@@ -102,6 +102,17 @@ export async function ensureCalendarSessionsForWindow(
   return fetchAndCacheWindow(startIso, endIso, cacheKey);
 }
 
+/** Drop one window from the cache and fetch fresh sessions from the server. */
+export async function revalidateCalendarSessionsForWindow(
+  scope: EffortView,
+  anchorYmd: string,
+): Promise<{ sessions: TasksCalendarSession[]; error?: string }> {
+  const { startIso, endIso, cacheKey } = computeCalendarFetchWindow(scope, anchorYmd);
+  cache.delete(cacheKey);
+  inflight.delete(cacheKey);
+  return fetchAndCacheWindow(startIso, endIso, cacheKey);
+}
+
 export async function prefetchCalendarSessions(scope: EffortView, anchorYmd: string): Promise<void> {
   await ensureCalendarSessionsForWindow(scope, anchorYmd);
 }

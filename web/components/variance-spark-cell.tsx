@@ -73,7 +73,7 @@ export function VarianceSparkCell({
 }: {
   totals: HomeWeekTotals;
   withinFivePercent: boolean;
-  /** Emphasize the most recent completed week in inbox review. */
+  /** Emphasize the most recent completed week. */
   emphasized?: boolean;
 }) {
   const hasForecast = hasForecastHours(totals.forecast);

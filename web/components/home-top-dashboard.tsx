@@ -53,6 +53,7 @@ export function HomeTopDashboard({
 
   const leftStackRef = useRef<HTMLDivElement>(null);
   const [calendarHeightPx, setCalendarHeightPx] = useState<number | null>(null);
+  const [hoursReloadKey, setHoursReloadKey] = useState(0);
 
   useLayoutEffect(() => {
     const el = leftStackRef.current;
@@ -85,7 +86,11 @@ export function HomeTopDashboard({
             </div>
           </div>
 
-          <HomeWeekHoursStackedBar todayIso={todayIso} projectById={projectById} />
+          <HomeWeekHoursStackedBar
+            todayIso={todayIso}
+            projectById={projectById}
+            reloadKey={hoursReloadKey}
+          />
         </div>
 
         <div className="order-last min-w-0 xl:order-none xl:col-span-4">
@@ -93,6 +98,9 @@ export function HomeTopDashboard({
             todayIso={todayIso}
             heightPx={calendarHeightPx}
             projectAbbreviationById={projectAbbreviationById}
+            projects={tasksSnapshot?.projects ?? []}
+            tracks={tasksSnapshot?.tracks ?? []}
+            onCalendarEntryCreated={() => setHoursReloadKey((k) => k + 1)}
           />
         </div>
       </div>

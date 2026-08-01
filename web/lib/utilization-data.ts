@@ -43,6 +43,8 @@ export type UtilizationWeekRow = {
 export type UtilizationInsight = {
   status: UtilizationInsightStatus;
   message: string;
+  /** Optional second line (e.g. shortfall weekly pace guidance). */
+  detail?: string;
 };
 
 export type UtilizationQuarterDTO = {
@@ -153,27 +155,30 @@ function buildInsight(args: {
       remainingWorkWeeks > 0
         ? Math.round((coverageShortfall / remainingWorkWeeks) * 4) / 4
         : coverageShortfall;
-    const perWeekPart =
+    const detail =
       remainingWorkWeeks > 0
-        ? ` About ${formatShortHours(perWeek)}/week across the remaining ${remainingWorkWeeks} work week${remainingWorkWeeks === 1 ? "" : "s"} to close the gap.`
-        : " No work weeks remain — the gap cannot be closed in this quarter.";
+        ? `About ${formatShortHours(perWeek)}/week across the remaining ${remainingWorkWeeks} work week${remainingWorkWeeks === 1 ? "" : "s"} to close the gap.`
+        : "No work weeks remain — the gap cannot be closed in this quarter.";
     return {
       status: "shortfall",
-      message: `Actuals and forecast cover ${formatShortHours(projectedHours)} of the ${formatShortHours(targetHours)} target — ${formatShortHours(coverageShortfall)} short.${perWeekPart}`,
+      message: `Actuals and forecast cover ${formatShortHours(projectedHours)} of the ${formatShortHours(targetHours)} target — ${formatShortHours(coverageShortfall)} short.`,
+      detail,
     };
   }
 
   if (aheadBy >= 1) {
     return {
       status: "ahead",
-      message: `Ahead of pace by ${formatShortHours(aheadBy)}. ${formatShortHours(remainingToTarget)} left to hit target; forecast covers the rest.`,
+      message: `Ahead of pace by ${formatShortHours(aheadBy)}.`,
+      detail: `${formatShortHours(remainingToTarget)} left to hit target; forecast covers the rest.`,
     };
   }
 
   if (aheadBy >= -1) {
     return {
       status: "on_track",
-      message: `On pace for the quarter. ${formatShortHours(remainingToTarget)} left to hit target; forecast covers the plan.`,
+      message: `On pace for the quarter.`,
+      detail: `${formatShortHours(remainingToTarget)} left to hit target; forecast covers the plan.`,
     };
   }
 

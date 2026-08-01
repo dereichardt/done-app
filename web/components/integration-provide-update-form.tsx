@@ -63,11 +63,11 @@ type Props = {
   headingRef?: RefObject<HTMLHeadingElement | null>;
   headingAsLinkHref?: string;
   submitError?: string | null;
-  /** When true, omit integration title + catalog line (e.g. Home inbox). */
+  /** When true, omit integration title + catalog line. */
   hideIntegrationHeading?: boolean;
 };
 
-/** Share-update fields for one integration (used by wizard + Home inbox resolver). */
+/** Share-update fields for one integration (used by the provide-update wizard). */
 export function IntegrationProvideUpdateFormFields({
   integrationRow,
   draft,

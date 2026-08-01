@@ -34,6 +34,8 @@ import {
   computeCalendarFetchWindow,
   ensureCalendarSessionsForWindow,
   getCachedCalendarSessions,
+  getCalendarSessionCacheGeneration,
+  revalidateCalendarSessionsForWindow,
   subscribeCalendarSessionCacheCleared,
 } from "@/lib/tasks-calendar-session-cache";
 import type { TasksFiltersValue } from "./tasks-filters";
@@ -243,6 +245,7 @@ export function TasksEffortCalendar({
   tracks,
   lastUsedIntegrationId,
   onRememberIntegration,
+  active = true,
 }: {
   scope: EffortView;
   anchorYmd: string;
@@ -253,6 +256,8 @@ export function TasksEffortCalendar({
   tracks: TasksPageTrack[];
   lastUsedIntegrationId: string | null;
   onRememberIntegration: (projectTrackId: string) => void;
+  /** When false (hidden keep-alive tab), skip network revalidation until shown. */
+  active?: boolean;
 }) {
   const anchorDate = useMemo(() => parseLocalYmd(anchorYmd), [anchorYmd]);
 
@@ -277,20 +282,32 @@ export function TasksEffortCalendar({
     () => computeCalendarFetchWindow(scope, anchorYmd),
     [scope, anchorYmd],
   );
+  const [cacheGeneration, setCacheGeneration] = useState(() => getCalendarSessionCacheGeneration());
+
+  useEffect(() => {
+    return subscribeCalendarSessionCacheCleared(() => {
+      setCacheGeneration(getCalendarSessionCacheGeneration());
+    });
+  }, []);
 
   useEffect(() => {
     const { cacheKey } = fetchWindow;
     const cached = getCachedCalendarSessions(cacheKey);
+    // Paint cache immediately when available, then revalidate so Home-created entries appear.
     if (cached) {
       setAllSessions(cached);
       setLoading(false);
-      return;
+    } else {
+      setLoading(true);
     }
-    setLoading(true);
     setFetchError(null);
+
     let cancelled = false;
     void (async () => {
-      const res = await ensureCalendarSessionsForWindow(scope, anchorYmd);
+      // Active calendar always hits the server; inactive keep-alive tab may use cache.
+      const res = active
+        ? await revalidateCalendarSessionsForWindow(scope, anchorYmd)
+        : await ensureCalendarSessionsForWindow(scope, anchorYmd);
       if (cancelled) return;
       if (res.error) {
         setFetchError(res.error);
@@ -303,7 +320,7 @@ export function TasksEffortCalendar({
     return () => {
       cancelled = true;
     };
-  }, [fetchWindow, scope, anchorYmd]);
+  }, [fetchWindow, scope, anchorYmd, cacheGeneration, active]);
 
   // ── Filter sessions ────────────────────────────────────────────────────────
   const filteredSessions = useMemo(() => {
@@ -420,7 +437,7 @@ export function TasksEffortCalendar({
     clearCalendarSessionCache();
     setLoading(true);
     setFetchError(null);
-    const res = await ensureCalendarSessionsForWindow(scope, anchorYmd);
+    const res = await revalidateCalendarSessionsForWindow(scope, anchorYmd);
     if (res.error) {
       setFetchError(res.error);
       setLoading(false);
@@ -428,27 +445,6 @@ export function TasksEffortCalendar({
     }
     setAllSessions(res.sessions);
     setLoading(false);
-  }, [scope, anchorYmd]);
-
-  // Quiet reload when another surface (e.g. finish session on list) clears the shared cache.
-  useEffect(() => {
-    let cancelled = false;
-    const unsubscribe = subscribeCalendarSessionCacheCleared(() => {
-      void (async () => {
-        const res = await ensureCalendarSessionsForWindow(scope, anchorYmd);
-        if (cancelled) return;
-        if (res.error) {
-          setFetchError(res.error);
-          return;
-        }
-        setAllSessions(res.sessions);
-        setFetchError(null);
-      })();
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
   }, [scope, anchorYmd]);
 
   const resolveDefaultSelection = useCallback((): { selectedProjectId: string; projectTrackId: string } => {

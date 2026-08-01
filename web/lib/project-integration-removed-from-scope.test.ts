@@ -53,12 +53,11 @@ describe("maybeApplyEnteringRemovedFromScope", () => {
 });
 
 describe("applyEnteringRemovedFromScope", () => {
-  it("deletes open tasks and dismisses stale inbox items", async () => {
+  it("stops timers and deletes open tasks", async () => {
     const trackSelect = chainable({ data: [{ id: "track1" }], error: null });
     const openTaskSelect = chainable({ data: [{ id: "task1" }, { id: "task2" }], error: null });
     const sessionDelete = chainable({ data: null, error: null });
     const taskDelete = chainable({ data: null, error: null });
-    const inboxUpdate = chainable({ data: null, error: null });
 
     const from = vi.fn((table: string) => {
       if (table === "project_tracks") return trackSelect;
@@ -72,7 +71,6 @@ describe("applyEnteringRemovedFromScope", () => {
         return openTaskSelect;
       }
       if (table === "integration_task_active_work_sessions") return sessionDelete;
-      if (table === "home_inbox_items") return inboxUpdate;
       return chainable();
     });
 
@@ -81,6 +79,6 @@ describe("applyEnteringRemovedFromScope", () => {
     expect(from).toHaveBeenCalledWith("project_tracks");
     expect(from).toHaveBeenCalledWith("integration_tasks");
     expect(from).toHaveBeenCalledWith("integration_task_active_work_sessions");
-    expect(from).toHaveBeenCalledWith("home_inbox_items");
+    expect(from).not.toHaveBeenCalledWith("home_inbox_items");
   });
 });

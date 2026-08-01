@@ -108,9 +108,9 @@ export function HomeSummaryCard({
     },
     {
       href: "/utilization",
-      label: "F + A",
-      value: formatSummaryHours(u.actualPlusForecast),
-      aria: `${u.label} forecast plus actuals: ${formatSummaryHours(u.actualPlusForecast)} (${formatSummaryHours(u.forecastHours)} forecast + ${formatSummaryHours(u.actualHours)} actuals). Go to utilization.`,
+      label: "Actuals",
+      value: formatSummaryHours(u.actualHours),
+      aria: `${u.label} actuals: ${formatSummaryHours(u.actualHours)}. Go to utilization.`,
     },
     {
       href: "/utilization",
@@ -118,7 +118,7 @@ export function HomeSummaryCard({
       value: u.attainmentPct != null ? `${u.attainmentPct}%` : "—",
       aria:
         u.attainmentPct != null
-          ? `${u.label} attainment: ${u.attainmentPct}%. Go to utilization.`
+          ? `${u.label} attainment: ${u.attainmentPct}% (actuals versus target). Go to utilization.`
           : `${u.label}: attainment unavailable until a target is set. Go to utilization.`,
     },
   ];

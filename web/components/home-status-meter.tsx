@@ -12,15 +12,24 @@ type HomeStatusMeterProps = {
   captionRight: string;
   fillRatio: number;
   markers: HomeStatusMeterMarker[];
+  /** CSS color for the fill track; defaults to `--app-text`. */
+  fillColor?: string;
   "aria-label": string;
 };
 
-export function HomeStatusMeter({ label, captionRight, fillRatio, markers, "aria-label": ariaLabel }: HomeStatusMeterProps) {
+export function HomeStatusMeter({
+  label,
+  captionRight,
+  fillRatio,
+  markers,
+  fillColor,
+  "aria-label": ariaLabel,
+}: HomeStatusMeterProps) {
   const r = Math.min(1, Math.max(0, fillRatio));
 
   const fillStyle: CSSProperties = {
     width: `${r * 100}%`,
-    background: "var(--app-text)",
+    background: fillColor ?? "var(--app-text)",
   };
 
   return (
