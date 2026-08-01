@@ -56,6 +56,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -1035,6 +1036,8 @@ export function TaskWorkRow({
   onActiveSessionChange,
   onClose,
   onActionError,
+  compact = false,
+  compactBadge = null,
 }: {
   taskId: string;
   taskTitle: string;
@@ -1048,6 +1051,13 @@ export function TaskWorkRow({
   onActiveSessionChange: (session: ActiveWorkSessionDTO) => void;
   onClose: (opts?: { completeTask?: boolean; refresh?: boolean }) => void;
   onActionError?: (error: string) => void;
+  /**
+   * Home skinny-task card: title can wrap to two lines; Started at / Duration sit under
+   * Pause / Discard / Finish, right-aligned.
+   */
+  compact?: boolean;
+  /** When set (typically with `compact`), replaces the project · integration crumb. */
+  compactBadge?: ReactNode;
 }) {
   const [startMs, setStartMs] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -1237,6 +1247,120 @@ export function TaskWorkRow({
     ? formatRoundedHoursLabelFromRoundedMs(roundDurationMsTo15MinBands(modalElapsedForFinish))
     : "";
 
+  const sessionMetaCards = (
+    <div className={`flex flex-wrap gap-1.5 ${compact ? "justify-end" : "sm:shrink-0"}`}>
+      <WorkSessionStartedAtMiniCard
+        valueMs={startMs}
+        ariaLabel="Edit session start time"
+        onCommit={(ms) => commitInRowStartTime(ms)}
+      />
+      <div className={integrationTaskWorkDurationMiniCardClass} style={workMiniCardSurface}>
+        <div className={workMiniCardLabel}>Duration</div>
+        <div className={workMiniCardValue} style={{ color: "var(--app-text)" }}>
+          {durationLive}
+        </div>
+      </div>
+    </div>
+  );
+
+  const actionButtons = (
+    <div className="flex flex-wrap items-stretch justify-end gap-2">
+      <button
+        type="button"
+        className="btn-ghost w-[5.25rem] shrink-0 justify-center gap-1 px-2 py-1.5 text-xs font-medium leading-[1.25]"
+        onClick={() => void togglePause()}
+        aria-pressed={isPaused}
+      >
+        {isPaused ? (
+          <>
+            <ResumeIcon />
+            Resume
+          </>
+        ) : (
+          <>
+            <PauseIcon />
+            Pause
+          </>
+        )}
+      </button>
+      <button
+        type="button"
+        className="btn-ghost px-3 py-1.5 text-xs font-medium leading-[1.25]"
+        onClick={() => discardDialogRef.current?.showModal()}
+      >
+        Discard
+      </button>
+      <button
+        type="button"
+        className="btn-cta-dark px-3 py-1.5 text-xs font-medium leading-[1.25] !text-xs"
+        onClick={openFinishModal}
+      >
+        Finish
+      </button>
+    </div>
+  );
+
+  const actionErrors = (
+    <>
+      {pauseSyncError ? (
+        <p className="max-w-full text-right text-xs break-words" style={{ color: "var(--app-danger)" }} role="alert">
+          {pauseSyncError}
+        </p>
+      ) : null}
+      {startTimeEditError ? (
+        <p className="max-w-full text-right text-xs break-words" style={{ color: "var(--app-danger)" }} role="alert">
+          {startTimeEditError}
+        </p>
+      ) : null}
+    </>
+  );
+
+  const titleBlock = (
+    <div className="min-w-0 flex-1">
+      <p className="text-xs font-medium" style={{ color: "var(--app-text-muted)" }}>
+        Working on
+      </p>
+      <p
+        className={
+          compact
+            ? "mt-0.5 line-clamp-2 break-words leading-snug font-medium"
+            : "mt-0.5 inline-block w-fit max-w-full break-words leading-snug font-medium"
+        }
+        style={{ color: "var(--app-text)" }}
+        title={compact ? taskTitle : undefined}
+      >
+        {taskTitle}
+      </p>
+      {compact && compactBadge ? (
+        <div className="mt-1.5">{compactBadge}</div>
+      ) : taskCrumb ? (
+        <p className="mt-1 truncate text-xs leading-snug text-muted-canvas">
+          {taskCrumb.projectColorVar ? (
+            <span
+              className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
+              style={{ backgroundColor: `var(${taskCrumb.projectColorVar})` }}
+              aria-hidden
+            />
+          ) : null}
+          <a
+            href={taskCrumb.href}
+            className="inline transition-colors hover:text-[var(--app-text)] hover:underline underline-offset-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="font-medium">{taskCrumb.projectName}</span>
+            <span className="mx-1.5">·</span>
+            <span>{taskCrumb.integrationLabel}</span>
+          </a>
+        </p>
+      ) : null}
+      {!compact && taskDueDateIso !== undefined ? (
+        <p className="mt-1 text-xs leading-snug tabular-nums text-muted-canvas">
+          {formatDateDisplay(taskDueDateIso)}
+        </p>
+      ) : null}
+    </div>
+  );
+
   return (
     <>
       <div
@@ -1249,118 +1373,52 @@ export function TaskWorkRow({
         onKeyDown={(e) => e.stopPropagation()}
         role="presentation"
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 flex-1 items-start gap-3">
-            <div
-              className="active-work-session-indicator--live inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[var(--app-info)]"
-              style={{
-                borderColor: "color-mix(in oklab, var(--app-border) 80%, transparent)",
-                background: "color-mix(in oklab, var(--app-info) 8%, var(--app-surface) 92%)",
-              }}
-              aria-hidden
-            >
-              <WorkOnTaskIcon />
+        {compact ? (
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-start gap-2">
+              <div
+                className="active-work-session-indicator--live inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[var(--app-info)]"
+                style={{
+                  borderColor: "color-mix(in oklab, var(--app-border) 80%, transparent)",
+                  background: "color-mix(in oklab, var(--app-info) 8%, var(--app-surface) 92%)",
+                }}
+                aria-hidden
+              >
+                <WorkOnTaskIcon />
+              </div>
+              {titleBlock}
             </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium" style={{ color: "var(--app-text-muted)" }}>
-                  Working on
-                </p>
-                <p
-                  className="mt-0.5 inline-block w-fit max-w-full break-words leading-snug font-medium"
-                  style={{ color: "var(--app-text)" }}
-                >
-                  {taskTitle}
-                </p>
-                {taskCrumb ? (
-                  <p className="mt-1 text-xs leading-snug text-muted-canvas">
-                    {taskCrumb.projectColorVar ? (
-                      <span
-                        className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
-                        style={{ backgroundColor: `var(${taskCrumb.projectColorVar})` }}
-                        aria-hidden
-                      />
-                    ) : null}
-                    <a
-                      href={taskCrumb.href}
-                      className="inline transition-colors hover:text-[var(--app-text)] hover:underline underline-offset-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <span className="font-medium">{taskCrumb.projectName}</span>
-                      <span className="mx-1.5">·</span>
-                      <span>{taskCrumb.integrationLabel}</span>
-                    </a>
-                  </p>
-                ) : null}
-                {taskDueDateIso !== undefined ? (
-                  <p className="mt-1 text-xs leading-snug tabular-nums text-muted-canvas">
-                    {formatDateDisplay(taskDueDateIso)}
-                  </p>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-1.5 sm:shrink-0">
-                <WorkSessionStartedAtMiniCard
-                  valueMs={startMs}
-                  ariaLabel="Edit session start time"
-                  onCommit={(ms) => commitInRowStartTime(ms)}
-                />
-                <div className={integrationTaskWorkDurationMiniCardClass} style={workMiniCardSurface}>
-                  <div className={workMiniCardLabel}>Duration</div>
-                  <div className={workMiniCardValue} style={{ color: "var(--app-text)" }}>
-                    {durationLive}
-                  </div>
-                </div>
-              </div>
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
+              {actionButtons}
+              {sessionMetaCards}
+              {actionErrors}
             </div>
           </div>
+        ) : (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <div
+                className="active-work-session-indicator--live inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[var(--app-info)]"
+                style={{
+                  borderColor: "color-mix(in oklab, var(--app-border) 80%, transparent)",
+                  background: "color-mix(in oklab, var(--app-info) 8%, var(--app-surface) 92%)",
+                }}
+                aria-hidden
+              >
+                <WorkOnTaskIcon />
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                {titleBlock}
+                {sessionMetaCards}
+              </div>
+            </div>
 
-          <div className="flex shrink-0 flex-col gap-1 sm:items-end">
-            <div className="flex flex-wrap items-stretch justify-end gap-2">
-              <button
-                type="button"
-                className="btn-ghost w-[5.25rem] shrink-0 justify-center gap-1 px-2 py-1.5 text-xs font-medium leading-[1.25]"
-                onClick={() => void togglePause()}
-                aria-pressed={isPaused}
-              >
-                {isPaused ? (
-                  <>
-                    <ResumeIcon />
-                    Resume
-                  </>
-                ) : (
-                  <>
-                    <PauseIcon />
-                    Pause
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost px-3 py-1.5 text-xs font-medium leading-[1.25]"
-                onClick={() => discardDialogRef.current?.showModal()}
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                className="btn-cta-dark px-3 py-1.5 text-xs font-medium leading-[1.25] !text-xs"
-                onClick={openFinishModal}
-              >
-                Finish
-              </button>
+            <div className="flex shrink-0 flex-col gap-1 sm:items-end">
+              {actionButtons}
+              {actionErrors}
             </div>
-            {pauseSyncError ? (
-              <p className="max-w-full text-right text-xs break-words" style={{ color: "var(--app-danger)" }} role="alert">
-                {pauseSyncError}
-              </p>
-            ) : null}
-            {startTimeEditError ? (
-              <p className="max-w-full text-right text-xs break-words" style={{ color: "var(--app-danger)" }} role="alert">
-                {startTimeEditError}
-              </p>
-            ) : null}
           </div>
-        </div>
+        )}
       </div>
 
       <dialog

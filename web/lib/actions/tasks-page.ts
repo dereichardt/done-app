@@ -320,11 +320,13 @@ export async function loadTasksPageSnapshot(): Promise<{
             direction: def.direction,
           }) || (def.name ?? "Integration")
         : "Integration";
+      const codeRaw = def?.integration_code != null ? String(def.integration_code).trim() : "";
       const itcRaw = def?.internal_time_code != null ? String(def.internal_time_code).trim() : "";
       return {
         id: row.id,
         projectId: row.project_id,
         label,
+        integrationCode: codeRaw.length > 0 ? codeRaw : null,
         internalTimeCode: itcRaw.length > 0 ? itcRaw : null,
       };
     });

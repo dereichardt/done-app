@@ -28,6 +28,26 @@ function sortTasks(rows: TasksPageTask[]) {
   });
 }
 
+function groupTasksByDueDate(tasks: TasksPageTask[]): Map<string, TasksPageTask[]> {
+  const byDate = new Map<string, TasksPageTask[]>();
+  for (const t of tasks) {
+    const key = t.due_date;
+    if (!key) continue;
+    const arr = byDate.get(key) ?? [];
+    arr.push(t);
+    byDate.set(key, arr);
+  }
+  return byDate;
+}
+
+function titleForDateGroup(dateIso: string, todayIso: string): string {
+  const dateLabel = formatDateDisplay(dateIso);
+  if (dateIso < todayIso) return `Past due · ${dateLabel}`;
+  if (dateIso === todayIso) return `Today · ${dateLabel}`;
+  if (dateIso === addDaysIsoUtc(todayIso, 1)) return `Tomorrow · ${dateLabel}`;
+  return dateLabel;
+}
+
 /** End of "this week" bucket on Work: day before next-week Sunday (exclusive upper bound via `< nextWeekStart`). */
 export function homeThisWeekEndExclusiveIso(todayIso: string): string {
   return nextWeekBucketStartIsoUtc(todayIso);
@@ -49,7 +69,7 @@ export function homeTaskMatchesMode(
 
 /**
  * Build display groups for the Home open-tasks card.
- * Today: Past due (if any) + Today.
+ * Today: Past due (by date) + Today — each header includes the date.
  * This week: one group per due date from past-due through end of week bucket.
  */
 export function computeHomeTaskGroups({
@@ -74,12 +94,23 @@ export function computeHomeTaskGroups({
     }
     sortTasks(pastDue);
     sortTasks(today);
+
     const groups: HomeTaskDateGroup[] = [];
-    if (pastDue.length > 0) {
-      groups.push({ id: "past_due", title: "Past due", tasks: pastDue });
+    const pastDueByDate = groupTasksByDueDate(pastDue);
+    const pastDueDates = [...pastDueByDate.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const dateIso of pastDueDates) {
+      groups.push({
+        id: `past_due_${dateIso}`,
+        title: titleForDateGroup(dateIso, todayIso),
+        tasks: pastDueByDate.get(dateIso)!,
+      });
     }
     if (today.length > 0) {
-      groups.push({ id: "today", title: "Today", tasks: today });
+      groups.push({
+        id: "today",
+        title: titleForDateGroup(todayIso, todayIso),
+        tasks: today,
+      });
     }
     return groups;
   }
@@ -92,25 +123,11 @@ export function computeHomeTaskGroups({
   }
   sortTasks(inRange);
 
-  const byDate = new Map<string, TasksPageTask[]>();
-  for (const t of inRange) {
-    const key = t.due_date!;
-    const arr = byDate.get(key) ?? [];
-    arr.push(t);
-    byDate.set(key, arr);
-  }
-
+  const byDate = groupTasksByDueDate(inRange);
   const dates = [...byDate.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  return dates.map((dateIso) => {
-    let title: string;
-    if (dateIso < todayIso) title = `Past due · ${formatDateDisplay(dateIso)}`;
-    else if (dateIso === todayIso) title = "Today";
-    else if (dateIso === addDaysIsoUtc(todayIso, 1)) title = "Tomorrow";
-    else title = formatDateDisplay(dateIso);
-    return {
-      id: dateIso,
-      title,
-      tasks: byDate.get(dateIso)!,
-    };
-  });
+  return dates.map((dateIso) => ({
+    id: dateIso,
+    title: titleForDateGroup(dateIso, todayIso),
+    tasks: byDate.get(dateIso)!,
+  }));
 }

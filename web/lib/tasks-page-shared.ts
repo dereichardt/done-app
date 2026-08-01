@@ -25,6 +25,8 @@ export type TasksPageIntegration = {
   projectId: string;
   /** Combined integration display label, e.g. "Workday → ADP". */
   label: string;
+  /** Catalog/integration ID code (e.g. INT1112) for compact UI badges. */
+  integrationCode: string | null;
   /** From the integration definition; used on the timesheet worktag row. */
   internalTimeCode: string | null;
 };

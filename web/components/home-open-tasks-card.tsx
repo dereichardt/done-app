@@ -3,8 +3,10 @@
 import { TaskWorkRow } from "@/components/integration-tasks-panel";
 import {
   HomeSkinnyTaskRow,
+  IntegrationIdBadge,
   type HomeSkinnyTaskMeta,
 } from "@/components/home-skinny-task-row";
+import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
 import type { TaskRowCrumb } from "@/components/task-row";
 import {
   startOrReplaceActiveWorkSession,
@@ -12,7 +14,7 @@ import {
   type ActiveWorkSessionIndicatorDTO,
 } from "@/lib/actions/integration-tasks";
 import { startOrReplaceInternalActiveWorkSession } from "@/lib/actions/internal-tasks";
-import { updateAnyTaskDueDate } from "@/lib/actions/tasks-page";
+import { toggleAnyTaskCompletion, updateAnyTaskDueDate } from "@/lib/actions/tasks-page";
 import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import {
   computeHomeTaskGroups,
@@ -70,6 +72,11 @@ export function HomeOpenTasksCard({
     return m;
   }, [snapshot?.tracks]);
 
+  const integrationById = useMemo(() => {
+    const m = new Map((snapshot?.integrations ?? []).map((i) => [i.id, i]));
+    return m;
+  }, [snapshot?.integrations]);
+
   const crumbForTask = useCallback(
     (task: TasksPageTask): TaskRowCrumb => {
       if (task.scope === "internal") {
@@ -106,21 +113,30 @@ export function HomeOpenTasksCard({
       const crumb = crumbForTask(task);
       if (task.scope === "internal") {
         return {
-          abbreviation: internalAbbreviation(task),
-          fullLabel: `Internal · ${task.internal_context_label}`,
+          badgeLabel: internalAbbreviation(task),
+          projectName: "Internal",
+          detailName: task.internal_context_label,
           colorVar: null,
           href: crumb.href,
         };
       }
       const project = projectById.get(task.project_id);
+      const integration =
+        task.project_integration_id != null
+          ? integrationById.get(task.project_integration_id)
+          : undefined;
+      const integrationCode = (integration?.integrationCode ?? "").trim();
+      const fallbackAbbr =
+        project?.abbreviation || deriveProjectAbbreviation(project?.name ?? "") || "PRJ";
       return {
-        abbreviation: project?.abbreviation || deriveProjectAbbreviation(project?.name ?? "") || "PRJ",
-        fullLabel: `${crumb.projectName} · ${crumb.integrationLabel}`,
+        badgeLabel: integrationCode || fallbackAbbr,
+        projectName: crumb.projectName,
+        detailName: crumb.integrationLabel,
         colorVar: project?.colorVar ?? null,
         href: crumb.href,
       };
     },
-    [crumbForTask, projectById],
+    [crumbForTask, integrationById, projectById],
   );
 
   const groups = useMemo(
@@ -134,6 +150,7 @@ export function HomeOpenTasksCard({
   );
   const [expandedWorkTaskId, setExpandedWorkTaskId] = useState<string | null>(null);
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
+  const [manualLogTask, setManualLogTask] = useState<TasksPageTask | null>(null);
 
   const activeWorkIndicator = snapshot?.activeWorkSessionIndicator;
   const activeWorkIndicatorSyncKey = activeWorkIndicator
@@ -329,14 +346,16 @@ export function HomeOpenTasksCard({
                   <TaskWorkRow
                     taskId={activeTaskOutsideFilter.id}
                     taskTitle={activeTaskOutsideFilter.title}
-                    taskCrumb={crumbForTask(activeTaskOutsideFilter)}
-                    taskDueDateIso={activeTaskOutsideFilter.due_date}
                     finishSessionIntegrationLabel={crumbForTask(activeTaskOutsideFilter).integrationLabel}
                     finishSessionProjectLabel={crumbForTask(activeTaskOutsideFilter).projectName}
                     activeSession={activeWorkSession}
                     onActiveSessionChange={setActiveWorkSession}
                     onClose={closeWorkRow}
                     onActionError={setWorkSessionActionError}
+                    compact
+                    compactBadge={
+                      <IntegrationIdBadge meta={metaForTask(activeTaskOutsideFilter)} />
+                    }
                   />
                 </li>
               ) : null}
@@ -354,14 +373,14 @@ export function HomeOpenTasksCard({
                             <TaskWorkRow
                               taskId={task.id}
                               taskTitle={task.title}
-                              taskCrumb={crumb}
-                              taskDueDateIso={task.due_date}
                               finishSessionIntegrationLabel={crumb.integrationLabel}
                               finishSessionProjectLabel={crumb.projectName}
                               activeSession={activeWorkSession}
                               onActiveSessionChange={setActiveWorkSession}
                               onClose={closeWorkRow}
                               onActionError={setWorkSessionActionError}
+                              compact
+                              compactBadge={<IntegrationIdBadge meta={metaForTask(task)} />}
                             />
                           </li>
                         );
@@ -376,6 +395,8 @@ export function HomeOpenTasksCard({
                             starting={startingTaskId === task.id}
                             onStartWork={startWorkOnTask}
                             onSaveDueDate={saveTaskDueDate}
+                            onToggleCompleteSuccess={markTaskCompletedLocally}
+                            onLongPressCompleteLog={(t) => setManualLogTask(t)}
                           />
                         </li>
                       );
@@ -392,6 +413,42 @@ export function HomeOpenTasksCard({
           ) : null}
         </div>
       </div>
+
+      <TaskOnlyManualLogDialog
+        open={manualLogTask != null}
+        taskId={manualLogTask?.id ?? ""}
+        projectTrackId={
+          manualLogTask?.scope === "project"
+            ? manualLogTask.project_track_id
+            : manualLogTask?.scope === "internal" && manualLogTask.internal_initiative_id
+              ? manualLogTask.internal_initiative_id
+              : ""
+        }
+        internalWorkSessionTaskId={
+          manualLogTask?.scope === "internal" && manualLogTask.internal_track_id != null
+            ? manualLogTask.id
+            : null
+        }
+        subtitle={
+          manualLogTask?.scope === "project"
+            ? `${projectById.get(manualLogTask.project_id)?.name ?? "Project"} · ${trackById.get(manualLogTask.project_track_id)?.label ?? "Track"}`
+            : manualLogTask?.scope === "internal"
+              ? `Internal · ${manualLogTask.internal_context_label}`
+              : ""
+        }
+        initialTitle={manualLogTask?.title ?? ""}
+        onClose={() => setManualLogTask(null)}
+        onCompleteTask={(taskId) => {
+          const task = openTasks.find((t) => t.id === taskId);
+          return toggleAnyTaskCompletion(taskId, task?.scope);
+        }}
+        onSaved={() => {
+          if (manualLogTask) {
+            markTaskCompletedLocally(manualLogTask.id);
+          }
+          setManualLogTask(null);
+        }}
+      />
     </section>
   );
 }

@@ -3,25 +3,37 @@ import Link from "next/link";
 import type { HomeSummary } from "@/lib/home-summary";
 
 type SummaryMetric = {
-  href: string;
+  href?: string;
   label: string;
   value: string;
   aria: string;
 };
 
 function MetricRow({ metric }: { metric: SummaryMetric }) {
+  const content = (
+    <>
+      <span className="min-w-0 truncate text-sm font-normal text-muted-canvas">{metric.label}</span>
+      <span className="shrink-0 text-sm font-bold tabular-nums" style={{ color: "var(--app-text)" }}>
+        {metric.value}
+      </span>
+    </>
+  );
+
   return (
     <li className="min-w-0">
-      <Link
-        href={metric.href}
-        className="flex items-center justify-between gap-3 rounded-[8px] px-1 py-1 no-underline transition-colors hover:bg-[var(--app-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
-        aria-label={metric.aria}
-      >
-        <span className="min-w-0 truncate text-sm font-normal text-muted-canvas">{metric.label}</span>
-        <span className="shrink-0 text-sm font-bold tabular-nums" style={{ color: "var(--app-text)" }}>
-          {metric.value}
-        </span>
-      </Link>
+      {metric.href ? (
+        <Link
+          href={metric.href}
+          className="flex items-center justify-between gap-3 rounded-[8px] px-1 py-1 no-underline transition-colors hover:bg-[var(--app-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+          aria-label={metric.aria}
+        >
+          {content}
+        </Link>
+      ) : (
+        <div className="flex items-center justify-between gap-3 px-1 py-1" aria-label={metric.aria}>
+          {content}
+        </div>
+      )}
     </li>
   );
 }
@@ -46,37 +58,33 @@ export function HomeSummaryCard({
       aria: `Active projects: ${summary.activeProjects}. Go to projects.`,
     },
     {
-      href: "/projects",
-      label: "Integrations",
-      value: String(summary.integrations),
-      aria: `Integrations across active projects: ${summary.integrations}. Go to projects.`,
-    },
-    {
       href: "/internal",
       label: "Active initiatives",
       value: String(summary.activeInitiatives),
       aria: `Active initiatives: ${summary.activeInitiatives}. Go to internal.`,
     },
+    {
+      label: "Integrations",
+      value: String(summary.integrations),
+      aria: `Integrations across active projects: ${summary.integrations}.`,
+    },
   ];
 
   const taskMetrics: SummaryMetric[] = [
     {
-      href: "/work",
       label: "Open tasks",
       value: String(openTasksCount),
-      aria: `Open tasks: ${openTasksCount}. Go to work.`,
+      aria: `Open tasks: ${openTasksCount}.`,
     },
     {
-      href: "/work",
       label: "Due today",
       value: String(dueTodayCount),
-      aria: `Tasks due today: ${dueTodayCount}. Go to work.`,
+      aria: `Tasks due today: ${dueTodayCount}.`,
     },
     {
-      href: "/work",
       label: "Past due",
       value: String(pastDueCount),
-      aria: `Past due tasks: ${pastDueCount}. Go to work.`,
+      aria: `Past due tasks: ${pastDueCount}.`,
     },
   ];
 
