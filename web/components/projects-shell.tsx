@@ -94,6 +94,24 @@ function ClockIcon() {
   );
 }
 
+function UtilizationIcon() {
+  return (
+    <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
+      {/* Track */}
+      <rect x="5" y="2" width="6" height="12" rx="1.25" />
+      {/* Fill ~80% from the bottom */}
+      <rect
+        x="6.1"
+        y="4.1"
+        width="3.8"
+        height="8.7"
+        rx="0.6"
+        style={{ fill: "currentColor", stroke: "none" }}
+      />
+    </svg>
+  );
+}
+
 function InboxIcon() {
   return (
     <svg viewBox="0 0 16 16" role="img" aria-hidden="true">
@@ -125,6 +143,12 @@ const navSections: NavSection[] = [
       { key: "tasks", label: "Tasks", href: "/work", icon: <TasksIcon /> },
       { key: "forecast", label: "Forecast", href: "/forecast", icon: <ForecastIcon /> },
       { key: "timesheet", label: "Timesheet", href: "/timesheet", icon: <ClockIcon /> },
+      {
+        key: "utilization",
+        label: "Utilization",
+        href: "/utilization",
+        icon: <UtilizationIcon />,
+      },
     ],
   },
   {
@@ -227,6 +251,8 @@ export function ProjectsShell({
     (pathname?.startsWith("/tasks/") ?? false);
   const isTimesheetRoute =
     pathname === "/timesheet" || (pathname?.startsWith("/timesheet/") ?? false);
+  const isUtilizationRoute =
+    pathname === "/utilization" || (pathname?.startsWith("/utilization/") ?? false);
   const isIntegrationCatalogRoute = pathname?.startsWith("/integrations/catalog") ?? false;
   const isSettingsRoute = pathname === "/settings" || (pathname?.startsWith("/settings/") ?? false);
   const isInternalRoute = pathname === "/internal" || (pathname?.startsWith("/internal/") ?? false);
@@ -336,6 +362,7 @@ export function ProjectsShell({
     if (isIntegrationCatalogRoute) return "Catalog";
     if (isForecastRoute) return "Forecast Studio";
     if (isInternalRoute) return "Internal";
+    if (isUtilizationRoute) return "Utilization";
     if (isTimesheetRoute) return "Timesheet";
     if (isTasksRoute) return "Tasks";
     if (isProjectsRoute) return "Projects";
@@ -348,6 +375,7 @@ export function ProjectsShell({
     isIntegrationCatalogRoute,
     isForecastRoute,
     isInternalRoute,
+    isUtilizationRoute,
     isTimesheetRoute,
     isTasksRoute,
     isProjectsRoute,

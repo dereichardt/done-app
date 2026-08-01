@@ -46,6 +46,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/work") ||
     pathname.startsWith("/tasks") ||
     pathname.startsWith("/timesheet") ||
+    pathname.startsWith("/utilization") ||
     pathname.startsWith("/forecast") ||
     pathname.startsWith("/internal") ||
     pathname.startsWith("/integrations") ||

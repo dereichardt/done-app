@@ -293,7 +293,7 @@ export function HomeOpenTasksCard({
         </Link>
       </div>
 
-      {/* Fixed height taller than Summary; list scrolls when content overflows. */}
+      {/* Fixed height; list scrolls when content overflows. */}
       <div className="card-canvas mt-3 flex h-[22rem] min-h-0 flex-col overflow-hidden">
         <div
           className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3"

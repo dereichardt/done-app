@@ -9,6 +9,13 @@ type SummaryMetric = {
   aria: string;
 };
 
+function formatSummaryHours(hours: number): string {
+  if (!Number.isFinite(hours) || hours === 0) return "0h";
+  const q = Math.round(hours * 4) / 4;
+  const s = Number.isInteger(q) ? String(q) : String(parseFloat(q.toFixed(2)));
+  return `${s}h`;
+}
+
 function MetricRow({ metric }: { metric: SummaryMetric }) {
   const content = (
     <>
@@ -88,20 +95,55 @@ export function HomeSummaryCard({
     },
   ];
 
+  const u = summary.utilization;
+  const hasTarget = u.targetHours != null && u.targetHours > 0;
+  const utilizationMetrics: SummaryMetric[] = [
+    {
+      href: "/utilization",
+      label: "Target",
+      value: hasTarget ? formatSummaryHours(u.targetHours!) : "—",
+      aria: hasTarget
+        ? `${u.label} target: ${formatSummaryHours(u.targetHours!)}. Go to utilization.`
+        : `${u.label}: no target set. Go to utilization.`,
+    },
+    {
+      href: "/utilization",
+      label: "F + A",
+      value: formatSummaryHours(u.actualPlusForecast),
+      aria: `${u.label} forecast plus actuals: ${formatSummaryHours(u.actualPlusForecast)} (${formatSummaryHours(u.forecastHours)} forecast + ${formatSummaryHours(u.actualHours)} actuals). Go to utilization.`,
+    },
+    {
+      href: "/utilization",
+      label: "Attainment",
+      value: u.attainmentPct != null ? `${u.attainmentPct}%` : "—",
+      aria:
+        u.attainmentPct != null
+          ? `${u.label} attainment: ${u.attainmentPct}%. Go to utilization.`
+          : `${u.label}: attainment unavailable until a target is set. Go to utilization.`,
+    },
+  ];
+
   return (
     <section aria-label="Home summary" className="flex min-h-0 flex-col">
       <div className="flex h-8 shrink-0 items-center justify-between gap-2">
         <h2 className="section-heading">Summary</h2>
       </div>
-      <div className="card-canvas mt-3 flex flex-col px-4 py-2.5">
+      {/* Match HomeOpenTasksCard card height (h-[22rem]). */}
+      <div className="card-canvas mt-3 flex h-[22rem] min-h-0 flex-col justify-between px-4 py-3.5">
         <ul className="flex list-none flex-col gap-0.5">
           {scopeMetrics.map((t) => (
             <MetricRow key={t.label} metric={t} />
           ))}
         </ul>
-        <div className="my-1.5 border-t" style={{ borderColor: "var(--app-border)" }} role="separator" />
+        <div className="border-t" style={{ borderColor: "var(--app-border)" }} role="separator" />
         <ul className="flex list-none flex-col gap-0.5">
           {taskMetrics.map((t) => (
+            <MetricRow key={t.label} metric={t} />
+          ))}
+        </ul>
+        <div className="border-t" style={{ borderColor: "var(--app-border)" }} role="separator" />
+        <ul className="flex list-none flex-col gap-0.5" aria-label={`${u.label} utilization`}>
+          {utilizationMetrics.map((t) => (
             <MetricRow key={t.label} metric={t} />
           ))}
         </ul>

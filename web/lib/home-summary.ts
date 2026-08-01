@@ -2,15 +2,29 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadTasksCalendarSessions } from "@/lib/actions/tasks-calendar";
 import { effortPeriodTotalHours } from "@/lib/integration-effort-buckets";
+import { loadUtilizationQuarter } from "@/lib/utilization-data";
 import type { UserPreferences } from "@/lib/user-preferences";
 import { getUserTodayIso } from "@/lib/user-preferences";
 import { addDaysYmd, mondayYmdOfWeekContaining, zonedMondayWeekBounds } from "@/lib/zoned-datetime";
+
+export type HomeSummaryUtilization = {
+  /** e.g. FY27 Q3 */
+  label: string;
+  targetHours: number | null;
+  actualHours: number;
+  forecastHours: number;
+  /** Actuals + forecast for the quarter. */
+  actualPlusForecast: number;
+  /** Actuals ÷ target × 100; null when no target. */
+  attainmentPct: number | null;
+};
 
 export type HomeSummary = {
   activeProjects: number;
   integrations: number;
   activeInitiatives: number;
   weekHours: number;
+  utilization: HomeSummaryUtilization;
 };
 
 function utcMidnightBoundsFallback(todayYmd: string): {
@@ -85,10 +99,26 @@ export async function loadHomeSummary(
     weekHours = effortPeriodTotalHours(cal.sessions, bounds.weekStart, bounds.weekEndExclusive);
   }
 
+  const utilizationDto = await loadUtilizationQuarter(
+    supabase,
+    ownerId,
+    todayYmd,
+    { startMonth: preferences.effort_quarter_start_month },
+  );
+  const actualPlusForecast = Math.round((utilizationDto.actualHours + utilizationDto.forecastHours) * 4) / 4;
+
   return {
     activeProjects,
     integrations,
     activeInitiatives: initiativeCount ?? 0,
     weekHours,
+    utilization: {
+      label: utilizationDto.label,
+      targetHours: utilizationDto.targetHours,
+      actualHours: utilizationDto.actualHours,
+      forecastHours: utilizationDto.forecastHours,
+      actualPlusForecast,
+      attainmentPct: utilizationDto.utilizationPct,
+    },
   };
 }
