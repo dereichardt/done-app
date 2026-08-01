@@ -1,5 +1,6 @@
 "use client";
 
+import { InitiativeIcpPill } from "@/components/initiative-icp-pill";
 import {
   loadTasksCalendarSessions,
   type TasksCalendarSession,
@@ -19,7 +20,7 @@ export type HomeWeekBarProjectMeta = {
   colorVar: string | null;
 };
 
-type BreakdownRow = { label: string; hours: number };
+type BreakdownRow = { label: string; hours: number; isIcp: boolean };
 
 type BarSegment = {
   id: string;
@@ -56,15 +57,21 @@ function breakdownFromSessions(
   rangeStart: Date,
   rangeEndExclusive: Date,
 ): BreakdownRow[] {
-  const breakdownMap = new Map<string, number>();
+  const breakdownMap = new Map<string, { hours: number; isIcp: boolean }>();
   for (const s of list) {
     const label = (s.integration_label ?? "").trim() || "Track";
     const h = effortPeriodTotalHours([s], rangeStart, rangeEndExclusive);
     if (!Number.isFinite(h) || h <= 0) continue;
-    breakdownMap.set(label, (breakdownMap.get(label) ?? 0) + h);
+    const existing = breakdownMap.get(label);
+    if (existing) {
+      existing.hours += h;
+      existing.isIcp = existing.isIcp || s.isIcp === true;
+    } else {
+      breakdownMap.set(label, { hours: h, isIcp: s.isIcp === true });
+    }
   }
   return [...breakdownMap.entries()]
-    .map(([label, hours]) => ({ label, hours }))
+    .map(([label, row]) => ({ label, hours: row.hours, isIcp: row.isIcp }))
     .sort((a, b) => b.hours - a.hours || a.label.localeCompare(b.label));
 }
 
@@ -242,8 +249,11 @@ function SegmentBreakdownPopover({
           ) : (
             breakdown.map((row) => (
               <li key={row.label} className="flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0 truncate" title={row.label}>
-                  {row.label}
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate" title={row.label}>
+                    {row.label}
+                  </span>
+                  {row.isIcp ? <InitiativeIcpPill /> : null}
                 </span>
                 <span className="shrink-0 font-semibold tabular-nums">{formatBarHours(row.hours)}</span>
               </li>
@@ -358,8 +368,12 @@ export function HomeWeekHoursStackedBar({
                   className="relative flex h-full min-w-[2px] items-stretch overflow-hidden"
                   style={{
                     width: `${pct}%`,
-                    background: mutedSurface(seg.colorVar),
-                    color: accentText(seg.colorVar),
+                    background: seg.isInternal
+                      ? "var(--app-internal-hours-surface)"
+                      : mutedSurface(seg.colorVar),
+                    color: seg.isInternal
+                      ? "var(--app-internal-hours-fg)"
+                      : accentText(seg.colorVar),
                   }}
                 >
                   <SegmentBreakdownPopover

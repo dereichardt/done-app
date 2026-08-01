@@ -23,6 +23,8 @@ export type TasksCalendarSession = GridSessionInput & {
   /** Links back to the integration Effort view so the user can open it from the detail popover. */
   integration_href: string;
   integration_href_label: "Open on integration" | "Open on project" | "Open internal";
+  /** True when the destination is an ICP internal initiative. */
+  isIcp?: boolean;
 };
 
 export type LoadTasksCalendarResult = {
@@ -215,15 +217,17 @@ async function appendInternalTaskCalendarSessions(
   }
 
   const titleByIniId = new Map<string, string>();
+  const icpByIniId = new Map<string, boolean>();
   if (iniIds.size > 0) {
     const { data: inv, error: invErr } = await supabase
       .from("internal_initiatives")
-      .select("id, title")
+      .select("id, title, icp")
       .eq("owner_id", userId)
       .in("id", [...iniIds]);
     if (invErr) return { error: invErr.message };
     for (const i of inv ?? []) {
       titleByIniId.set(i.id, (i.title ?? "").trim() || "Initiative");
+      icpByIniId.set(i.id, Boolean(i.icp));
     }
   }
 
@@ -238,6 +242,7 @@ async function appendInternalTaskCalendarSessions(
     let destTrackId: string;
     let integrationLabel: string;
     let integrationHref: string;
+    let isIcp = false;
     if (task.internal_track_id) {
       destTrackId = task.internal_track_id;
       const k = kindByTrackId.get(task.internal_track_id) ?? "admin";
@@ -247,6 +252,7 @@ async function appendInternalTaskCalendarSessions(
       destTrackId = task.internal_initiative_id;
       integrationLabel = titleByIniId.get(task.internal_initiative_id) ?? "Initiative";
       integrationHref = `/internal/initiatives/${task.internal_initiative_id}`;
+      isIcp = icpByIniId.get(task.internal_initiative_id) === true;
     } else {
       continue;
     }
@@ -268,6 +274,7 @@ async function appendInternalTaskCalendarSessions(
       project_name: "Internal",
       integration_href: integrationHref,
       integration_href_label: "Open internal",
+      isIcp,
     });
   }
 
@@ -283,7 +290,7 @@ async function appendInternalInitiativeManualCalendarSessions(
 ): Promise<{ error?: string }> {
   const { data: ownedIni, error: iniErr } = await supabase
     .from("internal_initiatives")
-    .select("id, title")
+    .select("id, title, icp")
     .eq("owner_id", userId);
   if (iniErr) return { error: iniErr.message };
   const iniRows = ownedIni ?? [];
@@ -293,6 +300,7 @@ async function appendInternalInitiativeManualCalendarSessions(
   const titleByIniId = new Map(
     iniRows.map((i) => [i.id, ((i.title ?? "").trim() || "Initiative") as string]),
   );
+  const icpByIniId = new Map(iniRows.map((i) => [i.id, Boolean(i.icp)]));
 
   const { data: manualRows, error: manErr } = await supabase
     .from("internal_initiative_manual_effort_entries")
@@ -325,6 +333,7 @@ async function appendInternalInitiativeManualCalendarSessions(
       project_name: "Internal",
       integration_href: `/internal/initiatives/${iniId}`,
       integration_href_label: "Open internal",
+      isIcp: icpByIniId.get(iniId) === true,
     });
   }
   return {};
