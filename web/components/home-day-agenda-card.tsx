@@ -17,7 +17,7 @@ import {
   type TasksPageTrack,
 } from "@/lib/tasks-page-shared";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type Ref } from "react";
 
 function formatSessionTimeRange(session: TasksCalendarSession): string {
   const start = new Date(session.started_at);
@@ -50,6 +50,27 @@ function sessionTypeLabel(s: TasksCalendarSession): "Task" | "Meeting" {
   return "Task";
 }
 
+function CalendarCollapseIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      width={16}
+      height={16}
+      aria-hidden
+    >
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+        d="M6 12l4-4-4-4"
+      />
+    </svg>
+  );
+}
+
 /** Today's effort agenda — height matches the left dashboard stack when `heightPx` is set. */
 export function HomeDayAgendaCard({
   todayIso,
@@ -58,6 +79,8 @@ export function HomeDayAgendaCard({
   projects = [],
   tracks = [],
   onCalendarEntryCreated,
+  onCollapse,
+  collapseButtonRef,
 }: {
   todayIso: string;
   /** Total section height (header + card), aligned to left stack including Hours this week. */
@@ -68,6 +91,9 @@ export function HomeDayAgendaCard({
   tracks?: TasksPageTrack[];
   /** Notifies parent so Hours this week (and related metrics) can reload. */
   onCalendarEntryCreated?: () => void;
+  /** When set, shows a collapse control in the section header. */
+  onCollapse?: () => void;
+  collapseButtonRef?: Ref<HTMLButtonElement>;
 }) {
   const [sessions, setSessions] = useState<TasksCalendarSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,9 +148,23 @@ export function HomeDayAgendaCard({
     >
       <div className="flex h-8 shrink-0 items-center justify-between gap-2">
         <h2 className="section-heading">Calendar</h2>
-        <Link href={calendarHref} className="btn-cta-tertiary shrink-0 !py-1 !px-2 text-xs">
-          Open calendar
-        </Link>
+        <div className="flex shrink-0 items-center gap-1">
+          <Link href={calendarHref} className="btn-cta-tertiary shrink-0 !py-1 !px-2 text-xs">
+            Open calendar
+          </Link>
+          {onCollapse ? (
+            <button
+              ref={collapseButtonRef}
+              type="button"
+              className="icon-btn"
+              aria-label="Collapse calendar"
+              aria-expanded={true}
+              onClick={onCollapse}
+            >
+              <CalendarCollapseIcon />
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="relative mt-3 min-h-0 flex-1">

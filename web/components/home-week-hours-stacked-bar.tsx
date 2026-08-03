@@ -277,11 +277,14 @@ export function HomeWeekHoursStackedBar({
   todayIso,
   projectById,
   reloadKey = 0,
+  /** When true at xl+, title/total use a 12-col grid so the title stays aligned with a fixed Summary column. */
+  wideLayout = false,
 }: {
   todayIso: string;
   projectById: Map<string, HomeWeekBarProjectMeta>;
   /** Increment to refetch week sessions (e.g. after a home calendar create). */
   reloadKey?: number;
+  wideLayout?: boolean;
 }) {
   const [sessions, setSessions] = useState<TasksCalendarSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -340,9 +343,29 @@ export function HomeWeekHoursStackedBar({
         under Tasks. Stacked bar still spans the full Summary+Tasks width.
       */}
       <div className="card-canvas flex flex-col gap-2 px-3 py-2.5">
-        <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-8">
-          <h2 className="section-heading min-w-0 truncate sm:col-span-2">Hours this week</h2>
-          <p className="text-xs font-medium tabular-nums text-muted-canvas sm:col-span-6 sm:text-right">
+        <div
+          className={
+            wideLayout
+              ? "grid grid-cols-1 items-center gap-2 sm:grid-cols-8 xl:grid-cols-12"
+              : "grid grid-cols-1 items-center gap-2 sm:grid-cols-8"
+          }
+        >
+          <h2
+            className={
+              wideLayout
+                ? "section-heading min-w-0 truncate sm:col-span-2 xl:col-span-2"
+                : "section-heading min-w-0 truncate sm:col-span-2"
+            }
+          >
+            Hours this week
+          </h2>
+          <p
+            className={
+              wideLayout
+                ? "text-xs font-medium tabular-nums text-muted-canvas sm:col-span-6 sm:text-right xl:col-span-10"
+                : "text-xs font-medium tabular-nums text-muted-canvas sm:col-span-6 sm:text-right"
+            }
+          >
             {loading ? "…" : formatEffortHoursLabel(totalHours)}
           </p>
         </div>

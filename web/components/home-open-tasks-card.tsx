@@ -69,6 +69,7 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 
 const subscribeToHydration = () => () => {};
@@ -211,11 +212,14 @@ const addTaskDialogClass =
 export function HomeOpenTasksCard({
   snapshot,
   onEffortChanged,
+  headerTrailing = null,
 }: {
   snapshot: TasksPageSnapshot | null;
   error?: string | null;
   /** Refresh Hours this week + Actuals vs Forecast after effort is logged. */
   onEffortChanged?: () => void;
+  /** Optional control rendered after “View all” (e.g. show-calendar when calendar is collapsed). */
+  headerTrailing?: ReactNode;
 }) {
   const router = useRouter();
   const addTaskDialogRef = useRef<HTMLDialogElement | null>(null);
@@ -655,9 +659,12 @@ export function HomeOpenTasksCard({
     <section aria-label="Open tasks" className="flex min-h-0 flex-col">
       <div className="flex h-8 shrink-0 items-center justify-between gap-2">
         <h2 className="section-heading">Tasks</h2>
-        <Link href="/work" className="btn-cta-tertiary shrink-0 !py-1 !px-2 text-xs">
-          View all
-        </Link>
+        <div className="flex shrink-0 items-center gap-1">
+          <Link href="/work" className="btn-cta-tertiary shrink-0 !py-1 !px-2 text-xs">
+            View all
+          </Link>
+          {headerTrailing}
+        </div>
       </div>
 
       {/* Fixed height; list scrolls when content overflows. FAB sits outside overflow clip. */}
