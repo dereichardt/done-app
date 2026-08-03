@@ -11,7 +11,7 @@ import {
   parseLocalYmd,
 } from "@/lib/integration-effort-buckets";
 import { TASKS_PAGE_INTERNAL_PROJECT_ID } from "@/lib/tasks-page-shared";
-import { addDaysYmd, mondayYmdOfWeekContaining } from "@/lib/zoned-datetime";
+import { addDaysYmd, sundayYmdOfWeekContaining } from "@/lib/zoned-datetime";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 export type HomeWeekBarProjectMeta = {
@@ -286,7 +286,7 @@ export function HomeWeekHoursStackedBar({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const weekStartYmd = mondayYmdOfWeekContaining(todayIso);
+  const weekStartYmd = sundayYmdOfWeekContaining(todayIso);
   const weekEndExclusiveYmd = addDaysYmd(weekStartYmd, 7);
   const rangeStart = useMemo(() => parseLocalYmd(weekStartYmd), [weekStartYmd]);
   const rangeEndExclusive = useMemo(

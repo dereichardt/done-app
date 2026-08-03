@@ -5,7 +5,7 @@ import { effortPeriodTotalHours } from "@/lib/integration-effort-buckets";
 import { loadUtilizationQuarter } from "@/lib/utilization-data";
 import type { UserPreferences } from "@/lib/user-preferences";
 import { getUserTodayIso } from "@/lib/user-preferences";
-import { addDaysYmd, mondayYmdOfWeekContaining, zonedMondayWeekBounds } from "@/lib/zoned-datetime";
+import { addDaysYmd, sundayYmdOfWeekContaining, zonedSundayWeekBounds } from "@/lib/zoned-datetime";
 
 export type HomeSummaryUtilization = {
   /** e.g. FY27 Q3 */
@@ -31,9 +31,9 @@ function utcMidnightBoundsFallback(todayYmd: string): {
   weekStartIso: string;
   weekEndExclusiveIso: string;
 } {
-  const mon = mondayYmdOfWeekContaining(todayYmd);
-  const next = addDaysYmd(mon, 7);
-  const weekStart = new Date(`${mon}T00:00:00.000Z`);
+  const sun = sundayYmdOfWeekContaining(todayYmd);
+  const next = addDaysYmd(sun, 7);
+  const weekStart = new Date(`${sun}T00:00:00.000Z`);
   const weekEndExclusive = new Date(`${next}T00:00:00.000Z`);
   return {
     weekStart,
@@ -50,7 +50,7 @@ export async function loadHomeSummary(
 ): Promise<HomeSummary> {
   const tz = preferences.timezone;
   const todayYmd = getUserTodayIso(tz);
-  let bounds = zonedMondayWeekBounds(tz, todayYmd);
+  let bounds = zonedSundayWeekBounds(tz, todayYmd);
   if (Number.isNaN(bounds.weekStart.getTime()) || Number.isNaN(bounds.weekEndExclusive.getTime())) {
     bounds = utcMidnightBoundsFallback(todayYmd);
   }

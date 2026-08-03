@@ -22,6 +22,13 @@ export function mondayYmdOfWeekContaining(todayYmd: string): string {
   return addDaysYmd(todayYmd, -mon0);
 }
 
+/** Sunday `YYYY-MM-DD` of the week containing `todayYmd` (proleptic Gregorian). */
+export function sundayYmdOfWeekContaining(todayYmd: string): string {
+  const mon0 = weekdayMon0FromYmd(todayYmd);
+  // Mon0 0=Mon … 6=Sun → days since Sunday = (mon0 + 1) % 7
+  return addDaysYmd(todayYmd, -((mon0 + 1) % 7));
+}
+
 function localYmdInTz(utcMs: number, timeZone: string): string {
   try {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -79,6 +86,26 @@ export function zonedMondayWeekBounds(
   const nextMondayYmd = addDaysYmd(mondayYmd, 7);
   const startMs = zonedLocalMidnightUtcMs(mondayYmd, tz);
   const endMs = zonedLocalMidnightUtcMs(nextMondayYmd, tz);
+  const weekStart = new Date(startMs);
+  const weekEndExclusive = new Date(endMs);
+  return {
+    weekStart,
+    weekEndExclusive,
+    weekStartIso: weekStart.toISOString(),
+    weekEndExclusiveIso: weekEndExclusive.toISOString(),
+  };
+}
+
+/** Sunday-start week in `timeZone`, same notion as timesheet / forecast weeks. */
+export function zonedSundayWeekBounds(
+  timeZone: string | null | undefined,
+  todayYmd: string,
+): { weekStart: Date; weekEndExclusive: Date; weekStartIso: string; weekEndExclusiveIso: string } {
+  const tz = timeZone?.trim() || "UTC";
+  const sundayYmd = sundayYmdOfWeekContaining(todayYmd);
+  const nextSundayYmd = addDaysYmd(sundayYmd, 7);
+  const startMs = zonedLocalMidnightUtcMs(sundayYmd, tz);
+  const endMs = zonedLocalMidnightUtcMs(nextSundayYmd, tz);
   const weekStart = new Date(startMs);
   const weekEndExclusive = new Date(endMs);
   return {
