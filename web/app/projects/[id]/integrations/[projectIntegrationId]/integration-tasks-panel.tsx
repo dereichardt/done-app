@@ -1036,6 +1036,7 @@ export function TaskWorkRow({
   onActiveSessionChange,
   onClose,
   onActionError,
+  onSessionPersisted,
   compact = false,
   compactBadge = null,
 }: {
@@ -1051,6 +1052,8 @@ export function TaskWorkRow({
   onActiveSessionChange: (session: ActiveWorkSessionDTO) => void;
   onClose: (opts?: { completeTask?: boolean; refresh?: boolean }) => void;
   onActionError?: (error: string) => void;
+  /** Called after a finished session is successfully persisted (Hours / Actuals refresh). */
+  onSessionPersisted?: () => void;
   /**
    * Home skinny-task card: title can wrap to two lines; Started at / Duration sit under
    * Pause / Discard / Finish, right-aligned.
@@ -1228,6 +1231,7 @@ export function TaskWorkRow({
         return;
       }
       clearCalendarSessionCache();
+      onSessionPersisted?.();
     })();
   }
 

@@ -8,6 +8,7 @@ import {
   IntegrationIdBadge,
   type HomeSkinnyTaskMeta,
 } from "@/components/home-skinny-task-row";
+import { HomeEditTaskDialog } from "@/components/home-edit-task-dialog";
 import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
 import {
   TaskQuickAdd,
@@ -21,18 +22,91 @@ import {
   type ActiveWorkSessionIndicatorDTO,
 } from "@/lib/actions/integration-tasks";
 import { startOrReplaceInternalActiveWorkSession } from "@/lib/actions/internal-tasks";
-import { toggleAnyTaskCompletion, updateAnyTaskDueDate } from "@/lib/actions/tasks-page";
+import {
+  reorderTaskWithinGroup,
+  rescheduleTaskByDrag,
+  toggleAnyTaskCompletion,
+  updateAnyTaskDueDate,
+  updateAnyTaskPriority,
+  updateAnyTaskTitle,
+} from "@/lib/actions/tasks-page";
 import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import {
   computeHomeTaskGroups,
   homeTaskMatchesMode,
+  type HomeTaskDateGroup,
   type HomeTasksMode,
 } from "@/lib/home-task-buckets";
 import { deriveProjectAbbreviation } from "@/lib/project-abbreviation";
+import { clearCalendarSessionCache } from "@/lib/tasks-calendar-session-cache";
 import type { TasksPageSnapshot, TasksPageTask } from "@/lib/tasks-page-shared";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
+
+const subscribeToHydration = () => () => {};
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
+
+function makeSortableId(groupId: string, taskId: string) {
+  return `${groupId}:${taskId}`;
+}
+
+function parseSortableId(id: string): { groupId: string; taskId: string } | null {
+  const ix = id.indexOf(":");
+  if (ix < 0) return null;
+  const groupId = id.slice(0, ix);
+  const taskId = id.slice(ix + 1);
+  if (!groupId || !taskId) return null;
+  return { groupId, taskId };
+}
+
+/** Due date applied when a task is dropped into this Home date group. */
+function dueDateForHomeGroup(group: HomeTaskDateGroup, todayIso: string): string {
+  if (group.id === "today") return todayIso;
+  if (group.id.startsWith("past_due_")) return group.id.slice("past_due_".length);
+  return group.id;
+}
+
+function GripHandleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden>
+      <circle cx="9" cy="6" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="6" r="1.4" fill="currentColor" />
+      <circle cx="9" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="9" cy="18" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="18" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
 
 function indicatorToActiveSessionDto(
   i: ActiveWorkSessionIndicatorDTO | null | undefined,
@@ -47,6 +121,83 @@ function indicatorToActiveSessionDto(
   };
 }
 
+function SortableHomeSkinnyTaskRow({
+  task,
+  groupId,
+  meta,
+  todayIso,
+  effectiveGlobalActiveTaskId,
+  starting,
+  onStartWork,
+  onSaveDueDate,
+  onToggleCompleteSuccess,
+  onLongPressCompleteLog,
+  onOpenEdit,
+  dndReady,
+  isDragOverlay = false,
+}: {
+  task: TasksPageTask;
+  groupId: string;
+  meta: HomeSkinnyTaskMeta;
+  todayIso: string;
+  effectiveGlobalActiveTaskId: string | null;
+  starting: boolean;
+  onStartWork: (task: TasksPageTask) => void | Promise<void>;
+  onSaveDueDate: (taskId: string, dueDateIso: string) => Promise<{ error?: string }>;
+  onToggleCompleteSuccess?: (taskId: string) => void;
+  onLongPressCompleteLog?: (task: TasksPageTask) => void;
+  onOpenEdit?: (task: TasksPageTask) => void;
+  dndReady: boolean;
+  isDragOverlay?: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: makeSortableId(groupId, task.id),
+    disabled: !dndReady || isDragOverlay,
+  });
+
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging && !isDragOverlay ? 0.4 : 1,
+  };
+
+  return (
+    <li ref={setNodeRef} style={style} className="min-w-0">
+      <HomeSkinnyTaskRow
+        task={task}
+        meta={meta}
+        todayIso={todayIso}
+        effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+        starting={starting}
+        onStartWork={onStartWork}
+        onSaveDueDate={onSaveDueDate}
+        onToggleCompleteSuccess={onToggleCompleteSuccess}
+        onLongPressCompleteLog={onLongPressCompleteLog}
+        onOpenEdit={onOpenEdit}
+        dragHandle={
+          <button
+            type="button"
+            className={[
+              "absolute left-0.5 top-1/2 z-[1] flex h-5 w-5 -translate-y-1/2 cursor-grab items-center justify-center rounded text-[var(--app-text-muted)] transition-opacity hover:text-[var(--app-text)] active:cursor-grabbing",
+              isDragOverlay
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
+            ].join(" ")}
+            aria-label="Drag to reorder or reschedule"
+            title="Drag to reorder or reschedule"
+            style={{ touchAction: "none" }}
+            onClick={(e) => e.preventDefault()}
+            {...(dndReady && !isDragOverlay ? attributes : {})}
+            {...(dndReady && !isDragOverlay ? listeners : {})}
+          >
+            <GripHandleIcon />
+          </button>
+        }
+      />
+    </li>
+  );
+}
+
 function internalAbbreviation(task: Extract<TasksPageTask, { scope: "internal" }>): string {
   if (task.internal_bucket_kind === "admin") return "ADM";
   if (task.internal_bucket_kind === "development") return "DEV";
@@ -59,9 +210,12 @@ const addTaskDialogClass =
 
 export function HomeOpenTasksCard({
   snapshot,
+  onEffortChanged,
 }: {
   snapshot: TasksPageSnapshot | null;
   error?: string | null;
+  /** Refresh Hours this week + Actuals vs Forecast after effort is logged. */
+  onEffortChanged?: () => void;
 }) {
   const router = useRouter();
   const addTaskDialogRef = useRef<HTMLDialogElement | null>(null);
@@ -165,6 +319,7 @@ export function HomeOpenTasksCard({
   const [expandedWorkTaskId, setExpandedWorkTaskId] = useState<string | null>(null);
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
   const [manualLogTask, setManualLogTask] = useState<TasksPageTask | null>(null);
+  const [editTask, setEditTask] = useState<TasksPageTask | null>(null);
 
   const activeWorkIndicator = snapshot?.activeWorkSessionIndicator;
   const activeWorkIndicatorSyncKey = activeWorkIndicator
@@ -273,6 +428,9 @@ export function HomeOpenTasksCard({
       setOpenTasks((prevTasks) =>
         prevTasks.map((t) => (t.id === taskId ? ({ ...t, due_date: next } as TasksPageTask) : t)),
       );
+      setEditTask((prevEdit) =>
+        prevEdit?.id === taskId ? ({ ...prevEdit, due_date: next } as TasksPageTask) : prevEdit,
+      );
       const fd = new FormData();
       fd.set("due_date", dueDateIso);
       const res = await updateAnyTaskDueDate(taskId, fd, existing.scope);
@@ -280,15 +438,185 @@ export function HomeOpenTasksCard({
         setOpenTasks((prevTasks) =>
           prevTasks.map((t) => (t.id === taskId ? ({ ...t, due_date: prev } as TasksPageTask) : t)),
         );
+        setEditTask((prevEdit) =>
+          prevEdit?.id === taskId ? ({ ...prevEdit, due_date: prev } as TasksPageTask) : prevEdit,
+        );
         return { error: res.error };
       }
       if (!homeTaskMatchesMode(next, mode, todayIso)) {
         setOpenTasks((prevTasks) => prevTasks.filter((t) => t.id !== taskId));
+        setEditTask((prevEdit) => (prevEdit?.id === taskId ? null : prevEdit));
       }
       return {};
     },
     [openTasks, mode, todayIso],
   );
+
+  const saveTaskTitle = useCallback(
+    async (taskId: string, title: string): Promise<{ error?: string }> => {
+      const existing = openTasks.find((t) => t.id === taskId) ?? editTask;
+      if (!existing) return {};
+      const prev = existing.title;
+      const next = title.trim();
+      if (!next || next === prev) return {};
+      setOpenTasks((prevTasks) =>
+        prevTasks.map((t) => (t.id === taskId ? ({ ...t, title: next } as TasksPageTask) : t)),
+      );
+      setEditTask((prevEdit) =>
+        prevEdit?.id === taskId ? ({ ...prevEdit, title: next } as TasksPageTask) : prevEdit,
+      );
+      const res = await updateAnyTaskTitle(taskId, next, existing.scope);
+      if (res?.error) {
+        setOpenTasks((prevTasks) =>
+          prevTasks.map((t) => (t.id === taskId ? ({ ...t, title: prev } as TasksPageTask) : t)),
+        );
+        setEditTask((prevEdit) =>
+          prevEdit?.id === taskId ? ({ ...prevEdit, title: prev } as TasksPageTask) : prevEdit,
+        );
+        return { error: res.error };
+      }
+      return {};
+    },
+    [openTasks, editTask],
+  );
+
+  const saveTaskPriority = useCallback(
+    async (
+      taskId: string,
+      priority: "low" | "medium" | "high",
+    ): Promise<{ error?: string }> => {
+      const existing = openTasks.find((t) => t.id === taskId) ?? editTask;
+      if (!existing) return {};
+      const prev = existing.priority;
+      setOpenTasks((prevTasks) =>
+        prevTasks.map((t) => (t.id === taskId ? ({ ...t, priority } as TasksPageTask) : t)),
+      );
+      setEditTask((prevEdit) =>
+        prevEdit?.id === taskId ? ({ ...prevEdit, priority } as TasksPageTask) : prevEdit,
+      );
+      const res = await updateAnyTaskPriority(taskId, priority, existing.scope);
+      if (res?.error) {
+        setOpenTasks((prevTasks) =>
+          prevTasks.map((t) => (t.id === taskId ? ({ ...t, priority: prev } as TasksPageTask) : t)),
+        );
+        setEditTask((prevEdit) =>
+          prevEdit?.id === taskId ? ({ ...prevEdit, priority: prev } as TasksPageTask) : prevEdit,
+        );
+        return { error: res.error };
+      }
+      return {};
+    },
+    [openTasks, editTask],
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const dndContextId = useId();
+  const dndReady = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
+  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
+
+  const allTasksFlat = useMemo(() => {
+    const m = new Map<string, { task: TasksPageTask; group: HomeTaskDateGroup }>();
+    for (const g of groups) for (const t of g.tasks) m.set(t.id, { task: t, group: g });
+    return m;
+  }, [groups]);
+
+  const activeDragTask = activeDragTaskId ? (allTasksFlat.get(activeDragTaskId)?.task ?? null) : null;
+
+  const reorderWithinGroup = useCallback(
+    async (groupId: string, orderedTaskIds: string[]) => {
+      const targetGroup = groups.find((g) => g.id === groupId);
+      if (!targetGroup) return;
+      const lookup = new Map(targetGroup.tasks.map((t) => [t.id, t] as const));
+      const reordered: TasksPageTask[] = orderedTaskIds
+        .map((id) => lookup.get(id))
+        .filter((v): v is TasksPageTask => Boolean(v))
+        .map((t, globalIndex) => ({
+          ...t,
+          sort_order: globalIndex,
+        }));
+
+      setOpenTasks((prev) => {
+        const inOrder = new Map(reordered.map((t) => [t.id, t] as const));
+        return prev.map((t) => (inOrder.has(t.id) ? inOrder.get(t.id)! : t));
+      });
+
+      const res = await reorderTaskWithinGroup(orderedTaskIds);
+      if (res.error) {
+        setWorkSessionActionError(res.error);
+        router.refresh();
+      }
+    },
+    [groups, router],
+  );
+
+  const moveAcrossGroup = useCallback(
+    async (taskId: string, toGroup: HomeTaskDateGroup) => {
+      const existing = openTasks.find((t) => t.id === taskId);
+      if (!existing) return;
+      const prevDue = existing.due_date;
+      const nextDue = dueDateForHomeGroup(toGroup, todayIso);
+      setOpenTasks((prevTasks) =>
+        prevTasks.map((t) =>
+          t.id === taskId ? ({ ...t, due_date: nextDue } as TasksPageTask) : t,
+        ),
+      );
+      const res = await rescheduleTaskByDrag(taskId, nextDue, existing.scope);
+      if (res.error) {
+        setOpenTasks((prevTasks) =>
+          prevTasks.map((t) =>
+            t.id === taskId ? ({ ...t, due_date: prevDue } as TasksPageTask) : t,
+          ),
+        );
+        setWorkSessionActionError(res.error);
+        return;
+      }
+      if (!homeTaskMatchesMode(nextDue, mode, todayIso)) {
+        setOpenTasks((prevTasks) => prevTasks.filter((t) => t.id !== taskId));
+      }
+    },
+    [openTasks, todayIso, mode],
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    const parsed = parseSortableId(String(event.active.id));
+    if (!parsed) return;
+    setActiveDragTaskId(parsed.taskId);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveDragTaskId(null);
+    const { active, over } = event;
+    if (!over) return;
+    const a = parseSortableId(String(active.id));
+    const o = parseSortableId(String(over.id));
+    if (!a || !o) return;
+    if (a.taskId === o.taskId) return;
+
+    if (a.groupId === o.groupId) {
+      const group = groups.find((g) => g.id === a.groupId);
+      if (!group) return;
+      const ids = group.tasks.map((t) => t.id);
+      const fromIx = ids.indexOf(a.taskId);
+      const toIx = ids.indexOf(o.taskId);
+      if (fromIx < 0 || toIx < 0 || fromIx === toIx) return;
+      const next = ids.slice();
+      next.splice(fromIx, 1);
+      next.splice(toIx, 0, a.taskId);
+      void reorderWithinGroup(a.groupId, next);
+      return;
+    }
+
+    const toGroup = groups.find((g) => g.id === o.groupId);
+    if (!toGroup) return;
+    void moveAcrossGroup(a.taskId, toGroup);
+  }
 
   const emptyMessage =
     mode === "today" ? "No tasks due today" : "No tasks due this week";
@@ -379,72 +707,124 @@ export function HomeOpenTasksCard({
             ) : groups.length === 0 && !activeTaskOutsideFilter ? (
               <p className="text-sm text-muted-canvas">{emptyMessage}</p>
             ) : (
-              <ul className="flex list-none flex-col gap-3">
-                {activeTaskOutsideFilter && activeWorkSession ? (
-                  <li className="min-w-0">
-                    <p className="mb-1.5 text-xs font-medium text-muted-canvas">In progress</p>
-                    <TaskWorkRow
-                      taskId={activeTaskOutsideFilter.id}
-                      taskTitle={activeTaskOutsideFilter.title}
-                      finishSessionIntegrationLabel={crumbForTask(activeTaskOutsideFilter).integrationLabel}
-                      finishSessionProjectLabel={crumbForTask(activeTaskOutsideFilter).projectName}
-                      activeSession={activeWorkSession}
-                      onActiveSessionChange={setActiveWorkSession}
-                      onClose={closeWorkRow}
-                      onActionError={setWorkSessionActionError}
-                      compact
-                      compactBadge={
-                        <IntegrationIdBadge meta={metaForTask(activeTaskOutsideFilter)} />
-                      }
-                    />
-                  </li>
-                ) : null}
-                {groups.map((group) => (
-                  <li key={group.id} className="min-w-0">
-                    <p className="mb-1.5 text-xs font-medium text-muted-canvas">{group.title}</p>
-                    <ul className="flex list-none flex-col gap-1.5">
-                      {group.tasks.map((task) => {
-                        const isExpanded =
-                          expandedWorkTaskId === task.id && activeWorkSession?.task_id === task.id;
-                        if (isExpanded && activeWorkSession) {
-                          const crumb = crumbForTask(task);
-                          return (
-                            <li key={task.id} className="min-w-0">
-                              <TaskWorkRow
-                                taskId={task.id}
-                                taskTitle={task.title}
-                                finishSessionIntegrationLabel={crumb.integrationLabel}
-                                finishSessionProjectLabel={crumb.projectName}
-                                activeSession={activeWorkSession}
-                                onActiveSessionChange={setActiveWorkSession}
-                                onClose={closeWorkRow}
-                                onActionError={setWorkSessionActionError}
-                                compact
-                                compactBadge={<IntegrationIdBadge meta={metaForTask(task)} />}
-                              />
-                            </li>
-                          );
+              <DndContext
+                id={dndContextId}
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onDragCancel={() => setActiveDragTaskId(null)}
+              >
+                <ul className="flex list-none flex-col gap-3">
+                  {activeTaskOutsideFilter && activeWorkSession ? (
+                    <li className="min-w-0">
+                      <p className="mb-1.5 text-xs font-medium text-muted-canvas">In progress</p>
+                      <TaskWorkRow
+                        taskId={activeTaskOutsideFilter.id}
+                        taskTitle={activeTaskOutsideFilter.title}
+                        finishSessionIntegrationLabel={crumbForTask(activeTaskOutsideFilter).integrationLabel}
+                        finishSessionProjectLabel={crumbForTask(activeTaskOutsideFilter).projectName}
+                        activeSession={activeWorkSession}
+                        onActiveSessionChange={setActiveWorkSession}
+                        onClose={closeWorkRow}
+                        onActionError={setWorkSessionActionError}
+                        onSessionPersisted={onEffortChanged}
+                        compact
+                        compactBadge={
+                          <IntegrationIdBadge meta={metaForTask(activeTaskOutsideFilter)} />
                         }
-                        return (
-                          <li key={task.id} className="min-w-0">
-                            <HomeSkinnyTaskRow
-                              task={task}
-                              meta={metaForTask(task)}
-                              todayIso={todayIso}
-                              effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
-                              starting={startingTaskId === task.id}
-                              onStartWork={startWorkOnTask}
-                              onSaveDueDate={saveTaskDueDate}
-                              onToggleCompleteSuccess={markTaskCompletedLocally}
-                              onLongPressCompleteLog={(t) => setManualLogTask(t)}
-                            />
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
+                      />
+                    </li>
+                  ) : null}
+                  {groups.map((group) => {
+                    const sortableIds = group.tasks
+                      .filter(
+                        (t) =>
+                          !(
+                            expandedWorkTaskId === t.id &&
+                            activeWorkSession?.task_id === t.id
+                          ),
+                      )
+                      .map((t) => makeSortableId(group.id, t.id));
+                    return (
+                      <li key={group.id} className="min-w-0">
+                        <p className="mb-1.5 text-xs font-medium text-muted-canvas">{group.title}</p>
+                        <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+                          <ul className="flex list-none flex-col gap-1.5">
+                            {group.tasks.map((task) => {
+                              const isExpanded =
+                                expandedWorkTaskId === task.id &&
+                                activeWorkSession?.task_id === task.id;
+                              if (isExpanded && activeWorkSession) {
+                                const crumb = crumbForTask(task);
+                                return (
+                                  <li key={task.id} className="min-w-0">
+                                    <TaskWorkRow
+                                      taskId={task.id}
+                                      taskTitle={task.title}
+                                      finishSessionIntegrationLabel={crumb.integrationLabel}
+                                      finishSessionProjectLabel={crumb.projectName}
+                                      activeSession={activeWorkSession}
+                                      onActiveSessionChange={setActiveWorkSession}
+                                      onClose={closeWorkRow}
+                                      onActionError={setWorkSessionActionError}
+                                      onSessionPersisted={onEffortChanged}
+                                      compact
+                                      compactBadge={<IntegrationIdBadge meta={metaForTask(task)} />}
+                                    />
+                                  </li>
+                                );
+                              }
+                              return (
+                                <SortableHomeSkinnyTaskRow
+                                  key={task.id}
+                                  task={task}
+                                  groupId={group.id}
+                                  meta={metaForTask(task)}
+                                  todayIso={todayIso}
+                                  effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+                                  starting={startingTaskId === task.id}
+                                  onStartWork={startWorkOnTask}
+                                  onSaveDueDate={saveTaskDueDate}
+                                  onToggleCompleteSuccess={markTaskCompletedLocally}
+                                  onLongPressCompleteLog={(t) => setManualLogTask(t)}
+                                  onOpenEdit={setEditTask}
+                                  dndReady={dndReady}
+                                />
+                              );
+                            })}
+                          </ul>
+                        </SortableContext>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <DragOverlay>
+                  {activeDragTask ? (
+                    <div className="opacity-95 shadow-lg">
+                      <HomeSkinnyTaskRow
+                        task={activeDragTask}
+                        meta={metaForTask(activeDragTask)}
+                        todayIso={todayIso}
+                        effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
+                        starting={false}
+                        onStartWork={() => {}}
+                        onSaveDueDate={async () => ({})}
+                        dragHandle={
+                          <button
+                            type="button"
+                            className="absolute left-0.5 top-1/2 z-[1] flex h-5 w-5 -translate-y-1/2 cursor-grabbing items-center justify-center rounded text-[var(--app-text-muted)] opacity-100"
+                            aria-hidden
+                            tabIndex={-1}
+                          >
+                            <GripHandleIcon />
+                          </button>
+                        }
+                      />
+                    </div>
+                  ) : null}
+                </DragOverlay>
+              </DndContext>
             )}
             {workSessionActionError ? (
               <p className="mt-2 text-sm" style={{ color: "var(--app-danger)" }} role="alert">
@@ -511,6 +891,30 @@ export function HomeOpenTasksCard({
         </div>
       </dialog>
 
+      <HomeEditTaskDialog
+        open={editTask != null}
+        task={editTask}
+        projectLabel={
+          editTask
+            ? editTask.scope === "internal"
+              ? "Internal"
+              : (projectById.get(editTask.project_id)?.name ?? "Project")
+            : ""
+        }
+        trackLabel={
+          editTask
+            ? editTask.scope === "internal"
+              ? editTask.internal_context_label
+              : (trackById.get(editTask.project_track_id)?.label ?? "Track")
+            : ""
+        }
+        todayIso={todayIso}
+        onClose={() => setEditTask(null)}
+        onSaveTitle={saveTaskTitle}
+        onSavePriority={saveTaskPriority}
+        onSaveDueDate={saveTaskDueDate}
+      />
+
       <TaskOnlyManualLogDialog
         open={manualLogTask != null}
         taskId={manualLogTask?.id ?? ""}
@@ -544,6 +948,8 @@ export function HomeOpenTasksCard({
             markTaskCompletedLocally(manualLogTask.id);
           }
           setManualLogTask(null);
+          clearCalendarSessionCache();
+          onEffortChanged?.();
         }}
       />
     </section>

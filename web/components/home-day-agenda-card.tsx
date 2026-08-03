@@ -17,7 +17,6 @@ import {
   type TasksPageTrack,
 } from "@/lib/tasks-page-shared";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 function formatSessionTimeRange(session: TasksCalendarSession): string {
@@ -70,7 +69,6 @@ export function HomeDayAgendaCard({
   /** Notifies parent so Hours this week (and related metrics) can reload. */
   onCalendarEntryCreated?: () => void;
 }) {
-  const router = useRouter();
   const [sessions, setSessions] = useState<TasksCalendarSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -235,7 +233,6 @@ export function HomeDayAgendaCard({
           setCreateOpen(false);
           await loadDay(todayIso);
           onCalendarEntryCreated?.();
-          router.refresh();
         }}
       />
     </section>

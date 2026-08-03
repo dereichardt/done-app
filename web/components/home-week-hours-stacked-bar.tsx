@@ -11,6 +11,7 @@ import {
   parseLocalYmd,
 } from "@/lib/integration-effort-buckets";
 import { TASKS_PAGE_INTERNAL_PROJECT_ID } from "@/lib/tasks-page-shared";
+import { subscribeCalendarSessionCacheCleared } from "@/lib/tasks-calendar-session-cache";
 import { addDaysYmd, sundayYmdOfWeekContaining } from "@/lib/zoned-datetime";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -285,6 +286,7 @@ export function HomeWeekHoursStackedBar({
   const [sessions, setSessions] = useState<TasksCalendarSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cacheClearTick, setCacheClearTick] = useState(0);
 
   const weekStartYmd = sundayYmdOfWeekContaining(todayIso);
   const weekEndExclusiveYmd = addDaysYmd(weekStartYmd, 7);
@@ -293,6 +295,8 @@ export function HomeWeekHoursStackedBar({
     () => parseLocalYmd(weekEndExclusiveYmd),
     [weekEndExclusiveYmd],
   );
+
+  useEffect(() => subscribeCalendarSessionCacheCleared(() => setCacheClearTick((n) => n + 1)), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -316,7 +320,7 @@ export function HomeWeekHoursStackedBar({
     return () => {
       cancelled = true;
     };
-  }, [rangeStart, rangeEndExclusive, reloadKey]);
+  }, [rangeStart, rangeEndExclusive, reloadKey, cacheClearTick]);
 
   const segments = useMemo(
     () => buildSegments(sessions, rangeStart, rangeEndExclusive, projectById),

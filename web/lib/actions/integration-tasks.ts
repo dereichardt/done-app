@@ -1132,7 +1132,8 @@ export async function createIntegrationTaskWorkSession(
     if (completeErr) return { error: completeErr.message };
   }
 
-  // Skip revalidatePath — finish callers use optimistic UI (same as start/discard).
+  // Home Actuals vs Forecast / summary; finish callers keep other surfaces optimistic.
+  revalidatePath("/home");
   return {};
 }
 

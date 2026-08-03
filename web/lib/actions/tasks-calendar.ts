@@ -148,6 +148,7 @@ function revalidateTasksCalendarPaths(projectId: string, projectIntegrationId: s
   revalidatePath("/work");
   revalidatePath("/tasks");
   revalidatePath("/timesheet");
+  revalidatePath("/home");
   revalidatePath(`/projects/${projectId}`);
   if (projectIntegrationId) {
     revalidatePath(`/projects/${projectId}/integrations/${projectIntegrationId}`);
@@ -158,6 +159,7 @@ function revalidateInternalCalendarPaths(initiativeId: string | null) {
   revalidatePath("/work");
   revalidatePath("/tasks");
   revalidatePath("/timesheet");
+  revalidatePath("/home");
   revalidatePath("/internal");
   if (initiativeId) revalidatePath(`/internal/initiatives/${initiativeId}`);
 }

@@ -11,9 +11,10 @@ export type HomeSummaryUtilization = {
   /** e.g. FY27 Q3 */
   label: string;
   targetHours: number | null;
+  /** Past Sunday weeks in the quarter only (excludes the in-progress week). */
   actualHours: number;
   forecastHours: number;
-  /** Actuals ÷ target × 100; null when no target. */
+  /** Past-week actuals ÷ target × 100; null when no target. */
   attainmentPct: number | null;
 };
 
@@ -104,6 +105,18 @@ export async function loadHomeSummary(
     { startMonth: preferences.effort_quarter_start_month },
   );
 
+  /** Summary Actuals/Attainment exclude the in-progress week (confirmed at weekly time entry). */
+  let pastActualHours = 0;
+  for (const w of utilizationDto.weeks) {
+    if (w.relative === "past") pastActualHours += w.actualHours;
+  }
+  pastActualHours = Math.round(pastActualHours * 4) / 4;
+  const targetHours = utilizationDto.targetHours;
+  const attainmentPct =
+    targetHours != null && targetHours > 0
+      ? Math.round((pastActualHours / targetHours) * 1000) / 10
+      : null;
+
   return {
     activeProjects,
     integrations,
@@ -111,10 +124,10 @@ export async function loadHomeSummary(
     weekHours,
     utilization: {
       label: utilizationDto.label,
-      targetHours: utilizationDto.targetHours,
-      actualHours: utilizationDto.actualHours,
+      targetHours,
+      actualHours: pastActualHours,
       forecastHours: utilizationDto.forecastHours,
-      attainmentPct: utilizationDto.utilizationPct,
+      attainmentPct,
     },
   };
 }

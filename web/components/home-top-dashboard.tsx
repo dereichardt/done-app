@@ -9,7 +9,8 @@ import {
 } from "@/components/home-week-hours-stacked-bar";
 import type { HomeSummary } from "@/lib/home-summary";
 import type { TasksPageSnapshot } from "@/lib/tasks-page-shared";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 export function HomeTopDashboard({
   summary,
@@ -20,6 +21,7 @@ export function HomeTopDashboard({
   tasksSnapshot: TasksPageSnapshot | null;
   todayIso: string;
 }) {
+  const router = useRouter();
   const openTasks = useMemo(
     () => (tasksSnapshot?.tasks ?? []).filter((t) => t.status !== "done"),
     [tasksSnapshot?.tasks],
@@ -55,6 +57,11 @@ export function HomeTopDashboard({
   const [calendarHeightPx, setCalendarHeightPx] = useState<number | null>(null);
   const [hoursReloadKey, setHoursReloadKey] = useState(0);
 
+  const refreshEffortSurfaces = useCallback(() => {
+    setHoursReloadKey((k) => k + 1);
+    router.refresh();
+  }, [router]);
+
   useLayoutEffect(() => {
     const el = leftStackRef.current;
     if (!el) return;
@@ -82,7 +89,10 @@ export function HomeTopDashboard({
               />
             </div>
             <div className="min-w-0 self-start sm:col-span-6">
-              <HomeOpenTasksCard snapshot={tasksSnapshot} />
+              <HomeOpenTasksCard
+                snapshot={tasksSnapshot}
+                onEffortChanged={refreshEffortSurfaces}
+              />
             </div>
           </div>
 
@@ -100,7 +110,7 @@ export function HomeTopDashboard({
             projectAbbreviationById={projectAbbreviationById}
             projects={tasksSnapshot?.projects ?? []}
             tracks={tasksSnapshot?.tracks ?? []}
-            onCalendarEntryCreated={() => setHoursReloadKey((k) => k + 1)}
+            onCalendarEntryCreated={refreshEffortSurfaces}
           />
         </div>
       </div>
