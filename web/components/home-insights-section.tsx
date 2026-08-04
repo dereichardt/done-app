@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { HomeEffortBreakdownCards } from "@/components/home-effort-breakdown-cards";
 import type { HomeInsightsDTO } from "@/lib/home-insights";
 import type { UtilizationInsightStatus, UtilizationWeekRow } from "@/lib/utilization-data";
 import { formatShortHours } from "@/lib/utilization-data";
@@ -345,6 +346,8 @@ export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
           </Link>
         </div>
       </div>
+
+      <HomeEffortBreakdownCards data={data.breakdowns} />
     </section>
   );
 }

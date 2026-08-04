@@ -1,5 +1,6 @@
 /**
- * Home Insights: quarter pulse (utilization) + upcoming capacity availability.
+ * Home Insights: quarter pulse (utilization) + upcoming capacity availability
+ * + Tasks/Meetings and Billable/Internal effort breakdowns.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -10,6 +11,10 @@ import {
   TARGET_WEEKLY_CAPACITY_HOURS,
   type CapacityGapsSynthesis,
 } from "@/lib/home-capacity-gaps";
+import {
+  loadHomeEffortBreakdowns,
+  type HomeEffortBreakdownsDTO,
+} from "@/lib/home-effort-breakdowns";
 import { currentSundayWeekYmd } from "@/lib/project-forecast";
 import type { UserPreferences } from "@/lib/user-preferences";
 import { getUserTodayIso } from "@/lib/user-preferences";
@@ -22,6 +27,7 @@ export type HomeInsightsDTO = {
   quarter: UtilizationQuarterDTO;
   capacity: CapacityGapsSynthesis;
   weeklyCapacityTarget: number;
+  breakdowns: HomeEffortBreakdownsDTO;
 };
 
 /**
@@ -96,14 +102,16 @@ export async function loadHomeInsights(
     startMonth: preferences.effort_quarter_start_month,
   };
 
-  const [quarter, capacity] = await Promise.all([
+  const [quarter, capacity, breakdowns] = await Promise.all([
     loadUtilizationQuarter(supabase, ownerId, todayIso, quarterConfig),
     loadCapacityGapsSynthesis(supabase, ownerId, todayIso),
+    loadHomeEffortBreakdowns(supabase, ownerId, todayIso, quarterConfig),
   ]);
 
   return {
     quarter,
     capacity,
     weeklyCapacityTarget: TARGET_WEEKLY_CAPACITY_HOURS,
+    breakdowns,
   };
 }
