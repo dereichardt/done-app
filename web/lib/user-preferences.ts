@@ -25,6 +25,11 @@ export type EffortQuarterStartMonth = (typeof EFFORT_QUARTER_START_MONTH_VALUES)
 
 export const DEFAULT_EFFORT_QUARTER_START_MONTH: EffortQuarterStartMonth = 1;
 
+/** Preferred full Mon–Fri week capacity hours (matches Forecast / Utilization pace). */
+export const DEFAULT_WEEKLY_CAPACITY_HOURS = 32;
+export const MIN_WEEKLY_CAPACITY_HOURS = 1;
+export const MAX_WEEKLY_CAPACITY_HOURS = 80;
+
 export const EFFORT_QUARTER_START_MONTH_OPTIONS: Array<{
   value: EffortQuarterStartMonth;
   label: string;
@@ -74,7 +79,29 @@ export type UserPreferences = {
   forecast_review_day: WeekdayValue;
   effort_quarter_start_month: EffortQuarterStartMonth;
   deployment_effort_by_phase: DeploymentEffortByPhase;
+  weekly_capacity_hours: number;
 };
+
+/** Round to nearest 0.25h (matches utilization / effort hour rounding). */
+export function roundQuarterHours(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_WEEKLY_CAPACITY_HOURS;
+  return Math.round(n * 4) / 4;
+}
+
+export function parseWeeklyCapacityHours(value: unknown): number | null {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(n)) return null;
+  const rounded = roundQuarterHours(n);
+  if (rounded < MIN_WEEKLY_CAPACITY_HOURS || rounded > MAX_WEEKLY_CAPACITY_HOURS) {
+    return null;
+  }
+  return rounded;
+}
 
 export function deploymentEffortFormFieldName(phaseKey: DeploymentPhaseKey): string {
   return `deployment_effort_${phaseKey}`;

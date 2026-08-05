@@ -23,7 +23,14 @@ import {
   parseLocalYmd,
 } from "@/lib/integration-effort-buckets";
 import type { EffortQuarterConfig } from "@/lib/project-weekly-effort";
+import {
+  countTimeOffWeekdaysInRange,
+  isTimeOffType,
+  workingWeekdayWeight,
+  type TimeOffDay,
+} from "@/lib/time-off";
 import { sundayWeekWindowFromAnchorYmd } from "@/lib/timesheet-week";
+import { DEFAULT_WEEKLY_CAPACITY_HOURS } from "@/lib/user-preferences";
 
 export type UtilizationInsightStatus =
   | "on_track"
@@ -61,6 +68,8 @@ export type UtilizationQuarterDTO = {
   utilizationPct: number | null;
   weeks: UtilizationWeekRow[];
   insight: UtilizationInsight;
+  timeOffDays: TimeOffDay[];
+  weeklyCapacityHours: number;
 };
 
 /**
@@ -502,12 +511,13 @@ function emptyDto(
   identity: FiscalQuarterIdentity,
   config: EffortQuarterConfig,
   todayYmd: string,
+  weeklyCapacityHours: number = DEFAULT_WEEKLY_CAPACITY_HOURS,
 ): UtilizationQuarterDTO {
   const weeksYmcs = sundayWeeksOverlappingRange(identity.start, identity.endExclusive);
   const dayWeights = weeksYmcs.map(
     (w) => weekOverlapInQuarter(w, identity.start, identity.endExclusive).days,
   );
-  const pace = paceHoursPerWeekWeighted(0, dayWeights);
+  const pace = paceHoursPerWeekWeighted(0, dayWeights, weeklyCapacityHours);
   const weeks: UtilizationWeekRow[] = weeksYmcs.map((weekStartYmd, i) => ({
     weekStartYmd,
     paceHours: pace[i] ?? 0,
@@ -531,7 +541,44 @@ function emptyDto(
     utilizationPct: null,
     weeks,
     insight: buildInsight({ targetHours: null, weeks, todayYmd }),
+    timeOffDays: [],
+    weeklyCapacityHours,
   };
+}
+
+async function loadTimeOffDays(
+  supabase: SupabaseClient,
+  ownerId: string,
+  startYmd: string,
+  endExclusiveYmd: string,
+): Promise<TimeOffDay[]> {
+  const { data, error } = await supabase
+    .from("time_off_days")
+    .select("day_date, off_type, other_label")
+    .eq("owner_id", ownerId)
+    .gte("day_date", startYmd)
+    .lt("day_date", endExclusiveYmd)
+    .order("day_date", { ascending: true });
+
+  if (error) {
+    console.error("[utilization] time off load failed", error);
+    return [];
+  }
+
+  const out: TimeOffDay[] = [];
+  for (const row of data ?? []) {
+    const dayYmd = String(row.day_date).slice(0, 10);
+    if (!isTimeOffType(row.off_type)) continue;
+    out.push({
+      dayYmd,
+      offType: row.off_type,
+      otherLabel:
+        row.off_type === "other" && typeof row.other_label === "string"
+          ? row.other_label.trim() || null
+          : null,
+    });
+  }
+  return out;
 }
 
 export async function loadUtilizationQuarter(
@@ -540,7 +587,13 @@ export async function loadUtilizationQuarter(
   todayYmd: string,
   quarterConfig: EffortQuarterConfig,
   quarterStartYmd?: string | null,
+  weeklyCapacityHours: number = DEFAULT_WEEKLY_CAPACITY_HOURS,
 ): Promise<UtilizationQuarterDTO> {
+  const capacity =
+    Number.isFinite(weeklyCapacityHours) && weeklyCapacityHours > 0
+      ? weeklyCapacityHours
+      : DEFAULT_WEEKLY_CAPACITY_HOURS;
+
   const anchor = quarterStartYmd?.trim()
     ? parseLocalYmd(quarterStartYmd.trim())
     : parseLocalYmd(todayYmd);
@@ -551,22 +604,28 @@ export async function loadUtilizationQuarter(
 
   const weeksYmcs = sundayWeeksOverlappingRange(identity.start, identity.endExclusive);
   if (weeksYmcs.length === 0) {
-    return emptyDto(identity, quarterConfig, todayYmd);
+    return emptyDto(identity, quarterConfig, todayYmd, capacity);
   }
 
-  // Load sessions overlapping the quarter calendar (Aug 1–Oct 31), not pre-quarter week days.
+  // Load sessions overlapping the quarter calendar, not pre-quarter week days.
   const windowStartYmd = identity.quarterStartYmd;
   const windowEndExclusiveYmd = identity.endExclusiveYmd;
 
+  const timeOffPromise = loadTimeOffDays(
+    supabase,
+    ownerId,
+    windowStartYmd,
+    windowEndExclusiveYmd,
+  );
+
+  // Build week fractions first so forecast proration is correct.
   const weekFractions = new Map<string, number>();
-  const dayWeights: number[] = [];
   for (const w of weeksYmcs) {
     const overlap = weekOverlapInQuarter(w, identity.start, identity.endExclusive);
     weekFractions.set(w, overlap.fraction);
-    dayWeights.push(overlap.days);
   }
 
-  const [targetRes, projectHours, initiativeHours] = await Promise.all([
+  const [targetRes, projectHours, initiativeHours, timeOffDays] = await Promise.all([
     supabase
       .from("utilization_quarter_targets")
       .select("target_hours")
@@ -593,10 +652,28 @@ export async function loadUtilizationQuarter(
       identity.endExclusive,
       weekFractions,
     ),
+    timeOffPromise,
   ]);
 
   if (targetRes.error) {
     console.error("[utilization] target load failed", targetRes.error);
+  }
+
+  const timeOffYmds = new Set(timeOffDays.map((d) => d.dayYmd));
+  const dayWeights: number[] = [];
+  for (const w of weeksYmcs) {
+    const overlap = weekOverlapInQuarter(w, identity.start, identity.endExclusive);
+    const { weekStart, weekEndExclusive } = sundayWeekWindowFromAnchorYmd(w);
+    const clipped = clipLocalRange(
+      weekStart,
+      weekEndExclusive,
+      localDayStart(identity.start),
+      localDayStart(identity.endExclusive),
+    );
+    const offCount = clipped
+      ? countTimeOffWeekdaysInRange(clipped.start, clipped.endExclusive, timeOffYmds)
+      : 0;
+    dayWeights.push(workingWeekdayWeight(overlap.days, offCount));
   }
 
   const rawTarget = targetRes.data?.target_hours;
@@ -614,7 +691,7 @@ export async function loadUtilizationQuarter(
     weeksYmcs,
   );
 
-  const pace = paceHoursPerWeekWeighted(targetHours ?? 0, dayWeights);
+  const pace = paceHoursPerWeekWeighted(targetHours ?? 0, dayWeights, capacity);
   const weeks: UtilizationWeekRow[] = weeksYmcs.map((weekStartYmd, i) => {
     const relative = weekRelativeToToday(weekStartYmd, todayYmd);
     const actualRaw = actualByWeek.get(weekStartYmd) ?? 0;
@@ -660,6 +737,8 @@ export async function loadUtilizationQuarter(
     utilizationPct,
     weeks,
     insight: buildInsight({ targetHours, weeks, todayYmd }),
+    timeOffDays,
+    weeklyCapacityHours: capacity,
   };
 }
 

@@ -28,6 +28,7 @@ export default async function ForecastPage({ searchParams }: PageProps) {
       projects={projects}
       todayIso={todayIso}
       deploymentEffortByPhase={prefsRes.preferences.deployment_effort_by_phase}
+      weeklyCapacityHours={prefsRes.preferences.weekly_capacity_hours}
       focusProjectId={
         focusProjectId && projects.some((p) => p.id === focusProjectId) ? focusProjectId : null
       }

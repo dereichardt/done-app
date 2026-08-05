@@ -8,12 +8,14 @@ import {
   DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
   DEFAULT_EFFORT_QUARTER_START_MONTH,
   DEFAULT_FORECAST_REVIEW_DAY,
+  DEFAULT_WEEKLY_CAPACITY_HOURS,
   isValidIanaTimezone,
   isWeekdayValue,
   normalizeTimezone,
   parseDeploymentEffortByPhase,
   parseDeploymentEffortByPhaseFromFormData,
   parseEffortQuarterStartMonth,
+  parseWeeklyCapacityHours,
   type UserPreferences,
 } from "@/lib/user-preferences";
 
@@ -23,6 +25,7 @@ type UserPreferencesRow = {
   forecast_review_day: string;
   effort_quarter_start_month: number;
   deployment_effort_by_phase: unknown;
+  weekly_capacity_hours: number | null;
 };
 
 type SavePreferencesState = {
@@ -37,6 +40,7 @@ function defaults(): UserPreferences {
     forecast_review_day: DEFAULT_FORECAST_REVIEW_DAY,
     effort_quarter_start_month: DEFAULT_EFFORT_QUARTER_START_MONTH,
     deployment_effort_by_phase: { ...DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE },
+    weekly_capacity_hours: DEFAULT_WEEKLY_CAPACITY_HOURS,
   };
 }
 
@@ -54,6 +58,8 @@ function toPreferences(row: UserPreferencesRow | null | undefined): UserPreferen
       parseEffortQuarterStartMonth(row.effort_quarter_start_month) ??
       DEFAULT_EFFORT_QUARTER_START_MONTH,
     deployment_effort_by_phase: parseDeploymentEffortByPhase(row.deployment_effort_by_phase),
+    weekly_capacity_hours:
+      parseWeeklyCapacityHours(row.weekly_capacity_hours) ?? DEFAULT_WEEKLY_CAPACITY_HOURS,
   };
 }
 
@@ -66,7 +72,7 @@ const loadUserPreferencesCached = cache(
     const { data, error } = await supabase
       .from("user_preferences")
       .select(
-        "timezone, activity_summary_day, forecast_review_day, effort_quarter_start_month, deployment_effort_by_phase",
+        "timezone, activity_summary_day, forecast_review_day, effort_quarter_start_month, deployment_effort_by_phase, weekly_capacity_hours",
       )
       .eq("user_id", user.id)
       .maybeSingle<UserPreferencesRow>();
@@ -98,6 +104,7 @@ export async function saveUserPreferences(
     formData.get("effort_quarter_start_month"),
   );
   const deploymentEffortByPhase = parseDeploymentEffortByPhaseFromFormData(formData);
+  const weeklyCapacityHours = parseWeeklyCapacityHours(formData.get("weekly_capacity_hours"));
   const timezone = normalizeTimezone(timezoneRaw);
 
   if (timezone && !isValidIanaTimezone(timezone)) {
@@ -118,6 +125,11 @@ export async function saveUserPreferences(
         "Deployment effort by stage must use multiples of 5% that total exactly 100%.",
     };
   }
+  if (weeklyCapacityHours === null) {
+    return {
+      error: "Weekly capacity must be between 1 and 80 hours (in 0.25 hour steps).",
+    };
+  }
 
   const { error } = await supabase.from("user_preferences").upsert(
     {
@@ -127,6 +139,7 @@ export async function saveUserPreferences(
       forecast_review_day: forecastReviewRaw,
       effort_quarter_start_month: effortQuarterStartMonth,
       deployment_effort_by_phase: deploymentEffortByPhase,
+      weekly_capacity_hours: weeklyCapacityHours,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" },
@@ -140,6 +153,7 @@ export async function saveUserPreferences(
   revalidatePath("/timesheet");
   revalidatePath("/home");
   revalidatePath("/forecast");
+  revalidatePath("/utilization");
   revalidatePath("/internal");
   return { success: true };
 }

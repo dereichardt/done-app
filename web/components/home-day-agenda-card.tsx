@@ -16,6 +16,7 @@ import {
   type TasksPageProject,
   type TasksPageTrack,
 } from "@/lib/tasks-page-shared";
+import { subscribeCalendarSessionCacheCleared } from "@/lib/tasks-calendar-session-cache";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type Ref } from "react";
 
@@ -78,6 +79,7 @@ export function HomeDayAgendaCard({
   projectAbbreviationById,
   projects = [],
   tracks = [],
+  reloadKey = 0,
   onCalendarEntryCreated,
   onCollapse,
   collapseButtonRef,
@@ -89,6 +91,8 @@ export function HomeDayAgendaCard({
   projectAbbreviationById?: Map<string, string>;
   projects?: TasksPageProject[];
   tracks?: TasksPageTrack[];
+  /** Increment to refetch day sessions (e.g. after finishing a work session). */
+  reloadKey?: number;
   /** Notifies parent so Hours this week (and related metrics) can reload. */
   onCalendarEntryCreated?: () => void;
   /** When set, shows a collapse control in the section header. */
@@ -99,6 +103,7 @@ export function HomeDayAgendaCard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [cacheClearTick, setCacheClearTick] = useState(0);
 
   const loadDay = useCallback(async (ymd: string) => {
     setLoading(true);
@@ -124,9 +129,11 @@ export function HomeDayAgendaCard({
     setLoading(false);
   }, []);
 
+  useEffect(() => subscribeCalendarSessionCacheCleared(() => setCacheClearTick((n) => n + 1)), []);
+
   useEffect(() => {
     void loadDay(todayIso);
-  }, [todayIso, loadDay]);
+  }, [todayIso, loadDay, reloadKey, cacheClearTick]);
 
   const dayHours = useMemo(() => {
     let sum = 0;

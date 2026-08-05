@@ -1,20 +1,10 @@
 import Link from "next/link";
 
+import { HomeAvailabilityCard } from "@/components/home-availability-card";
 import { HomeEffortBreakdownCards } from "@/components/home-effort-breakdown-cards";
 import type { HomeInsightsDTO } from "@/lib/home-insights";
 import type { UtilizationInsightStatus, UtilizationWeekRow } from "@/lib/utilization-data";
 import { formatShortHours } from "@/lib/utilization-data";
-
-function formatWeekLabel(weekStartYmd: string): string {
-  const [y, m, d] = weekStartYmd.split("-").map(Number);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return weekStartYmd;
-  const date = new Date(Date.UTC(y, m - 1, d));
-  return date.toLocaleDateString("en-US", {
-    timeZone: "UTC",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 function statusLabel(status: UtilizationInsightStatus): string {
   switch (status) {
@@ -60,8 +50,8 @@ function statusSurface(status: UtilizationInsightStatus): string {
 }
 
 /**
- * Pulse bar segments: past-week actuals (black) + current/future forecast (grey),
- * capped at the quarter target.
+ * Pulse bar segments: past-week actuals (dark) + current/future forecast (muted),
+ * against a target track; capped at the quarter target.
  */
 function quarterPulseFill(weeks: UtilizationWeekRow[], targetHours: number) {
   let pastActual = 0;
@@ -84,18 +74,6 @@ function quarterPulseFill(weeks: UtilizationWeekRow[], targetHours: number) {
   };
 }
 
-/** Capacity window weeks are offsets +4…+8 from the current Sunday. */
-function availabilityHorizonLabel(capacity: HomeInsightsDTO["capacity"]): string {
-  if (capacity.freeStartingWeek == null) {
-    const hasForecast = capacity.weeks.some((w) => w.portfolioHours > 0);
-    return hasForecast ? "No open capacity soon" : "No forecast yet";
-  }
-  const idx = capacity.weeks.findIndex((w) => w.weekStart === capacity.freeStartingWeek);
-  if (idx < 0) return "No open capacity soon";
-  const weeksOut = 4 + idx;
-  return weeksOut === 1 ? "in 1 week" : `in ${weeksOut} weeks`;
-}
-
 export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
   const { quarter, capacity, weeklyCapacityTarget } = data;
   const hasTarget = quarter.targetHours != null && quarter.targetHours > 0;
@@ -104,7 +82,6 @@ export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
     : null;
   const status = quarter.insight.status;
   const color = statusColor(status);
-  const availabilityWhen = availabilityHorizonLabel(capacity);
   const insightLines = [
     quarter.insight.message,
     ...(quarter.insight.detail ? [quarter.insight.detail] : []),
@@ -164,7 +141,7 @@ export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
                 >
                   {pulse.forecastPct > 0 ? (
                     <div
-                      className="absolute inset-y-0 flex items-center justify-end overflow-hidden px-2.5 motion-safe:[transition:left_300ms_cubic-bezier(0.2,0,0.2,1),width_300ms_cubic-bezier(0.2,0,0.2,1)]"
+                      className="absolute inset-y-0 flex items-center justify-end overflow-hidden rounded-full px-2.5 motion-safe:[transition:left_300ms_cubic-bezier(0.2,0,0.2,1),width_300ms_cubic-bezier(0.2,0,0.2,1)]"
                       style={{
                         left: `${pulse.actualPct}%`,
                         width: `${pulse.forecastPct}%`,
@@ -178,12 +155,16 @@ export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
                   ) : null}
                   {pulse.actualPct > 0 ? (
                     <div
-                      className="absolute inset-y-0 left-0 motion-safe:[transition:width_300ms_cubic-bezier(0.2,0,0.2,1)]"
+                      className="absolute inset-y-0 left-0 flex items-center overflow-hidden rounded-full px-2.5 motion-safe:[transition:width_300ms_cubic-bezier(0.2,0,0.2,1)]"
                       style={{
                         width: `${pulse.actualPct}%`,
                         background: "var(--app-cta-dark-fill)",
                       }}
-                    />
+                    >
+                      <span className="truncate text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-cta-dark-fg)]">
+                        {formatShortHours(pulse.pastActual)}
+                      </span>
+                    </div>
                   ) : null}
                 </div>
                 <div className="relative mt-1.5 h-4">
@@ -222,129 +203,10 @@ export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
           </Link>
         </div>
 
-        {/* Availability */}
-        <div
-          className="flex min-w-0 flex-col gap-3 rounded-[var(--app-radius)] border p-4"
-          style={{
-            borderColor: "var(--app-border)",
-            background: "var(--app-surface)",
-          }}
-        >
-          <div className="min-w-0">
-            <p className="text-xs font-medium" style={{ color: "var(--app-text-muted)" }}>
-              Availability
-            </p>
-            <p className="mt-0.5 text-sm font-medium" style={{ color: "var(--app-text)" }}>
-              {availabilityWhen}
-            </p>
-          </div>
-
-          <div
-            className="flex items-end gap-1.5"
-            role="img"
-            aria-label={`Forecast versus open capacity by week. Weekly target ${weeklyCapacityTarget} hours.`}
-          >
-            {capacity.weeks.map((week) => {
-              const booked = Math.min(week.portfolioHours, weeklyCapacityTarget);
-              const gap = week.freeHours;
-              const bookedPct = Math.round((booked / weeklyCapacityTarget) * 100);
-              const gapPct = Math.round((gap / weeklyCapacityTarget) * 100);
-              const isOpen = gap > 0;
-              const weekLabel = formatWeekLabel(week.weekStart);
-              return (
-                <div
-                  key={week.weekStart}
-                  className="group relative flex min-w-0 flex-1 flex-col items-center gap-1"
-                >
-                  <span
-                    className="tabular-nums text-[0.65rem] font-medium"
-                    style={{ color: isOpen ? "var(--app-success)" : "var(--app-text-muted)" }}
-                  >
-                    {isOpen ? `${gap}h` : "—"}
-                  </span>
-                  <div
-                    className="relative w-full cursor-default overflow-hidden rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
-                    style={{
-                      height: "4.5rem",
-                      background: "var(--app-surface-alt)",
-                      boxShadow: "inset 0 0 0 1px var(--app-border)",
-                    }}
-                    tabIndex={0}
-                    aria-label={`${weekLabel}: ${week.portfolioHours}h forecast, ${gap}h available`}
-                  >
-                    {/* Forecast booked hours sit at the bottom */}
-                    <div
-                      className="absolute bottom-0 left-0 right-0 motion-safe:[transition:height_300ms_cubic-bezier(0.2,0,0.2,1)]"
-                      style={{
-                        height: `${bookedPct}%`,
-                        background: "var(--app-border)",
-                      }}
-                    />
-                    {/* Open gap sits above forecast */}
-                    {gapPct > 0 ? (
-                      <div
-                        className="absolute left-0 right-0 motion-safe:[transition:bottom_300ms_cubic-bezier(0.2,0,0.2,1),height_300ms_cubic-bezier(0.2,0,0.2,1)]"
-                        style={{
-                          bottom: `${bookedPct}%`,
-                          height: `${gapPct}%`,
-                          background: "color-mix(in oklab, var(--app-success) 55%, var(--app-surface-alt))",
-                        }}
-                      />
-                    ) : null}
-                  </div>
-                  <span
-                    className="truncate text-[0.65rem]"
-                    style={{ color: "var(--app-text-muted)" }}
-                  >
-                    {weekLabel}
-                  </span>
-
-                  <div
-                    role="tooltip"
-                    className="pointer-events-none absolute bottom-[calc(100%-0.25rem)] left-1/2 z-20 w-max min-w-[7.5rem] -translate-x-1/2 rounded-[var(--app-radius)] border px-2.5 py-2 text-left opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
-                    style={{
-                      borderColor: "var(--app-border)",
-                      background: "var(--app-surface)",
-                      boxShadow: "0 8px 24px color-mix(in oklab, var(--app-text) 12%, transparent)",
-                      color: "var(--app-text)",
-                    }}
-                  >
-                    <p className="text-[0.65rem] font-medium" style={{ color: "var(--app-text-muted)" }}>
-                      {weekLabel}
-                    </p>
-                    <dl className="mt-1 space-y-0.5 text-xs">
-                      <div className="flex items-center justify-between gap-3">
-                        <dt style={{ color: "var(--app-text-muted)" }}>Forecast</dt>
-                        <dd className="tabular-nums font-medium">{week.portfolioHours}h</dd>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <dt style={{ color: "var(--app-text-muted)" }}>Available</dt>
-                        <dd
-                          className="tabular-nums font-medium"
-                          style={{ color: isOpen ? "var(--app-success)" : "var(--app-text)" }}
-                        >
-                          {gap}h
-                        </dd>
-                      </div>
-                    </dl>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <p className="text-sm leading-snug" style={{ color: "var(--app-text-muted)" }}>
-            {capacity.body}
-          </p>
-
-          <Link
-            href="/forecast"
-            className="mt-auto inline-flex text-sm font-medium no-underline transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
-            style={{ color: "var(--app-action-emphasis)" }}
-          >
-            Open forecast
-          </Link>
-        </div>
+        <HomeAvailabilityCard
+          capacity={capacity}
+          weeklyCapacityTarget={weeklyCapacityTarget}
+        />
       </div>
 
       <HomeEffortBreakdownCards data={data.breakdowns} />

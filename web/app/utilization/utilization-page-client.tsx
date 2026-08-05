@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { DialogCloseButton } from "@/components/dialog-close-button";
+import { UtilizationTimeOffCalendar } from "@/components/utilization-time-off-calendar";
 import { saveUtilizationQuarterTarget } from "@/lib/actions/utilization";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
 import type {
@@ -139,109 +140,170 @@ function UtilizationWeekStrip({ weeks }: { weeks: UtilizationWeekRow[] }) {
           <span className="inline-flex items-center gap-1.5">
             <span
               className="inline-block h-2 w-2 rounded-sm"
+              style={{ background: "var(--app-border)" }}
+              aria-hidden
+            />
+            Forecast
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block h-0.5 w-3"
               style={{
-                background: "color-mix(in oklab, var(--app-text) 22%, transparent)",
+                background: "color-mix(in oklab, var(--app-text) 55%, transparent)",
               }}
               aria-hidden
             />
             Pace
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block h-0.5 w-3"
-              style={{ background: "var(--app-action)" }}
-              aria-hidden
-            />
-            Forecast
-          </span>
         </div>
       </div>
 
-      <div className="mt-4 -mx-1 overflow-x-auto pb-1">
+      <div className="relative z-10 mt-4">
         <div
-          className="flex min-w-full gap-1.5 px-1"
-          style={{ minWidth: `${weeks.length * 3.25}rem` }}
-          role="list"
+          className="flex items-end gap-1.5"
+          role="img"
           aria-label="Quarter utilization by week"
         >
           {weeks.map((w) => {
-            const paceH = (w.paceHours / maxHours) * 100;
-            const actualH = (w.actualHours / maxHours) * 100;
-            const forecastH = (w.forecastHours / maxHours) * 100;
+            const pacePct = Math.round((w.paceHours / maxHours) * 100);
+            const actualPct = Math.round((w.actualHours / maxHours) * 100);
+            const forecastPct = Math.round((w.forecastHours / maxHours) * 100);
             const isCurrent = w.relative === "current";
+            const isFuture = w.relative === "future";
             const underPacePlan =
               w.paceHours > 0 && w.forecastHours + 0.25 < w.paceHours;
+            const label = weekLabel(w.weekStartYmd);
+            const actualLabel = isFuture ? "—" : formatBarHours(w.actualHours);
+            const inBarColor =
+              w.actualHours > 0
+                ? "var(--app-cta-dark-fg)"
+                : "var(--app-text)";
+
             return (
               <div
                 key={w.weekStartYmd}
-                role="listitem"
-                className="flex min-w-[2.75rem] flex-1 flex-col items-center"
-                title={`${weekLabel(w.weekStartYmd)}: actual ${formatBarHours(w.actualHours)}, pace ${formatBarHours(w.paceHours)}, forecast ${formatBarHours(w.forecastHours)}${underPacePlan ? " (forecast under pace)" : ""}`}
+                className="group relative z-0 flex min-w-0 flex-1 flex-col items-center gap-1 hover:z-30 focus-within:z-30"
               >
+                <span
+                  className="tabular-nums text-[0.65rem] font-medium"
+                  style={{ color: "var(--app-text-muted)" }}
+                >
+                  {formatBarHours(w.forecastHours)}
+                </span>
                 <div
-                  className="relative flex h-28 w-full items-end justify-center rounded-md"
+                  className="relative w-full cursor-default overflow-hidden rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
                   style={{
+                    height: "7rem",
                     background: underPacePlan
-                      ? "color-mix(in oklab, var(--app-warning) 28%, var(--app-surface))"
+                      ? "color-mix(in oklab, var(--app-action) 28%, var(--app-surface))"
                       : isCurrent
                         ? "color-mix(in oklab, var(--app-action) 8%, var(--app-surface-alt))"
                         : "var(--app-surface-alt)",
                     boxShadow: underPacePlan
-                      ? "inset 0 0 0 1px color-mix(in oklab, var(--app-warning) 40%, var(--app-border))"
+                      ? "inset 0 0 0 1px color-mix(in oklab, var(--app-action) 40%, var(--app-border))"
                       : isCurrent
                         ? "inset 0 0 0 1px color-mix(in oklab, var(--app-action) 35%, transparent)"
                         : "inset 0 0 0 1px var(--app-border)",
                   }}
+                  tabIndex={0}
+                  aria-label={`${label}: actual ${formatBarHours(w.actualHours)}, pace ${formatBarHours(w.paceHours)}, forecast ${formatBarHours(w.forecastHours)}${underPacePlan ? ", forecast under pace" : ""}`}
                 >
-                  {/* Pace baseline */}
-                  <div
-                    className="absolute inset-x-1 bottom-0 rounded-sm"
-                    style={{
-                      height: `${paceH}%`,
-                      background: underPacePlan
-                        ? "color-mix(in oklab, var(--app-warning) 72%, var(--app-text) 18%)"
-                        : "color-mix(in oklab, var(--app-text) 14%, transparent)",
-                    }}
-                    aria-hidden
-                  />
-                  {/* Forecast marker — sit inside the track even at 100% of scale */}
-                  {w.forecastHours > 0 ? (
+                  {/* Forecast volume */}
+                  {forecastPct > 0 ? (
                     <div
-                      className="absolute inset-x-0.5"
+                      className="absolute bottom-0 left-0 right-0 motion-safe:[transition:height_300ms_cubic-bezier(0.2,0,0.2,1)]"
                       style={{
-                        top: `max(0px, calc(${100 - forecastH}% - 1px))`,
-                        height: 2,
-                        background: "var(--app-action)",
-                        opacity: 0.9,
+                        height: `${forecastPct}%`,
+                        background: "var(--app-border)",
                       }}
                       aria-hidden
                     />
                   ) : null}
                   {/* Actuals fill */}
-                  {w.actualHours > 0 ? (
+                  {actualPct > 0 ? (
                     <div
-                      className="absolute inset-x-1.5 bottom-0 rounded-sm motion-safe:[transition:height_280ms_cubic-bezier(0.2,0,0.2,1)]"
+                      className="absolute bottom-0 left-0 right-0 motion-safe:[transition:height_300ms_cubic-bezier(0.2,0,0.2,1)]"
                       style={{
-                        height: `${actualH}%`,
+                        height: `${actualPct}%`,
                         background: "var(--app-cta-dark-fill)",
                       }}
                       aria-hidden
                     />
                   ) : null}
+                  {/* Pace line */}
+                  {w.paceHours > 0 ? (
+                    <div
+                      className="absolute inset-x-0 z-[1]"
+                      style={{
+                        bottom: `max(0px, calc(${pacePct}% - 1px))`,
+                        height: 2,
+                        background: underPacePlan
+                          ? "var(--app-action)"
+                          : "color-mix(in oklab, var(--app-text) 55%, transparent)",
+                      }}
+                      aria-hidden
+                    />
+                  ) : null}
+                  <span
+                    className="pointer-events-none absolute inset-x-0 bottom-1 z-[1] truncate px-0.5 text-center text-[0.6rem] font-medium leading-none tabular-nums"
+                    style={{ color: inBarColor }}
+                  >
+                    {actualLabel}
+                  </span>
                 </div>
+
                 <span
                   className={[
-                    "mt-1.5 text-[0.65rem] tabular-nums leading-none",
+                    "truncate text-[0.65rem]",
                     isCurrent
                       ? "font-medium text-[var(--app-text)]"
                       : "font-normal text-muted-canvas",
                   ].join(" ")}
                 >
-                  {weekLabel(w.weekStartYmd)}
+                  {label}
                 </span>
-                <span className="mt-1 text-[0.65rem] font-medium tabular-nums text-[var(--app-text)]">
-                  {w.relative === "future" ? "—" : formatBarHours(w.actualHours)}
-                </span>
+
+                <div
+                  role="tooltip"
+                  className="pointer-events-none absolute bottom-[calc(100%-0.25rem)] left-1/2 z-20 w-max min-w-[7.5rem] -translate-x-1/2 rounded-[var(--app-radius)] border px-2.5 py-2 text-left opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+                  style={{
+                    borderColor: "var(--app-border)",
+                    background: "var(--app-surface)",
+                    boxShadow: "0 8px 24px color-mix(in oklab, var(--app-text) 12%, transparent)",
+                    color: "var(--app-text)",
+                  }}
+                >
+                  <p
+                    className="text-[0.65rem] font-medium"
+                    style={{ color: "var(--app-text-muted)" }}
+                  >
+                    {label}
+                    {underPacePlan ? " · under pace" : ""}
+                  </p>
+                  <dl className="mt-1 space-y-0.5 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <dt style={{ color: "var(--app-text-muted)" }}>Actual</dt>
+                      <dd className="tabular-nums font-medium">{actualLabel}</dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt style={{ color: "var(--app-text-muted)" }}>Pace</dt>
+                      <dd
+                        className="tabular-nums font-medium"
+                        style={{
+                          color: underPacePlan ? "var(--app-action)" : "var(--app-text)",
+                        }}
+                      >
+                        {formatBarHours(w.paceHours)}
+                      </dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt style={{ color: "var(--app-text-muted)" }}>Forecast</dt>
+                      <dd className="tabular-nums font-medium">
+                        {formatBarHours(w.forecastHours)}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
               </div>
             );
           })}
@@ -500,6 +562,8 @@ export function UtilizationPageClient({
           ) : null}
         </div>
       </div>
+
+      <UtilizationTimeOffCalendar data={data} onDataChange={setData} />
 
       <TargetDialog
         open={targetOpen}

@@ -11,8 +11,8 @@ import { LockIcon, UndoIcon } from "@/components/action-icons";
 
 const BAR_MAX_PX = 100;
 /**
- * Hours that fill a forecast week bar to capacity (target weekly load).
- * May become a user setting later.
+ * Default hours that fill a forecast week bar to capacity (target weekly load).
+ * Overridden by user_preferences.weekly_capacity_hours when provided.
  */
 export const TARGET_WEEKLY_FORECAST_HOURS = 32;
 /** Portfolio “All projects” bar: full height at this load. */
@@ -22,9 +22,12 @@ export const PORTFOLIO_OVERLOAD_HOURS = 40;
 
 export type PortfolioCapacityTone = "below-target" | "at-target" | "overload";
 
-export function portfolioCapacityTone(hours: number): PortfolioCapacityTone {
+export function portfolioCapacityTone(
+  hours: number,
+  targetHours: number = TARGET_WEEKLY_FORECAST_HOURS,
+): PortfolioCapacityTone {
   if (hours > PORTFOLIO_OVERLOAD_HOURS) return "overload";
-  if (hours >= TARGET_WEEKLY_FORECAST_HOURS) return "at-target";
+  if (hours >= targetHours) return "at-target";
   return "below-target";
 }
 
@@ -34,8 +37,8 @@ function barHeightPx(hours: number, scaleHours: number, maxPx = BAR_MAX_PX): num
   return Math.min(maxPx, Math.max(8, Math.round((hours / scale) * maxPx)));
 }
 
-function capacityBarFillClass(hours: number): string {
-  const tone = portfolioCapacityTone(hours);
+function capacityBarFillClass(hours: number, targetHours: number): string {
+  const tone = portfolioCapacityTone(hours, targetHours);
   if (tone === "overload") {
     return "bg-[color-mix(in_oklab,var(--app-warning)_75%,transparent)]";
   }
@@ -69,9 +72,10 @@ export function ForecastWeekCell({
   lockLabel,
   cellId,
   barScaleHours = TARGET_WEEKLY_FORECAST_HOURS,
+  targetWeeklyHours = TARGET_WEEKLY_FORECAST_HOURS,
   /**
    * Portfolio capacity chrome: scale to {@link PORTFOLIO_BAR_MAX_HOURS}, draw a
-   * target line at {@link TARGET_WEEKLY_FORECAST_HOURS}, tint grey / green / yellow.
+   * target line at {@link targetWeeklyHours}, tint grey / green / yellow.
    */
   capacityTint = false,
   /** Session-start hours for this cell (edit session only). */
@@ -96,6 +100,8 @@ export function ForecastWeekCell({
   cellId?: string;
   /** Hours that fill the bar to max height (defaults to {@link TARGET_WEEKLY_FORECAST_HOURS}). */
   barScaleHours?: number;
+  /** Weekly capacity target line / tone threshold (from Settings). */
+  targetWeeklyHours?: number;
   capacityTint?: boolean;
   sessionBaselineHours?: number | null;
   onRevertToSession?: () => void;
@@ -123,7 +129,7 @@ export function ForecastWeekCell({
   const visualBarMaxPx = lockable && !capacityTint ? 84 : BAR_MAX_PX;
   const fillPx = barHeightPx(displayHours, scaleHours, visualBarMaxPx);
   const targetLineBottomPx = Math.round(
-    (TARGET_WEEKLY_FORECAST_HOURS / PORTFOLIO_BAR_MAX_HOURS) * BAR_MAX_PX,
+    (targetWeeklyHours / PORTFOLIO_BAR_MAX_HOURS) * BAR_MAX_PX,
   );
 
   const commit = useCallback(
@@ -256,7 +262,7 @@ export function ForecastWeekCell({
         ? "bg-[color-mix(in_oklab,var(--app-text)_12%,transparent)]"
         : "bg-[color-mix(in_oklab,var(--app-text)_18%,transparent)]";
 
-  const capacityTone = portfolioCapacityTone(displayHours);
+  const capacityTone = portfolioCapacityTone(displayHours, targetWeeklyHours);
 
   return (
     <div
@@ -309,8 +315,8 @@ export function ForecastWeekCell({
             capacityTone === "overload"
               ? `Portfolio ${displayHours} hours (above ${PORTFOLIO_OVERLOAD_HOURS}h)`
               : capacityTone === "at-target"
-                ? `Portfolio ${displayHours} hours (at or above ${TARGET_WEEKLY_FORECAST_HOURS}h target)`
-                : `Portfolio ${displayHours} hours (below ${TARGET_WEEKLY_FORECAST_HOURS}h target)`
+                ? `Portfolio ${displayHours} hours (at or above ${targetWeeklyHours}h target)`
+                : `Portfolio ${displayHours} hours (below ${targetWeeklyHours}h target)`
           }
         >
           <div
@@ -318,14 +324,14 @@ export function ForecastWeekCell({
             aria-hidden
           />
           <div
-            className={`absolute inset-x-0 bottom-0 rounded-sm ${capacityBarFillClass(displayHours)}`}
+            className={`absolute inset-x-0 bottom-0 rounded-sm ${capacityBarFillClass(displayHours, targetWeeklyHours)}`}
             style={{ height: fillPx }}
             aria-hidden
           />
           <div
             className="pointer-events-none absolute inset-x-[-2px] z-[1] h-px bg-[var(--app-text-muted)]"
             style={{ bottom: targetLineBottomPx }}
-            title={`${TARGET_WEEKLY_FORECAST_HOURS}h target`}
+            title={`${targetWeeklyHours}h target`}
             aria-hidden
           />
         </div>

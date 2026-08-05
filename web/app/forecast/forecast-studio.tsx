@@ -44,6 +44,7 @@ import {
 } from "@/lib/project-forecast";
 import { sundayWeekStartsInclusive, formatSundayWeekLabel } from "@/lib/project-weekly-effort";
 import type { DeploymentEffortByPhase } from "@/lib/user-preferences";
+import { DEFAULT_WEEKLY_CAPACITY_HOURS } from "@/lib/user-preferences";
 import {
   ForecastWeekCell,
   PORTFOLIO_BAR_MAX_HOURS,
@@ -94,8 +95,8 @@ function formatSummaryHours(hours: number): string {
     .replace(/\s*hr$/i, "h");
 }
 
-function portfolioCapacityTextClass(hours: number): string {
-  const tone = portfolioCapacityTone(hours);
+function portfolioCapacityTextClass(hours: number, targetHours: number): string {
+  const tone = portfolioCapacityTone(hours, targetHours);
   if (tone === "overload") {
     return "text-[color-mix(in_oklab,var(--app-warning)_65%,var(--app-text))]";
   }
@@ -172,11 +173,13 @@ export function ForecastStudio({
   projects: initialProjects,
   todayIso,
   deploymentEffortByPhase,
+  weeklyCapacityHours = DEFAULT_WEEKLY_CAPACITY_HOURS,
   focusProjectId,
 }: {
   projects: ForecastProjectDTO[];
   todayIso: string;
   deploymentEffortByPhase: DeploymentEffortByPhase;
+  weeklyCapacityHours?: number;
   focusProjectId: string | null;
 }) {
   const router = useRouter();
@@ -1017,6 +1020,7 @@ export function ForecastStudio({
                       <span
                         className={`text-xs tabular-nums ${portfolioCapacityTextClass(
                           portfolioTotalsByWeek[w] ?? 0,
+                          weeklyCapacityHours,
                         )}`}
                         title={`${portfolioTotalsByWeek[w] ?? 0} forecast hours`}
                       >
@@ -1107,6 +1111,7 @@ export function ForecastStudio({
                         }
                         capacityTint
                         barScaleHours={PORTFOLIO_BAR_MAX_HOURS}
+                        targetWeeklyHours={weeklyCapacityHours}
                         cellId={`portfolio:total:${w}`}
                         onCommitHours={() => {}}
                         onToggleLock={() =>
@@ -1402,6 +1407,7 @@ export function ForecastStudio({
                                   : `Lock ${formatSundayWeekLabel(w)} for ${project.customer_name}`
                               }
                               cellId={`${project.id}:project:${w}`}
+                              targetWeeklyHours={weeklyCapacityHours}
                               {...editProps}
                               onCommitHours={(next) =>
                                 applyProjectEdit(project, w, next)

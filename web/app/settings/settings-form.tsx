@@ -7,10 +7,13 @@ import {
   DEFAULT_DEPLOYMENT_EFFORT_BY_PHASE,
   DEFAULT_EFFORT_QUARTER_START_MONTH,
   DEFAULT_FORECAST_REVIEW_DAY,
+  DEFAULT_WEEKLY_CAPACITY_HOURS,
   DEPLOYMENT_EFFORT_PERCENT_OPTIONS,
   DEPLOYMENT_EFFORT_PERCENT_STEP,
   DEPLOYMENT_EFFORT_PHASES,
   EFFORT_QUARTER_START_MONTH_OPTIONS,
+  MAX_WEEKLY_CAPACITY_HOURS,
+  MIN_WEEKLY_CAPACITY_HOURS,
   deploymentEffortFormFieldName,
   effortQuarterStartMonthQuartersLabel,
   sumDeploymentEffort,
@@ -156,6 +159,28 @@ export function SettingsForm({
               options={weekdayOptions}
             />
           </div>
+
+          <label className="block text-sm font-medium" style={{ color: "var(--app-text)" }}>
+            Weekly capacity (hours)
+            <input
+              className="input-canvas mt-1"
+              id="settings-weekly-capacity-hours"
+              name="weekly_capacity_hours"
+              type="number"
+              inputMode="decimal"
+              min={MIN_WEEKLY_CAPACITY_HOURS}
+              max={MAX_WEEKLY_CAPACITY_HOURS}
+              step={0.25}
+              defaultValue={
+                initialPreferences.weekly_capacity_hours || DEFAULT_WEEKLY_CAPACITY_HOURS
+              }
+              required
+            />
+            <span className="mt-1 block text-xs font-normal text-muted-canvas">
+              Full Mon–Fri week target for pace, forecast, and availability (default{" "}
+              {DEFAULT_WEEKLY_CAPACITY_HOURS}). Each weekday of time off deducts capacity ÷ 5.
+            </span>
+          </label>
         </div>
       </section>
 

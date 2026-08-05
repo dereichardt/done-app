@@ -237,6 +237,7 @@ export function HomeTopDashboard({
               projectAbbreviationById={projectAbbreviationById}
               projects={tasksSnapshot?.projects ?? []}
               tracks={tasksSnapshot?.tracks ?? []}
+              reloadKey={hoursReloadKey}
               onCalendarEntryCreated={refreshEffortSurfaces}
               onCollapse={collapseCalendar}
               collapseButtonRef={collapseButtonRef}
