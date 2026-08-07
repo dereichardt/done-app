@@ -7,6 +7,8 @@ import {
   removeUtilizationTimeOff,
   saveUtilizationTimeOff,
 } from "@/lib/actions/utilization";
+import { localWeekdayCount } from "@/lib/fiscal-quarter";
+import { parseLocalYmd } from "@/lib/integration-effort-buckets";
 import {
   TIME_OFF_TYPE_LABELS,
   TIME_OFF_TYPES,
@@ -480,6 +482,15 @@ export function UtilizationTimeOffCalendar({
     [data.quarterStartYmd, data.endExclusiveYmd],
   );
 
+  const workingDaysInQuarter = useMemo(() => {
+    const start = parseLocalYmd(data.quarterStartYmd);
+    const end = parseLocalYmd(data.endExclusiveYmd);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+    return localWeekdayCount(start, end);
+  }, [data.quarterStartYmd, data.endExclusiveYmd]);
+
+  const timeOffDaysCount = data.timeOffDays?.length ?? 0;
+
   const selectedList = useMemo(() => Array.from(selected).sort(), [selected]);
 
   const onDayClick = (ymd: string, existing: TimeOffDay | undefined) => {
@@ -501,9 +512,16 @@ export function UtilizationTimeOffCalendar({
       aria-labelledby="utilization-time-off-heading"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 id="utilization-time-off-heading" className="section-heading">
-          Time off
-        </h2>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h2 id="utilization-time-off-heading" className="section-heading">
+            Time off
+          </h2>
+          <span className="text-xs font-medium text-muted-canvas tabular-nums">
+            {workingDaysInQuarter} working day{workingDaysInQuarter === 1 ? "" : "s"}
+            {" · "}
+            {timeOffDaysCount} time off day{timeOffDaysCount === 1 ? "" : "s"}
+          </span>
+        </div>
         {selectedList.length > 0 ? (
           <button
             type="button"

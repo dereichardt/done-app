@@ -123,6 +123,33 @@ describe("synthesizeCapacityGaps", () => {
     expect(result.freeStartingWeek).toBeNull();
     expect(result.body).toMatch(/No sustained open capacity/);
   });
+
+  it("uses varying pace weekTargets for free hours", () => {
+    const weekHours: Record<string, number> = {
+      "2026-07-19": 24,
+      "2026-07-26": 24,
+      "2026-08-02": 24,
+      "2026-08-09": 10,
+    };
+    const weekTargets: Record<string, number> = {
+      "2026-07-19": 32,
+      "2026-07-26": 32,
+      "2026-08-02": 31,
+      "2026-08-09": 16,
+    };
+    const result = synthesizeCapacityGaps({
+      weekHours,
+      weekStarts,
+      currentSundayYmd: currentSunday,
+      quarterLabel: "FY27 Q2",
+      weekTargets,
+    });
+    expect(result.weeks.map((w) => w.targetHours)).toEqual([32, 32, 31, 16]);
+    expect(result.weeks.map((w) => w.freeHours)).toEqual([8, 8, 7, 6]);
+    expect(result.pockets).toHaveLength(1);
+    expect(result.freeStartingWeek).toBe("2026-07-19");
+    expect(result.freeHoursPerWeek).toBe(7);
+  });
 });
 
 describe("capacity pocket copy", () => {

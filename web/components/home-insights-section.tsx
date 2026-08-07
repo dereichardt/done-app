@@ -3,8 +3,12 @@ import Link from "next/link";
 import { HomeAvailabilityCard } from "@/components/home-availability-card";
 import { HomeEffortBreakdownCards } from "@/components/home-effort-breakdown-cards";
 import type { HomeInsightsDTO } from "@/lib/home-insights";
-import type { UtilizationInsightStatus, UtilizationWeekRow } from "@/lib/utilization-data";
-import { formatShortHours } from "@/lib/utilization-data";
+import type { UtilizationInsightStatus, UtilizationQuarterDTO } from "@/lib/utilization-data";
+import {
+  formatShortHours,
+  paceDeltaLabel,
+  quarterPulseMetrics,
+} from "@/lib/utilization-data";
 
 function statusLabel(status: UtilizationInsightStatus): string {
   switch (status) {
@@ -50,42 +54,50 @@ function statusSurface(status: UtilizationInsightStatus): string {
 }
 
 /**
- * Pulse bar segments: past-week actuals (dark) + current/future forecast (muted),
- * against a target track; capped at the quarter target.
+ * Pulse bar: all actuals incl. current week (dark) + remaining current-week
+ * forecast + future forecasts (muted), capped at the quarter target.
+ * Pace marker uses the same day-prorated pace-to-date as status.
  */
-function quarterPulseFill(weeks: UtilizationWeekRow[], targetHours: number) {
-  let pastActual = 0;
-  let planForecast = 0;
-  for (const w of weeks) {
-    if (w.relative === "past") pastActual += w.actualHours;
-    else planForecast += w.forecastHours;
-  }
-  const actualFill = Math.min(targetHours, Math.max(0, pastActual));
-  const forecastFill = Math.min(Math.max(0, targetHours - actualFill), Math.max(0, planForecast));
-  const covered = Math.max(0, pastActual) + Math.max(0, planForecast);
-  return {
-    pastActual: Math.max(0, pastActual),
-    planForecast: Math.max(0, planForecast),
-    actualFill,
-    forecastFill,
-    covered,
-    actualPct: targetHours > 0 ? (actualFill / targetHours) * 100 : 0,
-    forecastPct: targetHours > 0 ? (forecastFill / targetHours) * 100 : 0,
-  };
+function quarterPulseFill(quarter: UtilizationQuarterDTO, targetHours: number) {
+  const timeOffYmds = new Set(quarter.timeOffDays.map((d) => d.dayYmd));
+  return quarterPulseMetrics({
+    weeks: quarter.weeks,
+    todayYmd: quarter.todayYmd,
+    targetHours,
+    endExclusiveYmd: quarter.endExclusiveYmd,
+    timeOffYmds,
+  });
+}
+
+function MetricChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="min-w-0 rounded-[var(--app-radius)] border px-2 py-1.5"
+      style={{ borderColor: "var(--app-border)", background: "var(--app-surface)" }}
+    >
+      <p
+        className="text-[0.65rem] font-medium leading-snug"
+        style={{ color: "var(--app-text-muted)" }}
+      >
+        {label}
+      </p>
+      <p
+        className="mt-1 truncate text-xs font-medium tabular-nums leading-none"
+        style={{ color: "var(--app-text)" }}
+      >
+        {value}
+      </p>
+    </div>
+  );
 }
 
 export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
   const { quarter, capacity, weeklyCapacityTarget } = data;
   const hasTarget = quarter.targetHours != null && quarter.targetHours > 0;
-  const pulse = hasTarget
-    ? quarterPulseFill(quarter.weeks, quarter.targetHours!)
-    : null;
+  const pulse = hasTarget ? quarterPulseFill(quarter, quarter.targetHours!) : null;
   const status = quarter.insight.status;
   const color = statusColor(status);
-  const insightLines = [
-    quarter.insight.message,
-    ...(quarter.insight.detail ? [quarter.insight.detail] : []),
-  ];
+  const paceChip = pulse ? paceDeltaLabel(pulse.aheadBy) : null;
 
   return (
     <section aria-label="Insights" className="mt-10">
@@ -128,44 +140,105 @@ export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
                     {formatShortHours(quarter.targetHours!)}
                   </span>
                 </div>
-                <div
-                  className="relative h-8 w-full overflow-hidden rounded-full"
-                  style={{ background: "var(--app-surface-alt)" }}
-                  role="meter"
-                  aria-label={`${quarter.label}: ${formatShortHours(pulse.pastActual)} past actuals, ${formatShortHours(pulse.planForecast)} forecast for current and future weeks, of ${formatShortHours(quarter.targetHours!)} target. ${quarter.insight.message}`}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(
-                    ((pulse.actualFill + pulse.forecastFill) / quarter.targetHours!) * 100,
-                  )}
-                >
-                  {pulse.forecastPct > 0 ? (
-                    <div
-                      className="absolute inset-y-0 flex items-center justify-end overflow-hidden rounded-full px-2.5 motion-safe:[transition:left_300ms_cubic-bezier(0.2,0,0.2,1),width_300ms_cubic-bezier(0.2,0,0.2,1)]"
-                      style={{
-                        left: `${pulse.actualPct}%`,
-                        width: `${pulse.forecastPct}%`,
-                        background: "var(--app-border)",
-                      }}
+                <div className="group relative">
+                  <div
+                    className="relative h-8 w-full overflow-hidden rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+                    style={{ background: "var(--app-surface-alt)" }}
+                    role="meter"
+                    tabIndex={0}
+                    aria-label={`${quarter.label}: ${formatShortHours(pulse.allActualHours)} actuals including current week, ${formatShortHours(pulse.planForecastHours)} remaining forecast for current and future weeks, pace to date ${formatShortHours(pulse.paceToDateHours)}, of ${formatShortHours(quarter.targetHours!)} target. ${quarter.insight.message}`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(
+                      ((pulse.actualFill + pulse.forecastFill) / quarter.targetHours!) * 100,
+                    )}
+                    aria-describedby="quarter-pulse-stats"
+                  >
+                    {pulse.forecastPct > 0 ? (
+                      <div
+                        className="absolute inset-y-0 flex items-center justify-end overflow-hidden px-2.5 motion-safe:[transition:left_300ms_cubic-bezier(0.2,0,0.2,1),width_300ms_cubic-bezier(0.2,0,0.2,1)]"
+                        style={{
+                          left: `${pulse.actualPct}%`,
+                          width: `${pulse.forecastPct}%`,
+                          background: "var(--app-border)",
+                        }}
+                      >
+                        <span className="truncate text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-text)]">
+                          {formatShortHours(pulse.planForecastHours)}
+                        </span>
+                      </div>
+                    ) : null}
+                    {pulse.actualPct > 0 ? (
+                      <div
+                        className="absolute inset-y-0 left-0 flex items-center overflow-hidden px-2.5 motion-safe:[transition:width_300ms_cubic-bezier(0.2,0,0.2,1)]"
+                        style={{
+                          width: `${pulse.actualPct}%`,
+                          background: "var(--app-cta-dark-fill)",
+                        }}
+                      >
+                        <span className="truncate text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-cta-dark-fg)]">
+                          {formatShortHours(pulse.allActualHours)}
+                        </span>
+                      </div>
+                    ) : null}
+                    {pulse.pacePct > 0 ? (
+                      <div
+                        className="pointer-events-none absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 motion-safe:[transition:left_300ms_cubic-bezier(0.2,0,0.2,1)]"
+                        style={{
+                          left: `${pulse.pacePct}%`,
+                          background: "var(--app-surface)",
+                          boxShadow:
+                            "0 0 0 1px color-mix(in oklab, var(--app-text) 18%, transparent)",
+                        }}
+                        aria-hidden
+                      />
+                    ) : null}
+                  </div>
+
+                  <div
+                    id="quarter-pulse-stats"
+                    role="tooltip"
+                    className="pointer-events-none absolute bottom-[calc(100%+0.35rem)] left-1/2 z-20 w-max min-w-[9.5rem] -translate-x-1/2 rounded-[var(--app-radius)] border px-2.5 py-2 text-left opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+                    style={{
+                      borderColor: "var(--app-border)",
+                      background: "var(--app-surface)",
+                      boxShadow: "0 8px 24px color-mix(in oklab, var(--app-text) 12%, transparent)",
+                      color: "var(--app-text)",
+                    }}
+                  >
+                    <p
+                      className="text-[0.65rem] font-medium"
+                      style={{ color: "var(--app-text-muted)" }}
                     >
-                      <span className="truncate text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-text)]">
-                        {formatShortHours(pulse.planForecast)}
-                      </span>
-                    </div>
-                  ) : null}
-                  {pulse.actualPct > 0 ? (
-                    <div
-                      className="absolute inset-y-0 left-0 flex items-center overflow-hidden rounded-full px-2.5 motion-safe:[transition:width_300ms_cubic-bezier(0.2,0,0.2,1)]"
-                      style={{
-                        width: `${pulse.actualPct}%`,
-                        background: "var(--app-cta-dark-fill)",
-                      }}
-                    >
-                      <span className="truncate text-[0.7rem] font-medium leading-none tabular-nums text-[var(--app-cta-dark-fg)]">
-                        {formatShortHours(pulse.pastActual)}
-                      </span>
-                    </div>
-                  ) : null}
+                      As of today
+                    </p>
+                    <dl className="mt-1 space-y-0.5 text-xs">
+                      <div className="flex items-center justify-between gap-4">
+                        <dt style={{ color: "var(--app-text-muted)" }}>Target</dt>
+                        <dd className="tabular-nums font-medium">
+                          {formatShortHours(quarter.targetHours!)}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt style={{ color: "var(--app-text-muted)" }}>Forecast</dt>
+                        <dd className="tabular-nums font-medium">
+                          {formatShortHours(pulse.planForecastHours)}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt style={{ color: "var(--app-text-muted)" }}>Pace</dt>
+                        <dd className="tabular-nums font-medium">
+                          {formatShortHours(pulse.paceToDateHours)}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt style={{ color: "var(--app-text-muted)" }}>Actuals</dt>
+                        <dd className="tabular-nums font-medium">
+                          {formatShortHours(pulse.allActualHours)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
                 </div>
                 <div className="relative mt-1.5 h-4">
                   <span
@@ -185,14 +258,27 @@ export function HomeInsightsSection({ data }: { data: HomeInsightsDTO }) {
             )}
           </div>
 
-          <ul
-            className="list-disc space-y-1 pl-4 text-sm leading-snug"
-            style={{ color: "var(--app-text-muted)" }}
-          >
-            {insightLines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
+          {hasTarget && pulse && paceChip ? (
+            <div className="grid grid-cols-4 gap-1.5">
+              <MetricChip label={paceChip.label} value={paceChip.value} />
+              <MetricChip
+                label="Projected Attainment"
+                value={`${pulse.projectedAttainmentPct}%`}
+              />
+              <MetricChip
+                label="Hours to reach target"
+                value={formatShortHours(pulse.hoursLeftToTarget)}
+              />
+              <MetricChip
+                label="Working Days Left"
+                value={`${pulse.workingDaysLeft} day${pulse.workingDaysLeft === 1 ? "" : "s"}`}
+              />
+            </div>
+          ) : status === "no_target" ? (
+            <p className="text-sm leading-snug" style={{ color: "var(--app-text-muted)" }}>
+              {quarter.insight.message}
+            </p>
+          ) : null}
 
           <Link
             href="/utilization"

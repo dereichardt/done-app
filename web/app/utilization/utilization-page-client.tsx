@@ -8,9 +8,15 @@ import { UtilizationTimeOffCalendar } from "@/components/utilization-time-off-ca
 import { saveUtilizationQuarterTarget } from "@/lib/actions/utilization";
 import { formatEffortHoursLabel } from "@/lib/integration-effort-buckets";
 import type {
+  QuarterPulseMetrics,
   UtilizationInsightStatus,
   UtilizationQuarterDTO,
   UtilizationWeekRow,
+} from "@/lib/utilization-data";
+import {
+  formatShortHours,
+  paceDeltaLabel,
+  quarterPulseMetrics,
 } from "@/lib/utilization-data";
 
 function formatBarHours(hours: number): string {
@@ -101,33 +107,104 @@ function MetricCard({
 }
 
 function insightTone(status: UtilizationInsightStatus): {
-  border: string;
+  color: string;
+  surface: string;
   label: string;
 } {
   switch (status) {
     case "ahead":
-      return { border: "var(--app-success)", label: "Ahead" };
+      return {
+        color: "var(--app-success)",
+        surface: "color-mix(in oklab, var(--app-success) 12%, var(--app-surface))",
+        label: "Ahead",
+      };
     case "on_track":
-      return { border: "var(--app-action)", label: "On track" };
-    case "shortfall":
-      return { border: "var(--app-warning)", label: "Shortfall" };
+      return {
+        color: "var(--app-success)",
+        surface: "color-mix(in oklab, var(--app-success) 12%, var(--app-surface))",
+        label: "On track",
+      };
     case "at_risk":
-      return { border: "var(--app-danger)", label: "At risk" };
+      return {
+        color: "var(--app-warning)",
+        surface: "color-mix(in oklab, var(--app-warning) 14%, var(--app-surface))",
+        label: "At risk",
+      };
+    case "shortfall":
+      return {
+        color: "var(--app-danger)",
+        surface: "color-mix(in oklab, var(--app-danger) 12%, var(--app-surface))",
+        label: "Shortfall",
+      };
     default:
-      return { border: "var(--app-border)", label: "No target" };
+      return {
+        color: "var(--app-info)",
+        surface: "color-mix(in oklab, var(--app-info) 12%, var(--app-surface))",
+        label: "No target",
+      };
   }
 }
 
-function UtilizationWeekStrip({ weeks }: { weeks: UtilizationWeekRow[] }) {
-  const maxHours = Math.max(
-    1,
+function StatusMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="min-w-0 rounded-[var(--app-radius)] border px-2.5 py-2"
+      style={{ borderColor: "var(--app-border)", background: "var(--app-surface)" }}
+    >
+      <p className="text-[0.65rem] font-medium leading-snug text-muted-canvas">{label}</p>
+      <p className="mt-1 truncate text-sm font-medium tabular-nums leading-none text-[var(--app-text)]">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+/** Chart ceiling: round up to the next 4h step so e.g. 39h isn't flush at 100%. */
+function weekStripScaleMax(weeks: UtilizationWeekRow[]): number {
+  const dataMax = Math.max(
+    0,
     ...weeks.map((w) => Math.max(w.paceHours, w.actualHours, w.forecastHours)),
   );
+  if (dataMax <= 0) return 1;
+  return Math.max(1, Math.ceil(dataMax / 4) * 4);
+}
+
+function UtilizationWeekStrip({
+  weeks,
+  pulse,
+  targetHours,
+  status,
+  statusMessage,
+}: {
+  weeks: UtilizationWeekRow[];
+  pulse: QuarterPulseMetrics | null;
+  targetHours: number | null;
+  status: UtilizationInsightStatus;
+  statusMessage: string;
+}) {
+  const maxHours = weekStripScaleMax(weeks);
+  const paceChip = pulse ? paceDeltaLabel(pulse.aheadBy) : null;
+  const forecastSurplus =
+    pulse != null && targetHours != null
+      ? Math.max(0, pulse.projectedHours - targetHours)
+      : 0;
+  const tone = insightTone(status);
 
   return (
     <div className="card-canvas px-4 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="section-heading">Week by week</h2>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h2 className="section-heading">Week by week</h2>
+          <span
+            className="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium"
+            style={{ color: tone.color, background: tone.surface }}
+            role="status"
+            title={statusMessage}
+            aria-label={statusMessage}
+          >
+            {tone.label}
+          </span>
+        </div>
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-canvas">
           <span className="inline-flex items-center gap-1.5">
             <span
@@ -172,11 +249,15 @@ function UtilizationWeekStrip({ weeks }: { weeks: UtilizationWeekRow[] }) {
             const isFuture = w.relative === "future";
             const underPacePlan =
               w.paceHours > 0 && w.forecastHours + 0.25 < w.paceHours;
+            const actualMetPace =
+              w.paceHours > 0 && w.actualHours + 0.25 >= w.paceHours;
             const label = weekLabel(w.weekStartYmd);
             const actualLabel = isFuture ? "—" : formatBarHours(w.actualHours);
             const inBarColor =
               w.actualHours > 0
-                ? "var(--app-cta-dark-fg)"
+                ? actualMetPace
+                  ? "var(--app-surface)"
+                  : "var(--app-cta-dark-fg)"
                 : "var(--app-text)";
 
             return (
@@ -185,29 +266,56 @@ function UtilizationWeekStrip({ weeks }: { weeks: UtilizationWeekRow[] }) {
                 className="group relative z-0 flex min-w-0 flex-1 flex-col items-center gap-1 hover:z-30 focus-within:z-30"
               >
                 <span
-                  className="tabular-nums text-[0.65rem] font-medium"
-                  style={{ color: "var(--app-text-muted)" }}
+                  className="flex h-3.5 items-center justify-center tabular-nums text-[0.65rem] font-medium"
+                  style={{
+                    color:
+                      w.relative === "past" && actualMetPace
+                        ? "var(--app-success)"
+                        : "var(--app-text-muted)",
+                  }}
+                  aria-label={
+                    w.relative === "past" && actualMetPace
+                      ? `Pace met (${formatBarHours(w.actualHours)} actual vs ${formatBarHours(w.paceHours)} pace)`
+                      : undefined
+                  }
                 >
-                  {formatBarHours(w.forecastHours)}
+                  {w.relative === "past" && actualMetPace ? (
+                    <svg viewBox="0 0 16 16" width={14} height={14} aria-hidden>
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                      />
+                    </svg>
+                  ) : (
+                    formatBarHours(w.forecastHours)
+                  )}
                 </span>
                 <div
                   className="relative w-full cursor-default overflow-hidden rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
                   style={{
                     height: "7rem",
-                    background: underPacePlan
-                      ? "color-mix(in oklab, var(--app-action) 28%, var(--app-surface))"
-                      : isCurrent
-                        ? "color-mix(in oklab, var(--app-action) 8%, var(--app-surface-alt))"
-                        : "var(--app-surface-alt)",
-                    boxShadow: underPacePlan
-                      ? "inset 0 0 0 1px color-mix(in oklab, var(--app-action) 40%, var(--app-border))"
-                      : isCurrent
-                        ? "inset 0 0 0 1px color-mix(in oklab, var(--app-action) 35%, transparent)"
-                        : "inset 0 0 0 1px var(--app-border)",
+                    background: "var(--app-surface-alt)",
+                    boxShadow: "inset 0 0 0 1px var(--app-border)",
                   }}
                   tabIndex={0}
                   aria-label={`${label}: actual ${formatBarHours(w.actualHours)}, pace ${formatBarHours(w.paceHours)}, forecast ${formatBarHours(w.forecastHours)}${underPacePlan ? ", forecast under pace" : ""}`}
                 >
+                  {/* Under-pace track: blue only up to the pace line */}
+                  {underPacePlan && pacePct > 0 ? (
+                    <div
+                      className="absolute bottom-0 left-0 right-0 motion-safe:[transition:height_300ms_cubic-bezier(0.2,0,0.2,1)]"
+                      style={{
+                        height: `${pacePct}%`,
+                        background:
+                          "color-mix(in oklab, var(--app-action) 28%, var(--app-surface))",
+                      }}
+                      aria-hidden
+                    />
+                  ) : null}
                   {/* Forecast volume */}
                   {forecastPct > 0 ? (
                     <div
@@ -225,7 +333,9 @@ function UtilizationWeekStrip({ weeks }: { weeks: UtilizationWeekRow[] }) {
                       className="absolute bottom-0 left-0 right-0 motion-safe:[transition:height_300ms_cubic-bezier(0.2,0,0.2,1)]"
                       style={{
                         height: `${actualPct}%`,
-                        background: "var(--app-cta-dark-fill)",
+                        background: actualMetPace
+                          ? "var(--app-success)"
+                          : "var(--app-cta-dark-fill)",
                       }}
                       aria-hidden
                     />
@@ -309,6 +419,39 @@ function UtilizationWeekStrip({ weeks }: { weeks: UtilizationWeekRow[] }) {
           })}
         </div>
       </div>
+
+      {pulse && paceChip ? (
+        <div
+          className="mt-4 grid grid-cols-6 gap-1.5 border-t pt-3"
+          style={{ borderColor: "var(--app-border)" }}
+        >
+          <StatusMetric
+            label="Pace to date"
+            value={formatShortHours(pulse.paceToDateHours)}
+          />
+          <StatusMetric label={paceChip.label} value={paceChip.value} />
+          <StatusMetric
+            label="Hours to reach target"
+            value={formatShortHours(pulse.hoursLeftToTarget)}
+          />
+          <StatusMetric
+            label="Projected hours"
+            value={formatShortHours(pulse.projectedHours)}
+          />
+          <StatusMetric
+            label="Remaining forecast"
+            value={formatShortHours(pulse.planForecastHours)}
+          />
+          <StatusMetric
+            label={pulse.coverageShortfall > 0.25 ? "Coverage shortfall" : "Forecast surplus"}
+            value={
+              pulse.coverageShortfall > 0.25
+                ? formatShortHours(pulse.coverageShortfall)
+                : formatShortHours(forecastSurplus)
+            }
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -459,8 +602,16 @@ export function UtilizationPageClient({
     setData(initialData);
   }, [initialData]);
 
-  const tone = insightTone(data.insight.status);
   const hasTarget = data.targetHours != null && data.targetHours > 0;
+  const pulse = hasTarget
+    ? quarterPulseMetrics({
+        weeks: data.weeks,
+        todayYmd: data.todayYmd,
+        targetHours: data.targetHours!,
+        endExclusiveYmd: data.endExclusiveYmd,
+        timeOffYmds: new Set(data.timeOffDays.map((d) => d.dayYmd)),
+      })
+    : null;
 
   const goQuarter = (quarterStartYmd: string) => {
     router.push(`/utilization?q=${encodeURIComponent(quarterStartYmd)}`);
@@ -518,7 +669,7 @@ export function UtilizationPageClient({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           title="Target"
           value={hasTarget ? formatEffortHoursLabel(data.targetHours!) : "—"}
@@ -545,23 +696,28 @@ export function UtilizationPageClient({
               : "Set a target to compute attainment"
           }
         />
+        <MetricCard
+          title="Projected Attainment"
+          value={pulse != null ? `${pulse.projectedAttainmentPct}%` : "—"}
+          subtitle={
+            hasTarget
+              ? "Actuals + remaining forecast ÷ target"
+              : "Set a target to project attainment"
+          }
+        />
       </div>
 
-      <UtilizationWeekStrip weeks={data.weeks} />
-
-      <div
-        className="card-canvas flex gap-3 border-l-4 px-4 py-3"
-        style={{ borderLeftColor: tone.border }}
-        role="status"
-      >
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-[var(--app-text)]">{tone.label}</p>
-          <p className="mt-1 text-sm text-muted-canvas">{data.insight.message}</p>
-          {data.insight.detail ? (
-            <p className="mt-1 text-sm text-muted-canvas">{data.insight.detail}</p>
-          ) : null}
-        </div>
-      </div>
+      <UtilizationWeekStrip
+        weeks={data.weeks}
+        pulse={pulse}
+        targetHours={data.targetHours}
+        status={data.insight.status}
+        statusMessage={
+          data.insight.detail
+            ? `${data.insight.message} ${data.insight.detail}`
+            : data.insight.message
+        }
+      />
 
       <UtilizationTimeOffCalendar data={data} onDataChange={setData} />
 

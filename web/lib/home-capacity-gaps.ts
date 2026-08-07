@@ -150,7 +150,11 @@ export function synthesizeCapacityGaps(input: {
   quarterLabel: string;
   /** Scalar weekly target when weekTargets is omitted. */
   targetHours?: number;
-  /** Per-week capacity after time off (Sunday week start → hours). */
+  /**
+   * Per-week capacity target (Sunday week start → hours).
+   * Prefer utilization pace hours when a quarter target exists; otherwise
+   * weekly capacity after time off.
+   */
   weekTargets?: Record<string, number>;
 }): CapacityGapsSynthesis {
   const defaultTarget = input.targetHours ?? TARGET_WEEKLY_CAPACITY_HOURS;

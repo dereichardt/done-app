@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   clipLocalRange,
   currentSundayFromTodayYmd,
+  localWeekdayCount,
   paceHoursPerWeekWeighted,
   resolveFiscalQuarter,
   shiftFiscalQuarter,
@@ -19,6 +20,7 @@ import {
 import {
   type EffortSessionInput,
   effortProratedHoursByLocalDay,
+  formatLocalYmd,
   localDayStart,
   parseLocalYmd,
 } from "@/lib/integration-effort-buckets";
@@ -62,6 +64,8 @@ export type UtilizationQuarterDTO = {
   endExclusiveYmd: string;
   prevQuarterStartYmd: string;
   nextQuarterStartYmd: string;
+  /** Owner-local today used for relative weeks and current-week forecast burn-down. */
+  todayYmd: string;
   targetHours: number | null;
   actualHours: number;
   forecastHours: number;
@@ -70,6 +74,39 @@ export type UtilizationQuarterDTO = {
   insight: UtilizationInsight;
   timeOffDays: TimeOffDay[];
   weeklyCapacityHours: number;
+};
+
+export type BlendedQuarterProjection = {
+  allActualHours: number;
+  remainingCurrentForecastHours: number;
+  futureForecastHours: number;
+  /** allActuals + remaining current-week forecast + future forecasts */
+  projectedHours: number;
+  /** remaining current + future — muted pulse segment */
+  planForecastHours: number;
+  /**
+   * Ideal hours by today: past weeks' full pace + current-week pace for
+   * fully past working days only (same burn rule as forecast).
+   */
+  paceToDateHours: number;
+};
+
+/** Shared metrics for Home quarter pulse + Utilization status card. */
+export type QuarterPulseMetrics = {
+  allActualHours: number;
+  planForecastHours: number;
+  paceToDateHours: number;
+  projectedHours: number;
+  projectedAttainmentPct: number;
+  aheadBy: number;
+  hoursLeftToTarget: number;
+  coverageShortfall: number;
+  workingDaysLeft: number;
+  actualFill: number;
+  forecastFill: number;
+  actualPct: number;
+  forecastPct: number;
+  pacePct: number;
 };
 
 /**
@@ -101,12 +138,176 @@ function roundHours(n: number): number {
   return Math.round(n * 4) / 4;
 }
 
+/**
+ * Mon–Fri days in a Sunday week that are not time off.
+ * `remaining` = working days with ymd >= today (today not burned yet).
+ * `past` = working days with ymd < today (fully elapsed).
+ */
+function currentWeekWorkingDayCounts(
+  weekStartYmd: string,
+  todayYmd: string,
+  timeOffYmds: ReadonlySet<string>,
+): { workingDays: number; remainingWorkingDays: number; pastWorkingDays: number } {
+  const { weekStart, weekEndExclusive } = sundayWeekWindowFromAnchorYmd(weekStartYmd);
+  let workingDays = 0;
+  let remainingWorkingDays = 0;
+  const day = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+  const end = new Date(
+    weekEndExclusive.getFullYear(),
+    weekEndExclusive.getMonth(),
+    weekEndExclusive.getDate(),
+  );
+  while (day < end) {
+    const dow = day.getDay();
+    if (dow !== 0 && dow !== 6) {
+      const ymd = formatLocalYmd(day);
+      if (!timeOffYmds.has(ymd)) {
+        workingDays += 1;
+        // Only fully past working days burn; today still counts as remaining.
+        if (ymd >= todayYmd) remainingWorkingDays += 1;
+      }
+    }
+    day.setDate(day.getDate() + 1);
+  }
+  return {
+    workingDays,
+    remainingWorkingDays,
+    pastWorkingDays: Math.max(0, workingDays - remainingWorkingDays),
+  };
+}
+
+/**
+ * Quarter pulse / coverage projection: all actuals (incl. current week) +
+ * remaining current-week forecast (daily burn of fully past Mon–Fri, time-off aware) +
+ * future week forecasts. Also returns pace-to-date with the same day burn rule.
+ */
+function blendedQuarterProjection(args: {
+  weeks: UtilizationWeekRow[];
+  todayYmd: string;
+  timeOffYmds?: ReadonlySet<string>;
+}): BlendedQuarterProjection {
+  const { weeks, todayYmd } = args;
+  const timeOffYmds = args.timeOffYmds ?? new Set<string>();
+  const currentSunday = currentSundayFromTodayYmd(todayYmd);
+
+  let allActualHours = 0;
+  let remainingCurrentForecastHours = 0;
+  let futureForecastHours = 0;
+  let paceToDateHours = 0;
+
+  for (const w of weeks) {
+    if (w.weekStartYmd < currentSunday) {
+      allActualHours += w.actualHours;
+      paceToDateHours += w.paceHours;
+    } else if (w.weekStartYmd === currentSunday) {
+      allActualHours += w.actualHours;
+      const { workingDays, remainingWorkingDays, pastWorkingDays } =
+        currentWeekWorkingDayCounts(w.weekStartYmd, todayYmd, timeOffYmds);
+      if (workingDays > 0) {
+        if (w.forecastHours > 0) {
+          remainingCurrentForecastHours = roundHours(
+            w.forecastHours * (remainingWorkingDays / workingDays),
+          );
+        }
+        if (w.paceHours > 0 && pastWorkingDays > 0) {
+          paceToDateHours += roundHours(w.paceHours * (pastWorkingDays / workingDays));
+        }
+      }
+    } else {
+      futureForecastHours += w.forecastHours;
+    }
+  }
+
+  allActualHours = roundHours(allActualHours);
+  paceToDateHours = roundHours(paceToDateHours);
+  futureForecastHours = roundHours(futureForecastHours);
+  const planForecastHours = roundHours(
+    remainingCurrentForecastHours + futureForecastHours,
+  );
+  const projectedHours = roundHours(allActualHours + planForecastHours);
+
+  return {
+    allActualHours,
+    remainingCurrentForecastHours,
+    futureForecastHours,
+    projectedHours,
+    planForecastHours,
+    paceToDateHours,
+  };
+}
+
+/**
+ * Pulse / status metrics from blended projection + target.
+ * Used by Home Insights quarter pulse and Utilization status card.
+ */
+export function quarterPulseMetrics(args: {
+  weeks: UtilizationWeekRow[];
+  todayYmd: string;
+  targetHours: number;
+  endExclusiveYmd: string;
+  timeOffYmds?: ReadonlySet<string>;
+}): QuarterPulseMetrics {
+  const { weeks, todayYmd, targetHours, endExclusiveYmd } = args;
+  const blend = blendedQuarterProjection({
+    weeks,
+    todayYmd,
+    timeOffYmds: args.timeOffYmds,
+  });
+  const allActualHours = Math.max(0, blend.allActualHours);
+  const planForecastHours = Math.max(0, blend.planForecastHours);
+  const paceToDateHours = Math.max(0, blend.paceToDateHours);
+  const projectedHours = Math.max(0, blend.projectedHours);
+  const actualFill = Math.min(targetHours, allActualHours);
+  const forecastFill = Math.min(
+    Math.max(0, targetHours - actualFill),
+    planForecastHours,
+  );
+  const start = parseLocalYmd(todayYmd);
+  const end = parseLocalYmd(endExclusiveYmd);
+  const workingDaysLeft =
+    Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())
+      ? 0
+      : localWeekdayCount(start, end);
+
+  return {
+    allActualHours,
+    planForecastHours,
+    paceToDateHours,
+    projectedHours,
+    projectedAttainmentPct:
+      targetHours > 0 ? Math.round((projectedHours / targetHours) * 1000) / 10 : 0,
+    aheadBy: allActualHours - paceToDateHours,
+    hoursLeftToTarget: Math.max(0, targetHours - allActualHours),
+    coverageShortfall: Math.max(0, targetHours - projectedHours),
+    workingDaysLeft,
+    actualFill,
+    forecastFill,
+    actualPct: targetHours > 0 ? (actualFill / targetHours) * 100 : 0,
+    forecastPct: targetHours > 0 ? (forecastFill / targetHours) * 100 : 0,
+    pacePct:
+      targetHours > 0 ? Math.min(100, (paceToDateHours / targetHours) * 100) : 0,
+  };
+}
+
+/** Pace chip label shared by Home + Utilization. */
+export function paceDeltaLabel(aheadBy: number): { label: string; value: string } {
+  if (aheadBy >= 1) {
+    return { label: "Ahead of pace by", value: formatShortHours(aheadBy) };
+  }
+  if (aheadBy <= -1) {
+    return { label: "Behind pace by", value: formatShortHours(Math.abs(aheadBy)) };
+  }
+  return { label: "On pace", value: formatShortHours(0) };
+}
+
 function buildInsight(args: {
   targetHours: number | null;
   weeks: UtilizationWeekRow[];
   todayYmd: string;
+  timeOffYmds?: ReadonlySet<string>;
 }): UtilizationInsight {
   const { targetHours, weeks, todayYmd } = args;
+  const timeOffYmds = args.timeOffYmds ?? new Set<string>();
   if (targetHours == null || targetHours <= 0) {
     return {
       status: "no_target",
@@ -118,25 +319,14 @@ function buildInsight(args: {
   const quarterFullyPast =
     weeks.length > 0 && weeks.every((w) => w.weekStartYmd < currentSunday);
 
-  let cumulativePace = 0;
-  let cumulativeActual = 0;
-  /** Hours still expected from the plan: future forecast + current week (max of actual vs forecast). */
-  let projectedHours = 0;
+  const { projectedHours, allActualHours, paceToDateHours } = blendedQuarterProjection({
+    weeks,
+    todayYmd,
+    timeOffYmds,
+  });
 
-  for (const w of weeks) {
-    if (w.weekStartYmd < currentSunday) {
-      cumulativePace += w.paceHours;
-      cumulativeActual += w.actualHours;
-      projectedHours += w.actualHours;
-    } else if (w.weekStartYmd === currentSunday) {
-      cumulativePace += w.paceHours;
-      cumulativeActual += w.actualHours;
-      projectedHours += Math.max(w.actualHours, w.forecastHours);
-    } else {
-      projectedHours += w.forecastHours;
-    }
-  }
-
+  const cumulativeActual = allActualHours;
+  const cumulativePace = paceToDateHours;
   const remainingToTarget = Math.max(0, targetHours - cumulativeActual);
   const aheadBy = cumulativeActual - cumulativePace;
   const utilizationPct = Math.round((cumulativeActual / targetHours) * 1000) / 10;
@@ -535,6 +725,7 @@ function emptyDto(
     endExclusiveYmd: identity.endExclusiveYmd,
     prevQuarterStartYmd: prev.quarterStartYmd,
     nextQuarterStartYmd: next.quarterStartYmd,
+    todayYmd,
     targetHours: null,
     actualHours: 0,
     forecastHours: 0,
@@ -731,16 +922,17 @@ export async function loadUtilizationQuarter(
     endExclusiveYmd: identity.endExclusiveYmd,
     prevQuarterStartYmd: prev.quarterStartYmd,
     nextQuarterStartYmd: next.quarterStartYmd,
+    todayYmd,
     targetHours,
     actualHours,
     forecastHours,
     utilizationPct,
     weeks,
-    insight: buildInsight({ targetHours, weeks, todayYmd }),
+    insight: buildInsight({ targetHours, weeks, todayYmd, timeOffYmds }),
     timeOffDays,
     weeklyCapacityHours: capacity,
   };
 }
 
 /** Exported for tests / insight preview. */
-export { buildInsight, formatShortHours };
+export { blendedQuarterProjection, buildInsight, formatShortHours };

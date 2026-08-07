@@ -115,8 +115,8 @@ export function HomeAvailabilityCard({
           role="img"
           aria-label={
             pocket
-              ? `Open capacity ${capacityPocketRangeLabel(pocket)}. Weekly target ${weeklyCapacityTarget} hours.`
-              : `Forecast versus open capacity by week. Weekly target ${weeklyCapacityTarget} hours.`
+              ? `Open capacity ${capacityPocketRangeLabel(pocket)}. Bars use each week's pace target.`
+              : `Forecast versus open capacity by week. Bars use each week's pace target.`
           }
         >
           {weeks.map((week) => {

@@ -61,6 +61,8 @@ async function loadTimeOffYmds(
 
 /**
  * Portfolio forecast hours for capacity-gap weeks (+1 … quarter end), then synthesize pockets.
+ * When `weekTargetsOverride` is set (utilization pace hours), use it and skip flat
+ * capacity-after-time-off targets — pace already includes time-off day weights.
  */
 export async function loadCapacityGapsSynthesis(
   supabase: SupabaseClient,
@@ -68,6 +70,7 @@ export async function loadCapacityGapsSynthesis(
   todayIso: string,
   quarterConfig: EffortQuarterConfig,
   weeklyCapacityHours: number = DEFAULT_WEEKLY_CAPACITY_HOURS,
+  weekTargetsOverride?: Record<string, number>,
 ): Promise<CapacityGapsSynthesis> {
   const capacity =
     Number.isFinite(weeklyCapacityHours) && weeklyCapacityHours > 0
@@ -81,6 +84,15 @@ export async function loadCapacityGapsSynthesis(
   );
   const quarterWeeks = sundayWeeksOverlappingRange(identity.start, identity.endExclusive);
   const gapWeeks = capacityWindowWeekStarts(currentSunday, quarterWeeks);
+
+  const resolveWeekTargets = (timeOffYmds: Set<string>): Record<string, number> => {
+    if (weekTargetsOverride != null) return weekTargetsOverride;
+    return weekTargetsAfterTimeOff({
+      weekStarts: gapWeeks,
+      weeklyCapacityHours: capacity,
+      timeOffYmds,
+    });
+  };
 
   const empty = (weekTargets?: Record<string, number>) =>
     synthesizeCapacityGaps({
@@ -108,7 +120,7 @@ export async function loadCapacityGapsSynthesis(
   const initiativeIds = (initiatives ?? []).map((row) => row.id as string);
 
   if (gapWeeks.length === 0) {
-    return empty();
+    return empty(weekTargetsOverride);
   }
 
   const gapStart = gapWeeks[0]!;
@@ -124,19 +136,16 @@ export async function loadCapacityGapsSynthesis(
   ].join("-");
 
   if (projectIds.length === 0 && initiativeIds.length === 0) {
+    if (weekTargetsOverride != null) {
+      return empty(weekTargetsOverride);
+    }
     const timeOffYmds = await loadTimeOffYmds(
       supabase,
       ownerId,
       gapStart,
       gapEndExclusiveYmd,
     );
-    return empty(
-      weekTargetsAfterTimeOff({
-        weekStarts: gapWeeks,
-        weeklyCapacityHours: capacity,
-        timeOffYmds,
-      }),
-    );
+    return empty(resolveWeekTargets(timeOffYmds));
   }
 
   const [{ data: hoursRows }, { data: initiativeHoursRows }, timeOffYmds] = await Promise.all([
@@ -156,7 +165,9 @@ export async function loadCapacityGapsSynthesis(
           .in("initiative_id", initiativeIds)
           .gte("week_start_date", gapStart)
           .lte("week_start_date", gapEnd),
-    loadTimeOffYmds(supabase, ownerId, gapStart, gapEndExclusiveYmd),
+    weekTargetsOverride != null
+      ? Promise.resolve(new Set<string>())
+      : loadTimeOffYmds(supabase, ownerId, gapStart, gapEndExclusiveYmd),
   ]);
 
   const weekHours: Record<string, number> = {};
@@ -167,11 +178,7 @@ export async function loadCapacityGapsSynthesis(
     weekHours[week] = (weekHours[week] ?? 0) + Math.max(0, Math.round(Number(row.hours) || 0));
   }
 
-  const weekTargets = weekTargetsAfterTimeOff({
-    weekStarts: gapWeeks,
-    weeklyCapacityHours: capacity,
-    timeOffYmds,
-  });
+  const weekTargets = resolveWeekTargets(timeOffYmds);
 
   return synthesizeCapacityGaps({
     weekHours,
@@ -195,7 +202,7 @@ export async function loadHomeInsights(
   const weeklyCapacity =
     preferences.weekly_capacity_hours ?? DEFAULT_WEEKLY_CAPACITY_HOURS;
 
-  const [quarter, capacity, breakdowns] = await Promise.all([
+  const [quarter, breakdowns] = await Promise.all([
     loadUtilizationQuarter(
       supabase,
       ownerId,
@@ -204,15 +211,24 @@ export async function loadHomeInsights(
       null,
       weeklyCapacity,
     ),
-    loadCapacityGapsSynthesis(
-      supabase,
-      ownerId,
-      todayIso,
-      quarterConfig,
-      weeklyCapacity,
-    ),
     loadHomeEffortBreakdowns(supabase, ownerId, todayIso, quarterConfig),
   ]);
+
+  const paceWeekTargets =
+    quarter.targetHours != null && quarter.targetHours > 0
+      ? Object.fromEntries(
+          quarter.weeks.map((w) => [w.weekStartYmd, w.paceHours]),
+        )
+      : undefined;
+
+  const capacity = await loadCapacityGapsSynthesis(
+    supabase,
+    ownerId,
+    todayIso,
+    quarterConfig,
+    weeklyCapacity,
+    paceWeekTargets,
+  );
 
   return {
     quarter,
