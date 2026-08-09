@@ -4,6 +4,7 @@ import Link from "next/link";
 import { CanvasSelect } from "@/components/canvas-select";
 import { FormSwitch } from "@/components/form-switch";
 import { ProjectColorPicker } from "@/components/project-color-picker";
+import { ProjectManagementHoursField } from "@/components/project-management-hours-field";
 import { createProject } from "@/lib/actions/projects";
 import {
   deriveProjectAbbreviation,
@@ -172,6 +173,9 @@ export function CreateProjectForm({
           options={projectRoles.map((r) => ({ value: r.id, label: r.name }))}
         />
       </div>
+      {!isExpertAssist ? (
+        <ProjectManagementHoursField id="new-project-pm-hours" />
+      ) : null}
 
       <ProjectColorPicker name="project_color_key" defaultValue={null} legend="Project color" />
       {state?.error ? (

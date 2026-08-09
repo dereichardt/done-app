@@ -93,6 +93,7 @@ describe("bulk portfolio forecast loading", () => {
           starts_on: "2026-01-01",
           ends_on: "2026-12-31",
           estimated_effort_hours: 100,
+          project_management_estimated_hours: 15,
           project_types: { system_key: "standard" },
         },
         {
@@ -161,6 +162,19 @@ describe("bulk portfolio forecast loading", () => {
       ["project-b", 3],
     ]);
     expect(projects[1]?.forecastModel).toBe("single_track");
+    expect(projects[0]?.integrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "integration-a",
+          estimatedEffortHours: 25,
+        }),
+        expect.objectContaining({
+          key: "project_management",
+          label: "Project Management",
+          estimatedEffortHours: 15,
+        }),
+      ]),
+    );
   });
 
   it("loads projects and initiatives in sixteen requests regardless of entity count", async () => {

@@ -160,6 +160,7 @@ type ProjectSourceRow = {
   starts_on: string | null;
   ends_on: string | null;
   estimated_effort_hours: number | string | null;
+  project_management_estimated_hours?: number | string | null;
   project_types: { system_key?: string | null } | { system_key?: string | null }[] | null;
 };
 
@@ -277,16 +278,28 @@ function buildProjectDTO(args: {
               : null,
         },
       ]
-    : args.integrations
-        .filter((row) => isIntegrationCountedInScope(row.integration_state ?? "active"))
-        .map((row) => {
-          const hours = row.estimated_effort_hours != null ? Number(row.estimated_effort_hours) : null;
-          return {
-            key: row.id,
-            label: integrationTitle(row),
-            estimatedEffortHours: hours != null && Number.isFinite(hours) ? hours : null,
-          };
-        });
+    : (() => {
+        const rows = args.integrations
+          .filter((row) => isIntegrationCountedInScope(row.integration_state ?? "active"))
+          .map((row) => {
+            const hours = row.estimated_effort_hours != null ? Number(row.estimated_effort_hours) : null;
+            return {
+              key: row.id,
+              label: integrationTitle(row),
+              estimatedEffortHours: hours != null && Number.isFinite(hours) ? hours : null,
+            };
+          });
+        const pmHoursRaw = project.project_management_estimated_hours;
+        const pmHours = pmHoursRaw != null ? Number(pmHoursRaw) : null;
+        if (pmHours != null && Number.isFinite(pmHours) && pmHours > 0) {
+          rows.push({
+            key: "project_management",
+            label: "Project Management",
+            estimatedEffortHours: pmHours,
+          });
+        }
+        return rows;
+      })();
   const hours: ForecastHoursCellDTO[] = hoursRows.map((row) => ({
     week_start_date: String(row.week_start_date).slice(0, 10),
     hours: Math.max(0, Math.round(Number(row.hours) || 0)),
@@ -387,7 +400,7 @@ export async function loadForecastProjectDTO(
   const { data: project } = await supabase
     .from("projects")
     .select(
-      "id, customer_name, starts_on, ends_on, estimated_effort_hours, project_types(system_key)",
+      "id, customer_name, starts_on, ends_on, estimated_effort_hours, project_management_estimated_hours, project_types(system_key)",
     )
     .eq("id", projectId)
     .eq("owner_id", ownerId)
@@ -531,7 +544,7 @@ export async function loadAllActiveForecastProjects(
   const { data: projects, error: projectsError } = await supabase
     .from("projects")
     .select(
-      "id, customer_name, starts_on, ends_on, estimated_effort_hours, project_types(system_key)",
+      "id, customer_name, starts_on, ends_on, estimated_effort_hours, project_management_estimated_hours, project_types(system_key)",
     )
     .eq("owner_id", ownerId)
     .is("completed_at", null)

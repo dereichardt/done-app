@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { generateExpertAssistForecastHours } from "@/lib/expert-assist-forecast";
-import { parseExpertAssistDetails } from "@/lib/project-types";
+import {
+  parseExpertAssistDetails,
+  parseProjectManagementEstimatedHours,
+} from "@/lib/project-types";
+
+describe("Project management estimated hours", () => {
+  it("treats empty as null and rejects non-quarter-hour values", () => {
+    expect(parseProjectManagementEstimatedHours("")).toEqual({ hours: null });
+    expect(parseProjectManagementEstimatedHours("10.1").error).toMatch(/quarter-hour/);
+    expect(parseProjectManagementEstimatedHours("-1").error).toMatch(/non-negative/);
+    expect(parseProjectManagementEstimatedHours("40.5")).toEqual({ hours: 40.5 });
+  });
+});
 
 describe("Expert Assist details", () => {
   it("requires ordered dates and positive quarter-hour effort", () => {

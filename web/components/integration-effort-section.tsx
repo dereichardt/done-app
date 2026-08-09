@@ -8,10 +8,16 @@ import {
 import { patchInternalInitiativeEstimatedEffort } from "@/lib/actions/internal-tasks";
 import {
   createIntegrationManualEffortEntry,
+  createProjectTrackManualEffortEntry,
   deleteIntegrationManualEffortEntry,
+  deleteProjectTrackManualEffortEntry,
   updateIntegrationManualEffortEntry,
+  updateProjectTrackManualEffortEntry,
 } from "@/lib/actions/integration-manual-effort";
-import { patchProjectIntegrationEstimatedEffort } from "@/lib/actions/projects";
+import {
+  patchProjectIntegrationEstimatedEffort,
+  patchProjectManagementEstimatedEffort,
+} from "@/lib/actions/projects";
 import { CanvasArrowLeftIcon, CanvasArrowRightIcon } from "@/components/canvas-arrow-icons";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
@@ -101,6 +107,13 @@ export type IntegrationEffortTarget =
       initiativeId: string;
       projectLabel: string;
       integrationLabel: string;
+    }
+  | {
+      kind: "project_management";
+      projectId: string;
+      projectTrackId: string;
+      projectLabel: string;
+      integrationLabel: string;
     };
 
 export function IntegrationEffortSection({
@@ -162,7 +175,9 @@ export function IntegrationEffortSection({
       const res =
         effortTarget.kind === "project_integration"
           ? await patchProjectIntegrationEstimatedEffort(effortTarget.projectIntegrationId, parsed.hours)
-          : await patchInternalInitiativeEstimatedEffort(effortTarget.initiativeId, parsed.hours);
+          : effortTarget.kind === "project_management"
+            ? await patchProjectManagementEstimatedEffort(effortTarget.projectId, parsed.hours)
+            : await patchInternalInitiativeEstimatedEffort(effortTarget.initiativeId, parsed.hours);
       if (gen !== saveGen.current) return;
       if (res.error) {
         setEstimateBanner("error");
@@ -318,22 +333,35 @@ export function IntegrationEffortSection({
         : null,
     };
 
-    const res =
-      effortTarget.kind === "project_integration"
-        ? createDraft.mode === "edit" && createDraft.manualEntryId
+    let res: { error?: string };
+    if (effortTarget.kind === "project_integration") {
+      res =
+        createDraft.mode === "edit" && createDraft.manualEntryId
           ? await updateIntegrationManualEffortEntry(
               effortTarget.projectIntegrationId,
               createDraft.manualEntryId,
               manualPayload,
             )
-          : await createIntegrationManualEffortEntry(effortTarget.projectIntegrationId, manualPayload)
-        : createDraft.mode === "edit" && createDraft.manualEntryId
+          : await createIntegrationManualEffortEntry(effortTarget.projectIntegrationId, manualPayload);
+    } else if (effortTarget.kind === "project_management") {
+      res =
+        createDraft.mode === "edit" && createDraft.manualEntryId
+          ? await updateProjectTrackManualEffortEntry(
+              effortTarget.projectTrackId,
+              createDraft.manualEntryId,
+              manualPayload,
+            )
+          : await createProjectTrackManualEffortEntry(effortTarget.projectTrackId, manualPayload);
+    } else {
+      res =
+        createDraft.mode === "edit" && createDraft.manualEntryId
           ? await updateInternalInitiativeManualEffortEntry(
               effortTarget.initiativeId,
               createDraft.manualEntryId,
               manualPayload,
             )
           : await createInternalInitiativeManualEffortEntry(effortTarget.initiativeId, manualPayload);
+    }
 
     if (res.error) {
       setCreateDraft((prev) =>
@@ -371,10 +399,15 @@ export function IntegrationEffortSection({
             effortTarget.projectIntegrationId,
             deleteContext.manualEntryId,
           )
-        : await deleteInternalInitiativeManualEffortEntry(
-            effortTarget.initiativeId,
-            deleteContext.manualEntryId,
-          );
+        : effortTarget.kind === "project_management"
+          ? await deleteProjectTrackManualEffortEntry(
+              effortTarget.projectTrackId,
+              deleteContext.manualEntryId,
+            )
+          : await deleteInternalInitiativeManualEffortEntry(
+              effortTarget.initiativeId,
+              deleteContext.manualEntryId,
+            );
     setDeletePending(false);
     if (res.error) {
       setDeleteError(res.error);

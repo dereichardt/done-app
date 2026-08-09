@@ -1,4 +1,5 @@
 import { ProjectIntegrationsSection } from "@/components/project-integrations-section";
+import { IntegrationEffortSection } from "@/components/integration-effort-section";
 import { loadActiveWorkSessionIndicator } from "@/lib/actions/integration-tasks";
 import {
   fetchProjectTrackTaskSnapshot,
@@ -29,6 +30,7 @@ import {
   type ProjectEffortRowDef,
   type ProjectEffortSessionInput,
 } from "@/lib/project-weekly-effort";
+import type { EffortSessionInput } from "@/lib/integration-effort-buckets";
 import { loadForecastProjectDTO } from "@/lib/forecast-data";
 import { loadHomeActualsVsForecast } from "@/lib/home-actuals-vs-forecast";
 
@@ -56,6 +58,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       starts_on,
       ends_on,
       estimated_effort_hours,
+      project_management_estimated_hours,
       integrations_enabled,
       project_types ( name, system_key ),
       project_roles ( name )
@@ -217,16 +220,34 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const PM_EFFORT_ROW_KEY = "project_management";
 
+  const projectManagementEstimatedHours =
+    project.project_management_estimated_hours != null
+      ? Number(project.project_management_estimated_hours)
+      : null;
+  const projectManagementEstimatedHoursNorm =
+    projectManagementEstimatedHours != null && Number.isFinite(projectManagementEstimatedHours)
+      ? projectManagementEstimatedHours
+      : null;
+
+  const expertAssistEstimatedHours =
+    project.estimated_effort_hours != null ? Number(project.estimated_effort_hours) : null;
+  const expertAssistEstimatedHoursNorm =
+    expertAssistEstimatedHours != null && Number.isFinite(expertAssistEstimatedHours)
+      ? expertAssistEstimatedHours
+      : null;
+
+  const pmEffortCardEstimatedHours = isExpertAssist
+    ? expertAssistEstimatedHoursNorm
+    : projectManagementEstimatedHoursNorm;
+  const showPmEffortSection = pmEffortCardEstimatedHours != null && pmTrack != null;
+
   const effortRows: ProjectEffortRowDef[] = isExpertAssist
     ? [
         {
           key: PM_EFFORT_ROW_KEY,
           label: "Expert Assist",
           kind: "project_management" as const,
-          estimatedEffortHours:
-            project.estimated_effort_hours != null
-              ? Number(project.estimated_effort_hours)
-              : null,
+          estimatedEffortHours: expertAssistEstimatedHoursNorm,
         },
       ]
     : [
@@ -242,7 +263,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           key: PM_EFFORT_ROW_KEY,
           label: (pmTrack?.name ?? "").trim() || "Project Management",
           kind: "project_management" as const,
-          estimatedEffortHours: null,
+          estimatedEffortHours: projectManagementEstimatedHoursNorm,
         },
       ];
 
@@ -388,12 +409,9 @@ export default async function ProjectDetailPage({ params }: PageProps) {
         initialProjectColorKey={projectColorKey}
         initialStartsOn={project.starts_on ?? null}
         initialEndsOn={project.ends_on ?? null}
-        initialEstimatedEffortHours={
-          project.estimated_effort_hours != null
-            ? Number(project.estimated_effort_hours)
-            : null
-        }
+        initialEstimatedEffortHours={expertAssistEstimatedHoursNorm}
         initialIntegrationsEnabled={project.integrations_enabled !== false}
+        initialProjectManagementEstimatedHours={projectManagementEstimatedHoursNorm}
         projectTypes={projectTypes ?? []}
         projectRoles={projectRoles ?? []}
       />
@@ -502,6 +520,39 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           )}
         </div>
       </section>
+
+      {showPmEffortSection && pmTrack ? (
+        <section className="mt-10 mb-2">
+          <div className="flex flex-col gap-2">
+            <h2 className="section-heading">Project Management Effort</h2>
+            <IntegrationEffortSection
+              effortTarget={{
+                kind: "project_management",
+                projectId: id,
+                projectTrackId: pmTrack.id,
+                projectLabel: project.customer_name ?? "",
+                integrationLabel: pmTrackLabel,
+              }}
+              initialEstimatedEffortHours={pmEffortCardEstimatedHours}
+              sessions={effortSessions
+                .filter((s) => s.rowKey === PM_EFFORT_ROW_KEY)
+                .map(
+                  (s): EffortSessionInput => ({
+                    source: s.source,
+                    source_id: s.source_id,
+                    started_at: s.started_at,
+                    finished_at: s.finished_at,
+                    duration_hours: s.duration_hours,
+                    integration_task_id: s.integration_task_id,
+                    entry_type: s.entry_type,
+                    title: s.title,
+                    work_accomplished: s.work_accomplished,
+                  }),
+                )}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-10">
         <ProjectActivityFeed projectId={id} initialEvents={initialActivity} />

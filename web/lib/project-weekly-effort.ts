@@ -19,7 +19,7 @@ export type ProjectEffortRowDef = {
   key: string;
   label: string;
   kind: ProjectEffortRowKind;
-  /** Integration estimate hours; null/undefined for PM or unset estimates. */
+  /** Estimated hours for the row (integration or project management); null when unset. */
   estimatedEffortHours?: number | null;
 };
 

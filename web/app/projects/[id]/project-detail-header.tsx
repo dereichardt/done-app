@@ -4,6 +4,7 @@ import { CanvasArrowLeftIcon } from "@/components/canvas-arrow-icons";
 import { CanvasSelect } from "@/components/canvas-select";
 import { FormSwitch } from "@/components/form-switch";
 import { ProjectColorPicker } from "@/components/project-color-picker";
+import { ProjectManagementHoursField } from "@/components/project-management-hours-field";
 import { reopenProject, updateProjectDetails } from "@/lib/actions/projects";
 import {
   deriveProjectAbbreviation,
@@ -36,6 +37,7 @@ export function ProjectDetailHeader({
   initialEndsOn,
   initialEstimatedEffortHours,
   initialIntegrationsEnabled,
+  initialProjectManagementEstimatedHours,
   projectTypes,
   projectRoles,
 }: {
@@ -52,6 +54,7 @@ export function ProjectDetailHeader({
   initialEndsOn: string | null;
   initialEstimatedEffortHours: number | null;
   initialIntegrationsEnabled: boolean;
+  initialProjectManagementEstimatedHours: number | null;
   projectTypes: ProjectTypeLookup[];
   projectRoles: LookupRow[];
 }) {
@@ -129,6 +132,9 @@ export function ProjectDetailHeader({
     const starts_on = String(fd.get("starts_on") ?? "").trim();
     const ends_on = String(fd.get("ends_on") ?? "").trim();
     const estimated_effort_hours = String(fd.get("estimated_effort_hours") ?? "").trim();
+    const project_management_estimated_hours = String(
+      fd.get("project_management_estimated_hours") ?? "",
+    ).trim();
     const integrations_enabled = fd.has("integrations_enabled");
 
     setSaving(true);
@@ -143,6 +149,7 @@ export function ProjectDetailHeader({
         ends_on,
         estimated_effort_hours,
         integrations_enabled,
+        project_management_estimated_hours,
       });
       if (result.error) {
         setError(result.error);
@@ -406,6 +413,12 @@ export function ProjectDetailHeader({
                 options={projectRoles.map((r) => ({ value: r.id, label: r.name }))}
               />
             </div>
+            {!isExpertAssist ? (
+              <ProjectManagementHoursField
+                id="project-detail-pm-hours"
+                defaultValue={initialProjectManagementEstimatedHours}
+              />
+            ) : null}
 
             <div className="mb-3">
               <ProjectColorPicker

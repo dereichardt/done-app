@@ -26,6 +26,7 @@ import { DEFAULT_PHASES } from "@/lib/project-phases";
 import {
   EXPERT_ASSIST_SYSTEM_KEY,
   parseExpertAssistDetails,
+  parseProjectManagementEstimatedHours,
   type ExpertAssistDetails,
 } from "@/lib/project-types";
 import { revalidatePath } from "next/cache";
@@ -116,6 +117,15 @@ export async function createProject(
     expertAssistDetails = parsed.details;
   }
 
+  let projectManagementEstimatedHours: number | null = null;
+  if (!isExpertAssist) {
+    const parsedPm = parseProjectManagementEstimatedHours(
+      String(formData.get("project_management_estimated_hours") ?? ""),
+    );
+    if (parsedPm.error) return { error: parsedPm.error };
+    projectManagementEstimatedHours = parsedPm.hours ?? null;
+  }
+
   // Reserve a sort position at the end of the active list.
   const { data: orderRow } = await supabase
     .from("projects")
@@ -141,6 +151,7 @@ export async function createProject(
       ends_on: expertAssistDetails?.ends_on ?? null,
       estimated_effort_hours: expertAssistDetails?.estimated_effort_hours ?? null,
       integrations_enabled: expertAssistDetails?.integrations_enabled ?? true,
+      project_management_estimated_hours: projectManagementEstimatedHours,
     })
     .select("id")
     .single();
@@ -183,6 +194,7 @@ export async function updateProjectDetails(
     ends_on?: string;
     estimated_effort_hours?: string;
     integrations_enabled?: boolean;
+    project_management_estimated_hours?: string;
   },
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -251,6 +263,15 @@ export async function updateProjectDetails(
     expertAssistDetails = parsed.details;
   }
 
+  let projectManagementEstimatedHours: number | null | undefined;
+  if (!isExpertAssist) {
+    const parsedPm = parseProjectManagementEstimatedHours(
+      data.project_management_estimated_hours ?? "",
+    );
+    if (parsedPm.error) return { error: parsedPm.error };
+    projectManagementEstimatedHours = parsedPm.hours ?? null;
+  }
+
   const detailUpdates = {
     customer_name,
     abbreviation,
@@ -258,6 +279,9 @@ export async function updateProjectDetails(
     primary_role_id,
     project_color_key,
     ...(expertAssistDetails ?? {}),
+    ...(projectManagementEstimatedHours !== undefined
+      ? { project_management_estimated_hours: projectManagementEstimatedHours }
+      : {}),
   };
 
   const { error } = await supabase
@@ -1163,6 +1187,58 @@ export async function patchProjectIntegrationEstimatedEffort(
 
   revalidatePath(`/projects/${row.project_id}`);
   revalidatePath(`/projects/${row.project_id}/integrations/${projectIntegrationId}`);
+  return {};
+}
+
+/**
+ * Patch project-management estimated hours.
+ * Expert Assist projects store this on `estimated_effort_hours`;
+ * standard projects use `project_management_estimated_hours`.
+ */
+export async function patchProjectManagementEstimatedEffort(
+  projectId: string,
+  hours: number | null,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  if (hours != null) {
+    if (!Number.isFinite(hours) || hours < 0) return { error: "Invalid estimated effort" };
+    const q = Math.round(hours * 4) / 4;
+    if (Math.abs(hours - q) > 1e-6) return { error: "Estimated effort must be in quarter-hour steps" };
+  }
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, project_types(system_key)")
+    .eq("id", projectId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (!project) return { error: "Not found" };
+
+  const projectType = Array.isArray(project.project_types)
+    ? project.project_types[0]
+    : project.project_types;
+  const isExpertAssist = projectType?.system_key === EXPERT_ASSIST_SYSTEM_KEY;
+
+  const { error } = await supabase
+    .from("projects")
+    .update(
+      isExpertAssist
+        ? { estimated_effort_hours: hours }
+        : { project_management_estimated_hours: hours },
+    )
+    .eq("id", projectId)
+    .eq("owner_id", user.id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/forecast");
   return {};
 }
 

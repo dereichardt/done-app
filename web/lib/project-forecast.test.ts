@@ -6,6 +6,7 @@ import {
   buildForecastPhaseWeekSegments,
   computeEstimateVariance,
   diffForecastCells,
+  forecastPrerequisites,
   formatSignedVarianceHours,
   generateForecastHours,
   phaseSpreadShapeFactor,
@@ -39,6 +40,32 @@ describe("project-level forecast helpers", () => {
   it("sums integration estimates but rounds actuals once for the project", () => {
     expect(sumEstimatedRoundedHours(INTEGRATIONS)).toBe(140);
     expect(sumActualsConsumedHours(10.1 + 3.2)).toBe(14);
+  });
+
+  it("includes project management hours in the estimated pool", () => {
+    expect(
+      sumEstimatedRoundedHours([
+        ...INTEGRATIONS,
+        { key: "project_management", label: "Project Management", estimatedEffortHours: 20 },
+      ]),
+    ).toBe(160);
+  });
+
+  it("allows forecast generation when only project management hours are estimated", () => {
+    const ok = forecastPrerequisites({
+      phases: PHASES,
+      integrations: [
+        { key: "project_management", label: "Project Management", estimatedEffortHours: 40 },
+      ],
+    });
+    expect(ok).toEqual({ ok: true });
+
+    const missing = forecastPrerequisites({
+      phases: PHASES,
+      integrations: [{ key: "int-a", label: "A", estimatedEffortHours: null }],
+    });
+    expect(missing).toMatchObject({ ok: false });
+    expect(missing.ok === false && missing.reason).toMatch(/Project Management Hours/);
   });
 
   it("spaces sparse whole hours across a long timeline", () => {

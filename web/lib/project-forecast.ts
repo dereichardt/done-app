@@ -142,7 +142,7 @@ export function roundWholeHours(n: number): number {
   return Math.round(n);
 }
 
-/** Sum of whole-hour integration estimates (same pool PM is carved from). */
+/** Sum of whole-hour estimates across integration and project-management rows. */
 export function sumEstimatedRoundedHours(
   integrations: ForecastIntegrationInput[],
 ): number {
@@ -374,7 +374,8 @@ export function forecastPrerequisites(input: {
   if (!withEstimate) {
     return {
       ok: false,
-      reason: "Add estimated effort to at least one integration before generating a forecast.",
+      reason:
+        "Add estimated effort to at least one integration or set Project Management Hours before generating a forecast.",
     };
   }
   return { ok: true };

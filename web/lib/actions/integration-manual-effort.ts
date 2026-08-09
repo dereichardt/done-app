@@ -249,3 +249,197 @@ export async function deleteIntegrationManualEffortEntry(
   return {};
 }
 
+async function loadOwnedPmTrack(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  projectTrackId: string,
+): Promise<{ project_id: string; project_track_id: string } | null> {
+  const { data: track } = await supabase
+    .from("project_tracks")
+    .select("id, project_id, kind")
+    .eq("id", projectTrackId)
+    .eq("kind", "project_management")
+    .maybeSingle();
+
+  if (!track) return null;
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", track.project_id)
+    .eq("owner_id", userId)
+    .maybeSingle();
+
+  if (!project) return null;
+  return { project_id: track.project_id, project_track_id: track.id };
+}
+
+function validateManualEffortPayload(payload: {
+  entry_type: ManualEffortEntryType;
+  title: string;
+  started_at: string;
+  finished_at: string;
+  work_accomplished: string | null;
+}):
+  | {
+      ok: true;
+      title: string;
+      started: Date;
+      finished: Date;
+      duration_hours: number;
+      work_accomplished: string | null;
+      entry_type: ManualEffortEntryType;
+    }
+  | { ok: false; error: string } {
+  if (!isEntryType(String(payload.entry_type))) return { ok: false, error: "Invalid entry type" };
+
+  const title = String(payload.title ?? "").trim();
+  if (!title) return { ok: false, error: "Title is required" };
+
+  const started = new Date(payload.started_at);
+  if (Number.isNaN(started.getTime())) return { ok: false, error: "Invalid start time" };
+  const finished = new Date(payload.finished_at);
+  if (Number.isNaN(finished.getTime())) return { ok: false, error: "Invalid end time" };
+  if (finished.getTime() <= started.getTime()) {
+    return { ok: false, error: "End time must be after start time" };
+  }
+
+  if (!isOnQuarterHour(started) || !isOnQuarterHour(finished)) {
+    return { ok: false, error: "Times must be in 15-minute increments" };
+  }
+
+  const duration_hours = (finished.getTime() - started.getTime()) / 3_600_000;
+  const q = Math.round(duration_hours * 4) / 4;
+  if (!Number.isFinite(duration_hours) || duration_hours <= 0) {
+    return { ok: false, error: "Invalid duration" };
+  }
+  if (Math.abs(duration_hours - q) > 1e-6) {
+    return { ok: false, error: "Duration must be in 15-minute increments" };
+  }
+
+  return {
+    ok: true,
+    title,
+    started,
+    finished,
+    duration_hours: q,
+    work_accomplished: payload.work_accomplished?.trim() ? payload.work_accomplished.trim() : null,
+    entry_type: payload.entry_type,
+  };
+}
+
+export async function createProjectTrackManualEffortEntry(
+  projectTrackId: string,
+  payload: {
+    entry_type: ManualEffortEntryType;
+    title: string;
+    started_at: string;
+    finished_at: string;
+    work_accomplished: string | null;
+  },
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const track = await loadOwnedPmTrack(supabase, user.id, projectTrackId);
+  if (!track) return { error: "Not found" };
+
+  const parsed = validateManualEffortPayload(payload);
+  if (!parsed.ok) return { error: parsed.error };
+
+  const { error } = await supabase.from("integration_manual_effort_entries").insert({
+    project_track_id: track.project_track_id,
+    project_integration_id: null,
+    entry_type: parsed.entry_type,
+    title: parsed.title,
+    started_at: parsed.started.toISOString(),
+    finished_at: parsed.finished.toISOString(),
+    duration_hours: parsed.duration_hours,
+    work_accomplished: parsed.work_accomplished,
+  });
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/projects/${track.project_id}`);
+  return {};
+}
+
+export async function updateProjectTrackManualEffortEntry(
+  projectTrackId: string,
+  manualEntryId: string,
+  payload: {
+    entry_type: ManualEffortEntryType;
+    title: string;
+    started_at: string;
+    finished_at: string;
+    work_accomplished: string | null;
+  },
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const track = await loadOwnedPmTrack(supabase, user.id, projectTrackId);
+  if (!track) return { error: "Not found" };
+
+  if (!manualEntryId || typeof manualEntryId !== "string") return { error: "Not found" };
+
+  const parsed = validateManualEffortPayload(payload);
+  if (!parsed.ok) return { error: parsed.error };
+
+  const { data: updated, error } = await supabase
+    .from("integration_manual_effort_entries")
+    .update({
+      entry_type: parsed.entry_type,
+      title: parsed.title,
+      started_at: parsed.started.toISOString(),
+      finished_at: parsed.finished.toISOString(),
+      duration_hours: parsed.duration_hours,
+      work_accomplished: parsed.work_accomplished,
+    })
+    .eq("id", manualEntryId)
+    .eq("project_track_id", track.project_track_id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!updated) return { error: "Not found" };
+
+  revalidatePath(`/projects/${track.project_id}`);
+  return {};
+}
+
+export async function deleteProjectTrackManualEffortEntry(
+  projectTrackId: string,
+  manualEntryId: string,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const track = await loadOwnedPmTrack(supabase, user.id, projectTrackId);
+  if (!track) return { error: "Not found" };
+
+  if (!manualEntryId || typeof manualEntryId !== "string") return { error: "Not found" };
+
+  const { data: deleted, error } = await supabase
+    .from("integration_manual_effort_entries")
+    .delete()
+    .eq("id", manualEntryId)
+    .eq("project_track_id", track.project_track_id)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!deleted) return { error: "Not found" };
+
+  revalidatePath(`/projects/${track.project_id}`);
+  return {};
+}
+

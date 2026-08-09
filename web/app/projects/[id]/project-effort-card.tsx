@@ -120,7 +120,7 @@ export function ProjectEffortCard({
   const estimatedByKey = useMemo(() => {
     const map = new Map<string, number | null>();
     for (const row of rows) {
-      map.set(row.key, row.kind === "project_management" ? null : (row.estimatedEffortHours ?? null));
+      map.set(row.key, row.estimatedEffortHours ?? null);
     }
     return map;
   }, [rows]);
@@ -129,7 +129,6 @@ export function ProjectEffortCard({
     let sum = 0;
     let any = false;
     for (const row of rows) {
-      if (row.kind !== "integration") continue;
       const h = row.estimatedEffortHours;
       if (h == null || !Number.isFinite(h)) continue;
       sum += h;
