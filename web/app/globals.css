@@ -26,8 +26,8 @@
   /* Warning / overload emphasis (e.g. portfolio week above sustainable load) */
   --app-warning: var(--project-color-yellow-medium, #fde65e);
   /* Hours this week — Internal segment fill + label */
-  --app-internal-hours-surface: #fcf8e8;
-  --app-internal-hours-fg: #f59e0b;
+  --app-internal-hours-surface: color-mix(in oklab, var(--app-border) 55%, var(--app-surface));
+  --app-internal-hours-fg: var(--app-text-muted);
   /* Primary dark CTA fill (.btn-cta-dark); reuse for matching form controls (e.g. checkboxes) */
   --app-cta-dark-fill: #1f2937;
   --app-cta-dark-fg: #f3f5f8;
