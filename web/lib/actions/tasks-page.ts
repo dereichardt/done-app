@@ -28,8 +28,10 @@ import {
 } from "@/lib/project-colors";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { devPerfDuration } from "@/lib/dev-perf-log";
+import { loadSubtasksGrouped } from "@/lib/task-subtask-data";
 import {
   TASKS_PAGE_INTERNAL_PROJECT_ID,
+  type TaskSubtask,
   type TaskWorkSessionHistoryRow,
   type TasksPageInternalDestination,
   type TasksPageInternalTask,
@@ -42,6 +44,30 @@ import {
 } from "@/lib/tasks-page-shared";
 
 const RECENTLY_COMPLETED_LIMIT = 10;
+
+async function attachSubtasksToPageTasks(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  tasks: TasksPageTask[],
+): Promise<{ tasks: TasksPageTask[]; error?: string }> {
+  const projectIds = tasks.filter((t) => t.scope === "project").map((t) => t.id);
+  const internalIds = tasks.filter((t) => t.scope === "internal").map((t) => t.id);
+  const [projectRes, internalRes] = await Promise.all([
+    loadSubtasksGrouped(supabase, "integration_task_subtasks", "integration_task_id", projectIds),
+    loadSubtasksGrouped(supabase, "internal_task_subtasks", "internal_task_id", internalIds),
+  ]);
+  if (projectRes.error) return { tasks, error: projectRes.error };
+  if (internalRes.error) return { tasks, error: internalRes.error };
+
+  return {
+    tasks: tasks.map((t) => {
+      const subtasks: TaskSubtask[] =
+        t.scope === "project"
+          ? (projectRes.grouped.get(t.id) ?? [])
+          : (internalRes.grouped.get(t.id) ?? []);
+      return { ...t, subtasks };
+    }),
+  };
+}
 
 async function loadInternalWorkTasksForSnapshot(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -135,6 +161,7 @@ async function loadInternalWorkTasksForSnapshot(
         internal_bucket_kind: k,
         internal_initiative_id: null,
         internal_track_id: t.internal_track_id,
+        subtasks: [],
       };
     }
     const ini = t.internal_initiative_id!;
@@ -148,6 +175,7 @@ async function loadInternalWorkTasksForSnapshot(
       priority: t.priority as TasksPageInternalTask["priority"],
       completed_at: t.completed_at ?? null,
       sort_order: Number(t.sort_order ?? 0),
+      subtasks: [],
       internal_context_label: title,
       internal_detail_href: `/internal/initiatives/${ini}`,
       internal_bucket_kind: null,
@@ -180,11 +208,16 @@ async function loadInternalWorkTasksForSnapshot(
     colorVar: null,
   };
 
+  const mappedOpen = openRows.map(mapRow);
+  const mappedRecent = recentRows.map(mapRow);
+  const attached = await attachSubtasksToPageTasks(supabase, [...mappedOpen, ...mappedRecent]);
+  const attachedById = new Map(attached.tasks.map((t) => [t.id, t] as const));
+
   return {
     internalProject,
     internalDestinations: destinations,
-    open: openRows.map(mapRow),
-    recent: recentRows.map(mapRow),
+    open: mappedOpen.map((t) => (attachedById.get(t.id) as TasksPageInternalTask | undefined) ?? t),
+    recent: mappedRecent.map((t) => (attachedById.get(t.id) as TasksPageInternalTask | undefined) ?? t),
   };
 }
 
@@ -419,6 +452,7 @@ export async function loadTasksPageSnapshot(): Promise<{
     priority: t.priority as TasksPageProjectTask["priority"],
     completed_at: t.completed_at ?? null,
     sort_order: Number(t.sort_order ?? 0),
+    subtasks: [] as TaskSubtask[],
     project_id: trackById.get(t.project_track_id)?.projectId ?? "",
     project_track_id: t.project_track_id,
     project_integration_id: trackById.get(t.project_track_id)?.projectIntegrationId ?? null,
@@ -433,10 +467,17 @@ export async function loadTasksPageSnapshot(): Promise<{
     priority: t.priority as TasksPageProjectTask["priority"],
     completed_at: t.completed_at ?? null,
     sort_order: Number(t.sort_order ?? 0),
+    subtasks: [] as TaskSubtask[],
     project_id: trackById.get(t.project_track_id)?.projectId ?? "",
     project_track_id: t.project_track_id,
     project_integration_id: trackById.get(t.project_track_id)?.projectIntegrationId ?? null,
   }));
+
+  const attached = await attachSubtasksToPageTasks(supabase, [...openTasks, ...recentlyCompleted]);
+  if (attached.error) return { error: attached.error };
+  const attachedById = new Map(attached.tasks.map((t) => [t.id, t] as const));
+  const openWithSubtasks = openTasks.map((t) => attachedById.get(t.id) ?? t);
+  const recentWithSubtasks = recentlyCompleted.map((t) => attachedById.get(t.id) ?? t);
 
   devPerfDuration("loadTasksPageSnapshot", perfStart);
   return {
@@ -446,8 +487,8 @@ export async function loadTasksPageSnapshot(): Promise<{
       integrations,
       tracks,
       internalDestinations: internalBlock.internalDestinations,
-      tasks: [...openTasks, ...internalBlock.open],
-      recentlyCompleted: [...recentlyCompleted, ...internalBlock.recent],
+      tasks: [...openWithSubtasks, ...internalBlock.open],
+      recentlyCompleted: [...recentWithSubtasks, ...internalBlock.recent],
       activeWorkSessionIndicator: indicatorRes.indicator ?? null,
     },
   };

@@ -1,4 +1,5 @@
 import type { CanvasSelectOption } from "@/components/canvas-select";
+import type { TaskSubtask } from "@/lib/tasks-page-shared";
 import { getUserTodayIso } from "@/lib/user-preferences";
 
 export type IntegrationTaskRow = {
@@ -11,6 +12,8 @@ export type IntegrationTaskRow = {
   completed_at: string | null;
   /** Set for merged Admin + Development internal track lists. */
   internal_track_kind?: "admin" | "development";
+  subtasks?: TaskSubtask[];
+  scope?: "project" | "internal";
 };
 
 export type IntegrationTaskWorkSessionRow = {

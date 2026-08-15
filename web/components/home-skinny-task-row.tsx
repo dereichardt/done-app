@@ -1,8 +1,9 @@
 "use client";
 
 import { CalendarIcon } from "@/components/action-icons";
+import { SubtaskPopoverButton } from "@/components/subtask-popover-button";
 import { TaskCompleteButton } from "@/components/task-row";
-import type { TasksPageTask } from "@/lib/tasks-page-shared";
+import type { TaskSubtask, TasksPageTask } from "@/lib/tasks-page-shared";
 import Link from "next/link";
 import {
   useCallback,
@@ -166,6 +167,7 @@ export function HomeSkinnyTaskRow({
   onToggleCompleteSuccess,
   onLongPressCompleteLog,
   onOpenEdit,
+  onSubtasksChange,
   dragHandle,
 }: {
   task: TasksPageTask;
@@ -179,6 +181,7 @@ export function HomeSkinnyTaskRow({
   onLongPressCompleteLog?: (task: TasksPageTask) => void;
   /** Open edit dialog when clicking the row outside action controls. */
   onOpenEdit?: (task: TasksPageTask) => void;
+  onSubtasksChange?: (taskId: string, subtasks: TaskSubtask[]) => void;
   /** Optional hover-reveal grip for drag reorder (listeners attached by parent). */
   dragHandle?: ReactNode;
 }) {
@@ -268,7 +271,7 @@ export function HomeSkinnyTaskRow({
         {task.title}
       </span>
 
-      <div className="relative flex h-8 min-w-[4.75rem] shrink-0 items-center justify-end">
+      <div className="relative flex h-8 min-w-[7.25rem] shrink-0 items-center justify-end">
         <span
           className={[
             priorityPillClass(task.priority),
@@ -287,6 +290,12 @@ export function HomeSkinnyTaskRow({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
+          <SubtaskPopoverButton
+            taskId={task.id}
+            scope={task.scope}
+            subtasks={task.subtasks ?? []}
+            onSubtasksChange={(next) => onSubtasksChange?.(task.id, next)}
+          />
           <button
             type="button"
             className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border transition-colors hover:bg-[var(--app-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)] disabled:cursor-default disabled:opacity-50"

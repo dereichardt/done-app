@@ -37,6 +37,7 @@ import {
   type IntegrationTaskRow as IntegrationTaskRowType,
   type IntegrationTaskWorkSessionRow as IntegrationTaskWorkSessionRowType,
 } from "@/lib/integration-task-helpers";
+import type { TaskSubtask } from "@/lib/tasks-page-shared";
 import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import { clearCalendarSessionCache } from "@/lib/tasks-calendar-session-cache";
 import {
@@ -2459,6 +2460,11 @@ export function IntegrationTasksPanel({
           onAfterToggleComplete={(taskId) => void refreshTaskSnapshotAndRoute()}
           onAfterUndo={(taskId) => void refreshTaskSnapshotAndRoute()}
           onLongPressCompleteLog={(task) => setManualLogTask(task)}
+          onSubtasksChange={(taskId, subtasks: TaskSubtask[]) => {
+            setOptimisticTasks((prev) =>
+              prev.map((row) => (row.id === taskId ? { ...row, subtasks } : row)),
+            );
+          }}
         />
       </li>
     );

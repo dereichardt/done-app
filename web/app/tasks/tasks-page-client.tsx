@@ -731,6 +731,7 @@ export function TasksPageClient({
               onAfterToggleComplete={afterToggleComplete}
               onAfterUndo={afterUndoComplete}
               onLongPressCompleteLog={(task) => setManualLogTask(task)}
+              onSubtasksChange={(taskId, subtasks) => updateTaskInState(taskId, { subtasks })}
               onReorderWithinBucket={reorderWithinBucket}
               onMoveAcrossBucket={moveAcrossBucket}
             />
@@ -777,7 +778,7 @@ export function TasksPageClient({
             subtitle="Pick a project and track (or Internal and a destination), then describe the task."
             onClose={() => addTaskDialogRef.current?.close()}
           />
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
             <TaskQuickAdd
               mode="global"
               layout="dialog"

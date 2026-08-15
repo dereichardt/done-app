@@ -1,6 +1,7 @@
 "use client";
 
 import { CanvasSelect } from "@/components/canvas-select";
+import { SubtaskListEditor } from "@/components/subtask-list-editor";
 import {
   ADD_TASK_TITLE_MAX_PX,
   DueDatePickerControl,
@@ -8,8 +9,10 @@ import {
 } from "@/components/task-row";
 import { createIntegrationTask } from "@/lib/actions/integration-tasks";
 import { createInternalTask } from "@/lib/actions/internal-tasks";
+import { parseSubtaskCreatesFromFormData } from "@/lib/task-subtask-data";
 import {
   TASKS_PAGE_INTERNAL_PROJECT_ID,
+  type TaskSubtask,
   type TasksPageInternalDestination,
 } from "@/lib/tasks-page-shared";
 import {
@@ -137,6 +140,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
   const [dueDateState, setDueDateState] = useState(() => ({ todayIso, value: todayIso }));
   const dueDate = dueDateState.todayIso === todayIso ? dueDateState.value : todayIso;
   const setDueDate = (value: string) => setDueDateState({ todayIso, value });
+  const [subtasks, setSubtasks] = useState<TaskSubtask[]>([]);
 
   const [createState, createAction, createPending] = useActionState(
     async (_prev: { error?: string } | void, formData: FormData) => {
@@ -145,6 +149,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
         setTitle("");
         setPriority(PRIORITY_DEFAULT);
         setDueDate(todayIso);
+        setSubtasks([]);
         await onCreated?.();
         return result;
       }
@@ -163,12 +168,14 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
           return { error: "Invalid priority" };
         }
         const due_date = dueRaw === "" ? null : dueRaw;
+        const subtaskCreates = parseSubtaskCreatesFromFormData(formData);
         return finishCreate(await createInternalTask({
           internal_track_id: dest.kind === "initiative" ? null : dest.id,
           internal_initiative_id: dest.kind === "initiative" ? dest.id : null,
           title,
           priority: priorityRaw,
           due_date,
+          subtasks: subtaskCreates,
         }));
       }
 
@@ -182,6 +189,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
           return { error: "Invalid priority" };
         }
         const due_date = dueRaw === "" ? null : dueRaw;
+        const subtaskCreates = parseSubtaskCreatesFromFormData(formData);
         if (ic.variant === "initiative") {
           return finishCreate(await createInternalTask({
             internal_track_id: null,
@@ -189,6 +197,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
             title,
             priority: priorityRaw,
             due_date,
+            subtasks: subtaskCreates,
           }));
         }
         if (ic.variant === "track") {
@@ -198,6 +207,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
             title,
             priority: priorityRaw,
             due_date,
+            subtasks: subtaskCreates,
           }));
         }
         const tid = String(formData.get("internal_type_pick") ?? "").trim();
@@ -210,6 +220,7 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
           title,
           priority: priorityRaw,
           due_date,
+          subtasks: subtaskCreates,
         }));
       }
 
@@ -370,6 +381,16 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
     </label>
   );
 
+  const subtasksField = (
+    <SubtaskListEditor
+      subtasks={subtasks}
+      onSubtasksChange={setSubtasks}
+      includeFormFields
+      disabled={createPending}
+      scrollable={isDialogLayout}
+    />
+  );
+
   const integrationAddBlocked =
     !isGlobal &&
     props.mode === "integration" &&
@@ -389,23 +410,26 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
   return (
     <form
       action={createAction}
-      className={`flex min-w-0 flex-col gap-2 ${className}`.trim()}
+      className={`flex min-h-0 flex-col gap-2 ${isDialogLayout ? "h-full" : ""} ${className}`.trim()}
     >
       {isDialogLayout ? (
-        <div className="add-task-inline-row flex flex-col gap-3">
-          {titleField}
-          {isGlobal ? (
+        <div className="add-task-inline-row flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex shrink-0 flex-col gap-3">
+            {titleField}
+            {isGlobal ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-2">
+                {projectField}
+                {integrationField}
+              </div>
+            ) : null}
+            {!isGlobal ? internalPickField : null}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-2">
-              {projectField}
-              {integrationField}
+              {priorityField}
+              {dueField}
             </div>
-          ) : null}
-          {!isGlobal ? internalPickField : null}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-2">
-            {priorityField}
-            {dueField}
           </div>
-          <div className="mt-30 flex items-center justify-end gap-2">
+          {subtasksField}
+          <div className="flex shrink-0 items-center justify-end gap-2">
             {onCancel ? (
               <button
                 type="button"
@@ -420,24 +444,27 @@ export function TaskQuickAdd(props: TaskQuickAddProps) {
           </div>
         </div>
       ) : (
-        <div className="add-task-inline-row flex w-full min-w-0 flex-nowrap items-start gap-2 pb-0.5">
-          {titleField}
-          {projectField}
-          {integrationField}
-          {internalPickField}
-          {priorityField}
-          {dueField}
-          <div className="flex min-h-0 shrink-0 flex-col items-end">
-            <div className="flex shrink-0 flex-col gap-1">
-              <span
-                className="select-none text-xs leading-normal text-transparent"
-                aria-hidden="true"
-              >
-                Title
-              </span>
-              {submitButton}
+        <div className="flex w-full min-w-0 flex-col gap-2">
+          <div className="add-task-inline-row flex w-full min-w-0 flex-nowrap items-start gap-2 pb-0.5">
+            {titleField}
+            {projectField}
+            {integrationField}
+            {internalPickField}
+            {priorityField}
+            {dueField}
+            <div className="flex min-h-0 shrink-0 flex-col items-end">
+              <div className="flex shrink-0 flex-col gap-1">
+                <span
+                  className="select-none text-xs leading-normal text-transparent"
+                  aria-hidden="true"
+                >
+                  Title
+                </span>
+                {submitButton}
+              </div>
             </div>
           </div>
+          {subtasksField}
         </div>
       )}
 

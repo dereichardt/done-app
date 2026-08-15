@@ -5,6 +5,9 @@ import {
   isRemovedFromScope,
 } from "@/lib/integration-metadata";
 import { loadInternalTaskFinishContextWithSupabase } from "@/lib/internal-task-context";
+import { parseSubtaskCreatesFromFormData, loadSubtasksGrouped } from "@/lib/task-subtask-data";
+import { insertSubtasksOnCreate } from "@/lib/actions/task-subtasks";
+import type { TaskSubtask } from "@/lib/tasks-page-shared";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -405,6 +408,8 @@ export type IntegrationTaskSnapshotTask = {
   status: string;
   priority: TaskPriority;
   completed_at: string | null;
+  subtasks: TaskSubtask[];
+  scope?: "project" | "internal";
 };
 
 export type IntegrationTaskSnapshotWorkSession = {
@@ -459,9 +464,23 @@ export async function fetchProjectTrackTaskSnapshot(
     status: t.status,
     priority: t.priority,
     completed_at: t.completed_at ?? null,
+    subtasks: [],
+    scope: "project",
   }));
 
   const taskIds = tasks.map((t) => t.id);
+  if (taskIds.length > 0) {
+    const subRes = await loadSubtasksGrouped(
+      supabase,
+      "integration_task_subtasks",
+      "integration_task_id",
+      taskIds,
+    );
+    if (subRes.error) return { error: subRes.error };
+    for (const task of tasks) {
+      task.subtasks = subRes.grouped.get(task.id) ?? [];
+    }
+  }
   let workRows: IntegrationTaskSnapshotWorkSession[] = [];
   if (taskIds.length > 0) {
     const { data, error } = await supabase
@@ -817,16 +836,28 @@ export async function createIntegrationTask(
       sameGroupTasks.reduce((max, row) => Math.max(max, Number(row.sort_order ?? 0)), 0) + 1;
   }
 
-  const { error } = await supabase.from("integration_tasks").insert({
-    project_track_id: projectTrackId,
-    title,
-    due_date,
-    priority: priorityRaw,
-    status: "open",
-    sort_order: nextSortOrder,
-  });
+  const { data: inserted, error } = await supabase
+    .from("integration_tasks")
+    .insert({
+      project_track_id: projectTrackId,
+      title,
+      due_date,
+      priority: priorityRaw,
+      status: "open",
+      sort_order: nextSortOrder,
+    })
+    .select("id")
+    .maybeSingle();
 
   if (error) return { error: error.message };
+  if (!inserted?.id) return { error: "Could not create task" };
+
+  const subtaskErr = await insertSubtasksOnCreate(
+    "project",
+    inserted.id,
+    parseSubtaskCreatesFromFormData(formData),
+  );
+  if (subtaskErr.error) return { error: subtaskErr.error };
 
   await revalidateTrackPaths(track);
   return {};

@@ -42,6 +42,13 @@ export type TasksPageTrack = {
   projectIntegrationId: string | null;
 };
 
+export type TaskSubtask = {
+  id: string;
+  title: string;
+  completed: boolean;
+  sort_order: number;
+};
+
 type TasksPageTaskShared = {
   id: string;
   title: string;
@@ -50,6 +57,7 @@ type TasksPageTaskShared = {
   priority: "low" | "medium" | "high";
   completed_at: string | null;
   sort_order: number;
+  subtasks: TaskSubtask[];
 };
 
 export type TasksPageProjectTask = TasksPageTaskShared & {

@@ -2,13 +2,14 @@
 
 import { CanvasSelect } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
+import { SubtaskListEditor } from "@/components/subtask-list-editor";
 import {
   ADD_TASK_TITLE_MAX_PX,
   DueDatePickerControl,
   syncAddTaskTitleHeight,
 } from "@/components/task-row";
 import { taskPriorityOptions } from "@/lib/integration-task-helpers";
-import type { TasksPageTask } from "@/lib/tasks-page-shared";
+import type { TaskSubtask, TasksPageTask } from "@/lib/tasks-page-shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const dialogClass =
@@ -24,6 +25,7 @@ export function HomeEditTaskDialog({
   onSaveTitle,
   onSavePriority,
   onSaveDueDate,
+  onSubtasksChange,
 }: {
   open: boolean;
   task: TasksPageTask | null;
@@ -37,6 +39,7 @@ export function HomeEditTaskDialog({
     priority: "low" | "medium" | "high",
   ) => Promise<{ error?: string }>;
   onSaveDueDate: (taskId: string, dueDateIso: string) => Promise<{ error?: string }>;
+  onSubtasksChange: (taskId: string, subtasks: TaskSubtask[]) => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
@@ -148,8 +151,9 @@ export function HomeEditTaskDialog({
           <DialogCloseButton onClick={close} />
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          <form className="add-task-inline-row flex flex-col gap-3" onSubmit={(e) => void handleSave(e)}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+          <form className="add-task-inline-row flex min-h-0 flex-1 flex-col gap-3" onSubmit={(e) => void handleSave(e)}>
+            <div className="flex shrink-0 flex-col gap-3">
             <label
               className="canvas-select-field flex w-full min-w-0 flex-col gap-1 text-xs"
               style={{ color: "var(--app-text-muted)" }}
@@ -232,8 +236,19 @@ export function HomeEditTaskDialog({
                 />
               </label>
             </div>
+            </div>
 
-            <div className="mt-30 flex items-center justify-end gap-2">
+            {task ? (
+              <SubtaskListEditor
+                subtasks={task.subtasks ?? []}
+                onSubtasksChange={(next) => onSubtasksChange(task.id, next)}
+                persist={{ taskId: task.id, scope: task.scope }}
+                disabled={saving}
+                scrollable
+              />
+            ) : null}
+
+            <div className="flex shrink-0 items-center justify-end gap-2">
               <button
                 type="button"
                 className="btn-ghost h-9 min-h-9 px-3 text-xs"

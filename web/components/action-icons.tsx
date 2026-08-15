@@ -18,6 +18,25 @@ export function CalendarIcon({ size = 16, className = "shrink-0" }: ActionIconPr
   );
 }
 
+/** Checklist / list rows — used for task subtasks. */
+export function ListIcon({ size = 16, className = "shrink-0" }: ActionIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.15"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M8 6h12M8 12h12M8 18h12"
+      />
+      <circle cx="4" cy="6" r="1.15" fill="currentColor" />
+      <circle cx="4" cy="12" r="1.15" fill="currentColor" />
+      <circle cx="4" cy="18" r="1.15" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function TrashIcon({ size = 16, className = "shrink-0" }: ActionIconProps) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className={className}>

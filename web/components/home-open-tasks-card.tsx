@@ -39,7 +39,7 @@ import {
 } from "@/lib/home-task-buckets";
 import { deriveProjectAbbreviation } from "@/lib/project-abbreviation";
 import { clearCalendarSessionCache } from "@/lib/tasks-calendar-session-cache";
-import type { TasksPageSnapshot, TasksPageTask } from "@/lib/tasks-page-shared";
+import type { TaskSubtask, TasksPageSnapshot, TasksPageTask } from "@/lib/tasks-page-shared";
 import {
   DndContext,
   DragOverlay,
@@ -134,6 +134,7 @@ function SortableHomeSkinnyTaskRow({
   onToggleCompleteSuccess,
   onLongPressCompleteLog,
   onOpenEdit,
+  onSubtasksChange,
   dndReady,
   isDragOverlay = false,
 }: {
@@ -148,6 +149,7 @@ function SortableHomeSkinnyTaskRow({
   onToggleCompleteSuccess?: (taskId: string) => void;
   onLongPressCompleteLog?: (task: TasksPageTask) => void;
   onOpenEdit?: (task: TasksPageTask) => void;
+  onSubtasksChange?: (taskId: string, subtasks: TaskSubtask[]) => void;
   dndReady: boolean;
   isDragOverlay?: boolean;
 }) {
@@ -175,6 +177,7 @@ function SortableHomeSkinnyTaskRow({
         onToggleCompleteSuccess={onToggleCompleteSuccess}
         onLongPressCompleteLog={onLongPressCompleteLog}
         onOpenEdit={onOpenEdit}
+        onSubtasksChange={onSubtasksChange}
         dragHandle={
           <button
             type="button"
@@ -368,6 +371,15 @@ export function HomeOpenTasksCard({
 
   const markTaskCompletedLocally = useCallback((taskId: string) => {
     setOpenTasks((prev) => prev.filter((t) => t.id !== taskId));
+  }, []);
+
+  const patchTaskSubtasks = useCallback((taskId: string, subtasks: TaskSubtask[]) => {
+    setOpenTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? ({ ...t, subtasks } as TasksPageTask) : t)),
+    );
+    setEditTask((prev) =>
+      prev?.id === taskId ? ({ ...prev, subtasks } as TasksPageTask) : prev,
+    );
   }, []);
 
   const closeWorkRow = useCallback(
@@ -796,6 +808,7 @@ export function HomeOpenTasksCard({
                                   onToggleCompleteSuccess={markTaskCompletedLocally}
                                   onLongPressCompleteLog={(t) => setManualLogTask(t)}
                                   onOpenEdit={setEditTask}
+                                  onSubtasksChange={patchTaskSubtasks}
                                   dndReady={dndReady}
                                 />
                               );
@@ -878,7 +891,7 @@ export function HomeOpenTasksCard({
             </div>
             <DialogCloseButton onClick={closeAddTask} />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
             {addTaskOpen ? (
               <TaskQuickAdd
                 mode="global"
@@ -920,6 +933,7 @@ export function HomeOpenTasksCard({
         onSaveTitle={saveTaskTitle}
         onSavePriority={saveTaskPriority}
         onSaveDueDate={saveTaskDueDate}
+        onSubtasksChange={patchTaskSubtasks}
       />
 
       <TaskOnlyManualLogDialog

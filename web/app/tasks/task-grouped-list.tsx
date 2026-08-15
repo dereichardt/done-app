@@ -22,7 +22,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Fragment, useId, useMemo, useState, useSyncExternalStore } from "react";
 import type { ActiveWorkSessionDTO } from "@/lib/actions/integration-tasks";
-import type { TasksPageTask } from "@/lib/tasks-page-shared";
+import type { TaskSubtask, TasksPageTask } from "@/lib/tasks-page-shared";
 import {
   addDaysIsoUtc,
   formatDateDisplay,
@@ -195,6 +195,7 @@ function SortableTaskRow({
   onAfterToggleComplete,
   onAfterUndo,
   onLongPressCompleteLog,
+  onSubtasksChange,
   isDragOverlay = false,
   dndReady,
 }: {
@@ -216,6 +217,7 @@ function SortableTaskRow({
   onAfterToggleComplete?: (taskId: string) => void | Promise<void>;
   onAfterUndo?: (taskId: string) => void | Promise<void>;
   onLongPressCompleteLog?: (task: TasksPageTask) => void;
+  onSubtasksChange?: (taskId: string, subtasks: TaskSubtask[]) => void;
   isDragOverlay?: boolean;
   dndReady: boolean;
 }) {
@@ -260,18 +262,21 @@ function SortableTaskRow({
             status: task.status,
             priority: task.priority,
             completed_at: task.completed_at,
+            subtasks: task.subtasks ?? [],
+            scope: task.scope,
           }}
           crumb={crumb}
           effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}
           starting={starting}
-          onStartWork={(t) => onStartWork({ ...task, ...t })}
-          onOpenHistory={(t) => onOpenHistory({ ...task, ...t })}
-          onOpenDelete={(t) => onOpenDelete({ ...task, ...t })}
+          onStartWork={() => onStartWork(task)}
+          onOpenHistory={() => onOpenHistory(task)}
+          onOpenDelete={() => onOpenDelete(task)}
           onSaveTitle={onSaveTitle}
           onSavePriority={onSavePriority}
           onSaveDueDate={onSaveDueDate}
           onAfterToggleComplete={onAfterToggleComplete}
           onAfterUndo={onAfterUndo}
+          onSubtasksChange={onSubtasksChange}
           onLongPressCompleteLog={
             onLongPressCompleteLog
               ? () => {
@@ -304,6 +309,7 @@ export function TaskGroupedList({
   onAfterToggleComplete,
   onAfterUndo,
   onLongPressCompleteLog,
+  onSubtasksChange,
   onReorderWithinBucket,
   onMoveAcrossBucket,
 }: {
@@ -329,6 +335,7 @@ export function TaskGroupedList({
   onAfterToggleComplete?: (taskId: string) => void | Promise<void>;
   onAfterUndo?: (taskId: string) => void | Promise<void>;
   onLongPressCompleteLog?: (task: TasksPageTask) => void;
+  onSubtasksChange?: (taskId: string, subtasks: TaskSubtask[]) => void;
   onReorderWithinBucket: (bucketId: TaskBucketId, orderedTaskIds: string[]) => void | Promise<void>;
   onMoveAcrossBucket: (
     taskId: string,
@@ -472,6 +479,7 @@ export function TaskGroupedList({
                             onAfterToggleComplete={onAfterToggleComplete}
                             onAfterUndo={onAfterUndo}
                             onLongPressCompleteLog={onLongPressCompleteLog}
+                            onSubtasksChange={onSubtasksChange}
                             dndReady={dndReady}
                           />
                         );
@@ -518,6 +526,7 @@ export function TaskGroupedList({
                         onAfterToggleComplete={onAfterToggleComplete}
                         onAfterUndo={onAfterUndo}
                         onLongPressCompleteLog={onLongPressCompleteLog}
+                        onSubtasksChange={onSubtasksChange}
                         dndReady={dndReady}
                       />
                     );
@@ -557,6 +566,8 @@ export function TaskGroupedList({
                 status: activeDragTask.status,
                 priority: activeDragTask.priority,
                 completed_at: activeDragTask.completed_at,
+                subtasks: activeDragTask.subtasks ?? [],
+                scope: activeDragTask.scope,
               }}
               crumb={crumbForTask(activeDragTask)}
               effectiveGlobalActiveTaskId={effectiveGlobalActiveTaskId}

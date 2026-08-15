@@ -2,6 +2,7 @@
 
 import { CalendarIcon, TrashIcon, UndoIcon } from "@/components/action-icons";
 import { CanvasSelect } from "@/components/canvas-select";
+import { SubtaskPopoverButton } from "@/components/subtask-popover-button";
 import {
   addDaysIsoUtc,
   formatCompletedOnDate,
@@ -11,6 +12,7 @@ import {
   type IntegrationTaskRow,
 } from "@/lib/integration-task-helpers";
 import { toggleAnyTaskCompletion } from "@/lib/actions/tasks-page";
+import type { TaskSubtask } from "@/lib/tasks-page-shared";
 import {
   useActionState,
   useEffect,
@@ -414,7 +416,7 @@ function TaskDueDateInline({
   }
 
   return (
-    <div className="mt-1">
+    <div>
       <button
         type="button"
         className="task-due-date-pill cursor-pointer"
@@ -483,6 +485,8 @@ export type TaskRowProps = {
   onLongPressCompleteLog?: (task: IntegrationTaskRow) => void;
   /** Called after a successful undo with the task id. */
   onAfterUndo?: (taskId: string) => void | Promise<void>;
+  /** Optimistic subtask list updates from the hover popover. */
+  onSubtasksChange?: (taskId: string, subtasks: TaskSubtask[]) => void;
 };
 
 export function TaskRow({
@@ -499,11 +503,15 @@ export function TaskRow({
   onAfterToggleComplete,
   onLongPressCompleteLog,
   onAfterUndo,
+  onSubtasksChange,
 }: TaskRowProps) {
   const isDone = task.status === "done";
   const isThisActiveTimer = effectiveGlobalActiveTaskId === task.id;
   const hasAnotherActiveTimer = effectiveGlobalActiveTaskId != null && !isThisActiveTimer;
   const shouldDisableStartWork = starting || hasAnotherActiveTimer;
+  const subtasks = task.subtasks ?? [];
+  const subtaskScope = task.scope === "internal" ? "internal" : "project";
+  const completedSubtaskCount = subtasks.filter((s) => s.completed).length;
 
   const [titleEdit, setTitleEdit] = useState<{ draft: string } | null>(null);
   const [titleEditError, setTitleEditError] = useState<string | null>(null);
@@ -761,23 +769,41 @@ export function TaskRow({
               </p>
             ) : null}
             {isDone ? (
-              <p className="mt-1">
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <span className="task-due-date-pill task-due-date-pill--completed">
                   {formatDateDisplay(task.due_date)}
                 </span>
-              </p>
+                {subtasks.length > 0 ? (
+                  <span className="task-due-date-pill" title="Subtasks">
+                    {completedSubtaskCount}/{subtasks.length}
+                  </span>
+                ) : null}
+              </div>
             ) : (
-              <TaskDueDateInline
-                task={task}
-                pending={dueDateSaving}
-                onSubmit={(taskId, dueDateIso) => void commitDueDateEdit(taskId, dueDateIso)}
-              />
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <TaskDueDateInline
+                  task={task}
+                  pending={dueDateSaving}
+                  onSubmit={(taskId, dueDateIso) => void commitDueDateEdit(taskId, dueDateIso)}
+                />
+                {subtasks.length > 0 ? (
+                  <span className="task-due-date-pill" title="Subtasks">
+                    {completedSubtaskCount}/{subtasks.length}
+                  </span>
+                ) : null}
+              </div>
             )}
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className={`flex items-center ${isDone ? "gap-3" : "gap-0.5"}`}>
               <div className="flex shrink-0 items-center gap-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                <SubtaskPopoverButton
+                  taskId={task.id}
+                  scope={subtaskScope}
+                  subtasks={subtasks}
+                  onSubtasksChange={(next) => onSubtasksChange?.(task.id, next)}
+                />
                 {!isDone ? (
                   <button
                     type="button"

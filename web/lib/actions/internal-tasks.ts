@@ -5,7 +5,10 @@ import {
   type ActiveWorkSessionDTO,
   type IntegrationTaskSnapshot,
 } from "@/lib/actions/integration-tasks";
+import { insertSubtasksOnCreate } from "@/lib/actions/task-subtasks";
 import { loadInternalTaskFinishContextWithSupabase } from "@/lib/internal-task-context";
+import { loadSubtasksGrouped, type SubtaskCreateInput } from "@/lib/task-subtask-data";
+import type { TaskSubtask } from "@/lib/tasks-page-shared";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -600,6 +603,7 @@ export async function createInternalTask(
     title: string;
     priority?: TaskPriority;
     due_date?: string | null;
+    subtasks?: SubtaskCreateInput[];
   },
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -662,8 +666,12 @@ export async function createInternalTask(
     internal_initiative_id: initiativeId,
   };
 
-  const { error } = await supabase.from("internal_tasks").insert(insertRow);
+  const { data: inserted, error } = await supabase.from("internal_tasks").insert(insertRow).select("id").maybeSingle();
   if (error) return { error: error.message };
+  if (!inserted?.id) return { error: "Could not create task" };
+
+  const subtaskErr = await insertSubtasksOnCreate("internal", inserted.id, payload.subtasks ?? []);
+  if (subtaskErr.error) return { error: subtaskErr.error };
 
   revalidateInternalAll(initiativeId);
   return {};
@@ -814,6 +822,8 @@ export type InternalTaskSnapshotTask = {
   priority: TaskPriority;
   completed_at: string | null;
   internal_track_kind?: "admin" | "development";
+  subtasks: TaskSubtask[];
+  scope?: "project" | "internal";
 };
 
 export type InternalTaskSnapshotWorkSession = {
@@ -912,6 +922,8 @@ export async function fetchInternalCombinedAdminDevTaskSnapshot(
       priority: t.priority as TaskPriority,
       completed_at: t.completed_at ?? null,
       internal_track_kind: tid === adminTrackId ? ("admin" as const) : ("development" as const),
+      subtasks: [],
+      scope: "internal" as const,
     };
   });
 
@@ -943,6 +955,8 @@ async function fetchInternalTaskSnapshotForParent(
     status: t.status,
     priority: t.priority as TaskPriority,
     completed_at: t.completed_at ?? null,
+    subtasks: [],
+    scope: "internal",
   }));
 
   const projectTrackId = trackId ?? initiativeId!;
@@ -956,6 +970,18 @@ async function packInternalTasksIntegrationSnapshot(
   projectTrackId: string,
 ): Promise<{ snapshot?: IntegrationTaskSnapshot; error?: string }> {
   const taskIds = tasks.map((t) => t.id);
+  if (taskIds.length > 0) {
+    const subRes = await loadSubtasksGrouped(
+      supabase,
+      "internal_task_subtasks",
+      "internal_task_id",
+      taskIds,
+    );
+    if (subRes.error) return { error: subRes.error };
+    for (const task of tasks) {
+      task.subtasks = subRes.grouped.get(task.id) ?? [];
+    }
+  }
   let workRows: InternalTaskSnapshotWorkSession[] = [];
   if (taskIds.length > 0) {
     const { data, error } = await supabase
