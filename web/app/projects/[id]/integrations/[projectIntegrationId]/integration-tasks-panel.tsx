@@ -24,6 +24,7 @@ import {
 } from "@/lib/work-session-duration";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
+import { SubtaskPopoverButton } from "@/components/subtask-popover-button";
 import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
 import { TaskQuickAdd, type TaskQuickAddInternalCreate } from "@/components/task-quick-add";
 import { TaskRow, type TaskRowCrumb } from "@/components/task-row";
@@ -1040,6 +1041,9 @@ export function TaskWorkRow({
   onSessionPersisted,
   compact = false,
   compactBadge = null,
+  subtasks = [],
+  onSubtasksChange,
+  subtaskScope = "project",
 }: {
   taskId: string;
   taskTitle: string;
@@ -1062,6 +1066,9 @@ export function TaskWorkRow({
   compact?: boolean;
   /** When set (typically with `compact`), replaces the project · integration crumb. */
   compactBadge?: ReactNode;
+  subtasks?: TaskSubtask[];
+  onSubtasksChange?: (next: TaskSubtask[]) => void;
+  subtaskScope?: "project" | "internal";
 }) {
   const [startMs, setStartMs] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -1269,7 +1276,13 @@ export function TaskWorkRow({
   );
 
   const actionButtons = (
-    <div className="flex flex-wrap items-stretch justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <SubtaskPopoverButton
+        taskId={taskId}
+        scope={subtaskScope}
+        subtasks={subtasks}
+        onSubtasksChange={(next) => onSubtasksChange?.(next)}
+      />
       <button
         type="button"
         className="btn-ghost w-[5.25rem] shrink-0 justify-center gap-1 px-2 py-1.5 text-xs font-medium leading-[1.25]"
@@ -2432,6 +2445,13 @@ export function IntegrationTasksPanel({
             onActiveSessionChange={setActiveWorkSession}
             onClose={closeWorkRow}
             onActionError={setWorkSessionActionError}
+            subtasks={t.subtasks ?? []}
+            subtaskScope={t.scope === "internal" ? "internal" : "project"}
+            onSubtasksChange={(next) => {
+              setOptimisticTasks((prev) =>
+                prev.map((row) => (row.id === t.id ? { ...row, subtasks: next } : row)),
+              );
+            }}
           />
         </li>
       );

@@ -457,6 +457,9 @@ export function TaskGroupedList({
                                 onActiveSessionChange={onActiveWorkSessionChange}
                                 onClose={onCloseWorkRow}
                                 onActionError={onWorkSessionActionError}
+                                subtasks={task.subtasks ?? []}
+                                subtaskScope={task.scope === "internal" ? "internal" : "project"}
+                                onSubtasksChange={(next) => onSubtasksChange?.(task.id, next)}
                               />
                             </li>
                           );
@@ -504,6 +507,9 @@ export function TaskGroupedList({
                             onActiveSessionChange={onActiveWorkSessionChange}
                             onClose={onCloseWorkRow}
                             onActionError={onWorkSessionActionError}
+                            subtasks={task.subtasks ?? []}
+                            subtaskScope={task.scope === "internal" ? "internal" : "project"}
+                            onSubtasksChange={(next) => onSubtasksChange?.(task.id, next)}
                           />
                         </li>
                       );

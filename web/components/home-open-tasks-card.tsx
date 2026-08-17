@@ -752,6 +752,9 @@ export function HomeOpenTasksCard({
                         compactBadge={
                           <IntegrationIdBadge meta={metaForTask(activeTaskOutsideFilter)} />
                         }
+                        subtasks={activeTaskOutsideFilter.subtasks ?? []}
+                        subtaskScope={activeTaskOutsideFilter.scope === "internal" ? "internal" : "project"}
+                        onSubtasksChange={(next) => patchTaskSubtasks(activeTaskOutsideFilter.id, next)}
                       />
                     </li>
                   ) : null}
@@ -790,6 +793,9 @@ export function HomeOpenTasksCard({
                                       onSessionPersisted={onEffortChanged}
                                       compact
                                       compactBadge={<IntegrationIdBadge meta={metaForTask(task)} />}
+                                      subtasks={task.subtasks ?? []}
+                                      subtaskScope={task.scope === "internal" ? "internal" : "project"}
+                                      onSubtasksChange={(next) => patchTaskSubtasks(task.id, next)}
                                     />
                                   </li>
                                 );

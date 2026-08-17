@@ -152,6 +152,39 @@ export async function deleteAnyTaskSubtask(
   return {};
 }
 
+export async function reorderAnyTaskSubtasks(
+  taskId: string,
+  orderedIds: string[],
+  scope?: TaskScope,
+): Promise<{ error?: string }> {
+  if (orderedIds.length === 0) return {};
+
+  const resolved = await resolveParentTable(taskId, scope);
+  if ("error" in resolved) return { error: resolved.error };
+
+  const supabase = await createClient();
+  const { spec } = resolved;
+  const { data: existing, error: existingErr } = await supabase
+    .from(spec.table)
+    .select("id")
+    .eq(spec.parentColumn, taskId);
+  if (existingErr) return { error: existingErr.message };
+
+  const existingIds = new Set((existing ?? []).map((row) => row.id as string));
+  if (orderedIds.some((id) => !existingIds.has(id))) {
+    return { error: "One or more subtasks are invalid" };
+  }
+
+  const updates = orderedIds.map((id, index) =>
+    supabase.from(spec.table).update({ sort_order: index }).eq("id", id).eq(spec.parentColumn, taskId),
+  );
+  const results = await Promise.all(updates);
+  for (const { error } of results) {
+    if (error) return { error: error.message };
+  }
+  return {};
+}
+
 export async function insertSubtasksOnCreate(
   kind: TaskScope,
   parentId: string,
