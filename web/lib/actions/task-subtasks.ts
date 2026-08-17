@@ -152,6 +152,24 @@ export async function deleteAnyTaskSubtask(
   return {};
 }
 
+export async function listAnyTaskSubtasks(
+  taskId: string,
+  scope?: TaskScope,
+): Promise<{ subtasks?: TaskSubtask[]; error?: string }> {
+  const resolved = await resolveParentTable(taskId, scope);
+  if ("error" in resolved) return { error: resolved.error };
+
+  const supabase = await createClient();
+  const { spec } = resolved;
+  const { data, error } = await supabase
+    .from(spec.table)
+    .select("id, title, completed, sort_order")
+    .eq(spec.parentColumn, taskId)
+    .order("sort_order", { ascending: true });
+  if (error) return { error: error.message };
+  return { subtasks: (data ?? []).map((row) => mapSubtaskRow(row)) };
+}
+
 export async function reorderAnyTaskSubtasks(
   taskId: string,
   orderedIds: string[],

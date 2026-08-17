@@ -28,6 +28,7 @@ import { SubtaskPopoverButton } from "@/components/subtask-popover-button";
 import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
 import { TaskQuickAdd, type TaskQuickAddInternalCreate } from "@/components/task-quick-add";
 import { TaskRow, type TaskRowCrumb } from "@/components/task-row";
+import { WorkAccomplishedField } from "@/components/work-accomplished-field";
 import {
   formatDateDisplay,
   isIntegrationTaskPastDue,
@@ -49,6 +50,7 @@ import {
   updateAnyTaskPriority,
   updateAnyTaskTitle,
 } from "@/lib/actions/tasks-page";
+import { listAnyTaskSubtasks, toggleAnyTaskSubtask } from "@/lib/actions/task-subtasks";
 import { useActionState } from "react";
 import {
   useCallback,
@@ -68,6 +70,23 @@ const dialogBaseClass =
 
 const finishModalDurationHelpText =
   "Duration uses 15-minute rounding and does not include paused time.";
+
+function sessionSubtaskScope(scope: ActiveWorkSessionDTO["scope"]): "project" | "internal" {
+  return scope === "internal" ? "internal" : "project";
+}
+
+async function persistCheckedSubtaskCompletions(
+  taskId: string,
+  subtasks: TaskSubtask[],
+  checkedIds: ReadonlySet<string>,
+  scope: "project" | "internal",
+  onSubtasksChange?: (next: TaskSubtask[]) => void,
+) {
+  const toComplete = subtasks.filter((row) => checkedIds.has(row.id) && !row.completed);
+  if (toComplete.length === 0) return;
+  await Promise.all(toComplete.map((row) => toggleAnyTaskSubtask(taskId, row.id, true, scope)));
+  onSubtasksChange?.(subtasks.map((row) => (checkedIds.has(row.id) ? { ...row, completed: true } : row)));
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -834,6 +853,8 @@ function OffListWorkSessionFinishDialog({
     activeSession.pause_started_at ? new Date(activeSession.pause_started_at).getTime() : null,
   );
   const [workAccomplished, setWorkAccomplished] = useState("");
+  const [finishSubtasks, setFinishSubtasks] = useState<TaskSubtask[]>([]);
+  const [checkedFinishSubtaskIds, setCheckedFinishSubtaskIds] = useState<Set<string>>(() => new Set());
   const [finishError, setFinishError] = useState<string | null>(null);
   const [savePending, setSavePending] = useState<"session" | "complete" | null>(null);
   const [finishDraftStartMs, setFinishDraftStartMs] = useState<number | null>(() => {
@@ -854,12 +875,23 @@ function OffListWorkSessionFinishDialog({
     setFinishDraftEndMs(null);
     setFinishEndUserEdited(false);
     setWorkAccomplished("");
+    setCheckedFinishSubtaskIds(new Set());
     setFinishError(null);
   }, [
     activeSession.started_at,
     activeSession.paused_ms_accumulated,
     activeSession.pause_started_at,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listAnyTaskSubtasks(taskId, sessionSubtaskScope(activeSession.scope)).then((res) => {
+      if (!cancelled && res.subtasks) setFinishSubtasks(res.subtasks);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, activeSession.scope]);
 
   useEffect(() => {
     if (finishDraftStartMs == null) {
@@ -913,6 +945,12 @@ function OffListWorkSessionFinishDialog({
         setFinishError(res.error);
         return;
       }
+      await persistCheckedSubtaskCompletions(
+        taskId,
+        finishSubtasks,
+        checkedFinishSubtaskIds,
+        sessionSubtaskScope(activeSession.scope),
+      );
       dialogRef.current?.close();
       notifyActiveWorkSessionChanged({ cleared: true });
       onSuccess();
@@ -978,17 +1016,14 @@ function OffListWorkSessionFinishDialog({
                 savePending={savePending !== null}
               />
             ) : null}
-            <label className="flex flex-col gap-1 text-xs" style={{ color: "var(--app-text-muted)" }}>
-              Work accomplished
-              <textarea
-                value={workAccomplished}
-                onChange={(e) => setWorkAccomplished(e.target.value)}
-                rows={3}
-                placeholder="What did you accomplish?"
-                className="input-canvas resize-y text-sm"
-                style={{ color: "var(--app-text)" }}
-              />
-            </label>
+            <WorkAccomplishedField
+              value={workAccomplished}
+              onChange={setWorkAccomplished}
+              subtasks={finishSubtasks}
+              checkedIds={checkedFinishSubtaskIds}
+              onCheckedIdsChange={setCheckedFinishSubtaskIds}
+              disabled={savePending !== null}
+            />
             {finishError ? (
               <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
                 {finishError}
@@ -1077,6 +1112,7 @@ export function TaskWorkRow({
   const discardDialogRef = useRef<HTMLDialogElement>(null);
   const finishDialogRef = useRef<HTMLDialogElement>(null);
   const [workAccomplished, setWorkAccomplished] = useState("");
+  const [checkedFinishSubtaskIds, setCheckedFinishSubtaskIds] = useState<Set<string>>(() => new Set());
   const [finishError, setFinishError] = useState<string | null>(null);
   const [savePending, setSavePending] = useState<"session" | "complete" | null>(null);
   /** Non-null while finish dialog is open (draft start/end for save). */
@@ -1189,6 +1225,7 @@ export function TaskWorkRow({
     setFinishDraftEndMs(Date.now());
     setFinishEndUserEdited(false);
     setWorkAccomplished("");
+    setCheckedFinishSubtaskIds(new Set());
     setFinishError(null);
     requestAnimationFrame(() => finishDialogRef.current?.showModal());
   }
@@ -1238,6 +1275,13 @@ export function TaskWorkRow({
         onActionError?.(res.error);
         return;
       }
+      await persistCheckedSubtaskCompletions(
+        taskId,
+        subtasks,
+        checkedFinishSubtaskIds,
+        subtaskScope,
+        onSubtasksChange,
+      );
       clearCalendarSessionCache();
       onSessionPersisted?.();
     })();
@@ -1539,17 +1583,14 @@ export function TaskWorkRow({
                   savePending={savePending !== null}
                 />
               ) : null}
-              <label className="flex flex-col gap-1 text-xs" style={{ color: "var(--app-text-muted)" }}>
-                Work accomplished
-                <textarea
-                  value={workAccomplished}
-                  onChange={(e) => setWorkAccomplished(e.target.value)}
-                  rows={3}
-                  placeholder="What did you accomplish?"
-                  className="input-canvas resize-y text-sm"
-                  style={{ color: "var(--app-text)" }}
-                />
-              </label>
+              <WorkAccomplishedField
+                value={workAccomplished}
+                onChange={setWorkAccomplished}
+                subtasks={subtasks}
+                checkedIds={checkedFinishSubtaskIds}
+                onCheckedIdsChange={setCheckedFinishSubtaskIds}
+                disabled={savePending !== null}
+              />
               {finishError ? (
                 <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
                   {finishError}
@@ -1627,6 +1668,8 @@ export function ActiveWorkSessionDialog({
   const discardDialogRef = useRef<HTMLDialogElement>(null);
   const finishDialogRef = useRef<HTMLDialogElement>(null);
   const [workAccomplished, setWorkAccomplished] = useState("");
+  const [finishSubtasks, setFinishSubtasks] = useState<TaskSubtask[]>([]);
+  const [checkedFinishSubtaskIds, setCheckedFinishSubtaskIds] = useState<Set<string>>(() => new Set());
   const [finishError, setFinishError] = useState<string | null>(null);
   const [savePending, setSavePending] = useState<"session" | "complete" | null>(null);
   const [finishDraftStartMs, setFinishDraftStartMs] = useState<number | null>(null);
@@ -1743,7 +1786,11 @@ export function ActiveWorkSessionDialog({
     setFinishDraftEndMs(Date.now());
     setFinishEndUserEdited(false);
     setWorkAccomplished("");
+    setCheckedFinishSubtaskIds(new Set());
     setFinishError(null);
+    void listAnyTaskSubtasks(taskId, sessionSubtaskScope(activeSession.scope)).then((res) => {
+      if (res.subtasks) setFinishSubtasks(res.subtasks);
+    });
     requestAnimationFrame(() => finishDialogRef.current?.showModal());
   }
 
@@ -1792,6 +1839,12 @@ export function ActiveWorkSessionDialog({
         onActionError?.(res.error);
         return;
       }
+      await persistCheckedSubtaskCompletions(
+        taskId,
+        finishSubtasks,
+        checkedFinishSubtaskIds,
+        sessionSubtaskScope(activeSession.scope),
+      );
       clearCalendarSessionCache();
     })();
   }
@@ -2016,17 +2069,14 @@ export function ActiveWorkSessionDialog({
                   savePending={savePending !== null}
                 />
               ) : null}
-              <label className="flex flex-col gap-1 text-xs" style={{ color: "var(--app-text-muted)" }}>
-                Work accomplished
-                <textarea
-                  value={workAccomplished}
-                  onChange={(e) => setWorkAccomplished(e.target.value)}
-                  rows={3}
-                  placeholder="What did you accomplish?"
-                  className="input-canvas resize-y text-sm"
-                  style={{ color: "var(--app-text)" }}
-                />
-              </label>
+              <WorkAccomplishedField
+                value={workAccomplished}
+                onChange={setWorkAccomplished}
+                subtasks={finishSubtasks}
+                checkedIds={checkedFinishSubtaskIds}
+                onCheckedIdsChange={setCheckedFinishSubtaskIds}
+                disabled={savePending !== null}
+              />
               {finishError ? (
                 <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
                   {finishError}
