@@ -487,6 +487,14 @@ export type TaskRowProps = {
   onAfterUndo?: (taskId: string) => void | Promise<void>;
   /** Optimistic subtask list updates from the hover popover. */
   onSubtasksChange?: (taskId: string, subtasks: TaskSubtask[]) => void;
+  /**
+   * Project / integration labels for the subtask popover header when `crumb` is
+   * omitted (integration page rows already show that context elsewhere).
+   */
+  taskContext?: {
+    projectName: string;
+    integrationLabel: string;
+  } | null;
 };
 
 export function TaskRow({
@@ -504,6 +512,7 @@ export function TaskRow({
   onLongPressCompleteLog,
   onAfterUndo,
   onSubtasksChange,
+  taskContext,
 }: TaskRowProps) {
   const isDone = task.status === "done";
   const isThisActiveTimer = effectiveGlobalActiveTaskId === task.id;
@@ -801,6 +810,9 @@ export function TaskRow({
                 <SubtaskPopoverButton
                   taskId={task.id}
                   scope={subtaskScope}
+                  taskTitle={task.title}
+                  projectName={crumb?.projectName ?? taskContext?.projectName}
+                  integrationLabel={crumb?.integrationLabel ?? taskContext?.integrationLabel}
                   subtasks={subtasks}
                   onSubtasksChange={(next) => onSubtasksChange?.(task.id, next)}
                 />

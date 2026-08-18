@@ -1,6 +1,7 @@
 "use client";
 
 import { TaskWorkRow } from "@/components/integration-tasks-panel";
+import { SubtaskDialogProvider } from "@/components/subtask-dialog";
 import { TaskRow, type TaskRowCrumb } from "@/components/task-row";
 import {
   DndContext,
@@ -550,6 +551,7 @@ export function TaskGroupedList({
   }
 
   return (
+    <SubtaskDialogProvider>
     <DndContext
       id={dndContextId}
       sensors={sensors}
@@ -589,5 +591,6 @@ export function TaskGroupedList({
         ) : null}
       </DragOverlay>
     </DndContext>
+    </SubtaskDialogProvider>
   );
 }

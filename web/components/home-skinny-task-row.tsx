@@ -293,6 +293,9 @@ export function HomeSkinnyTaskRow({
           <SubtaskPopoverButton
             taskId={task.id}
             scope={task.scope}
+            taskTitle={task.title}
+            projectName={meta.projectName}
+            integrationLabel={meta.detailName}
             subtasks={task.subtasks ?? []}
             onSubtasksChange={(next) => onSubtasksChange?.(task.id, next)}
           />

@@ -60,6 +60,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { SubtaskDialogProvider } from "@/components/subtask-dialog";
 import {
   useCallback,
   useEffect,
@@ -668,6 +669,7 @@ export function HomeOpenTasksCard({
   }, []);
 
   return (
+    <SubtaskDialogProvider>
     <section aria-label="Open tasks" className="flex min-h-0 flex-col">
       <div className="flex h-8 shrink-0 items-center justify-between gap-2">
         <h2 className="section-heading">Tasks</h2>
@@ -980,5 +982,6 @@ export function HomeOpenTasksCard({
         }}
       />
     </section>
+    </SubtaskDialogProvider>
   );
 }

@@ -24,6 +24,7 @@ import {
 } from "@/lib/work-session-duration";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
+import { SubtaskDialogProvider } from "@/components/subtask-dialog";
 import { SubtaskPopoverButton } from "@/components/subtask-popover-button";
 import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
 import { TaskQuickAdd, type TaskQuickAddInternalCreate } from "@/components/task-quick-add";
@@ -1324,6 +1325,9 @@ export function TaskWorkRow({
       <SubtaskPopoverButton
         taskId={taskId}
         scope={subtaskScope}
+        taskTitle={taskTitle}
+        projectName={taskCrumb?.projectName ?? finishSessionProjectLabel}
+        integrationLabel={taskCrumb?.integrationLabel ?? finishSessionIntegrationLabel}
         subtasks={subtasks}
         onSubtasksChange={(next) => onSubtasksChange?.(next)}
       />
@@ -2535,6 +2539,10 @@ export function IntegrationTasksPanel({
               prev.map((row) => (row.id === taskId ? { ...row, subtasks } : row)),
             );
           }}
+          taskContext={{
+            projectName: finishSessionProjectLabel,
+            integrationLabel: finishSessionIntegrationLabel,
+          }}
         />
       </li>
     );
@@ -2545,6 +2553,7 @@ export function IntegrationTasksPanel({
   const historyTotalLabel = formatRoundedHoursLabelFromRoundedMs(historyTotalMs);
 
   return (
+    <SubtaskDialogProvider>
     <div className={`${surface === "card" ? "card-canvas p-3" : "p-0"} flex h-full min-h-0 flex-col overflow-hidden ${className}`.trim()}>
       {activeTimerIsOnAnotherTaskList && globalActiveWorkSessionProp ? (
         <div
@@ -2916,5 +2925,6 @@ export function IntegrationTasksPanel({
         onSaved={refreshTaskSnapshotAndRoute}
       />
     </div>
+    </SubtaskDialogProvider>
   );
 }
