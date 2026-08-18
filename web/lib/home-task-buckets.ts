@@ -68,6 +68,19 @@ export function homeTaskMatchesMode(
 }
 
 /**
+ * Whether a due date still belongs anywhere on the Home tasks card
+ * (Today or This week). After a date change, prune local state with this —
+ * not the current toggle — so moving a task from today to later this week
+ * keeps it available when switching to This week.
+ */
+export function homeTaskBelongsOnCard(
+  dueDateIso: string | null,
+  todayIso: string,
+): boolean {
+  return homeTaskMatchesMode(dueDateIso, "this_week", todayIso);
+}
+
+/**
  * Build display groups for the Home open-tasks card.
  * Today: Past due (by date) + Today — each header includes the date.
  * This week: one group per due date from past-due through end of week bucket.

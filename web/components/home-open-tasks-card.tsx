@@ -33,7 +33,7 @@ import {
 import { notifyActiveWorkSessionChanged } from "@/lib/active-work-session-events";
 import {
   computeHomeTaskGroups,
-  homeTaskMatchesMode,
+  homeTaskBelongsOnCard,
   type HomeTaskDateGroup,
   type HomeTasksMode,
 } from "@/lib/home-task-buckets";
@@ -459,13 +459,13 @@ export function HomeOpenTasksCard({
         );
         return { error: res.error };
       }
-      if (!homeTaskMatchesMode(next, mode, todayIso)) {
+      if (!homeTaskBelongsOnCard(next, todayIso)) {
         setOpenTasks((prevTasks) => prevTasks.filter((t) => t.id !== taskId));
         setEditTask((prevEdit) => (prevEdit?.id === taskId ? null : prevEdit));
       }
       return {};
     },
-    [openTasks, mode, todayIso],
+    [openTasks, todayIso],
   );
 
   const saveTaskTitle = useCallback(
@@ -593,11 +593,11 @@ export function HomeOpenTasksCard({
         setWorkSessionActionError(res.error);
         return;
       }
-      if (!homeTaskMatchesMode(nextDue, mode, todayIso)) {
+      if (!homeTaskBelongsOnCard(nextDue, todayIso)) {
         setOpenTasks((prevTasks) => prevTasks.filter((t) => t.id !== taskId));
       }
     },
-    [openTasks, todayIso, mode],
+    [openTasks, todayIso],
   );
 
   function handleDragStart(event: DragStartEvent) {
