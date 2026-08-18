@@ -18,7 +18,7 @@ import {
 } from "@/lib/tasks-page-shared";
 import { subscribeCalendarSessionCacheCleared } from "@/lib/tasks-calendar-session-cache";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type Ref } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type Ref } from "react";
 
 function formatSessionTimeRange(session: TasksCalendarSession): string {
   const start = new Date(session.started_at);
@@ -72,6 +72,14 @@ function CalendarCollapseIcon({ className }: { className?: string }) {
   );
 }
 
+function TaskEffortIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden>
+      <path fill="currentColor" d="M13 2L4 14h6l-1 8 11-14h-6l1-6z" />
+    </svg>
+  );
+}
+
 /** Today's effort agenda — height matches the left dashboard stack when `heightPx` is set. */
 export function HomeDayAgendaCard({
   todayIso,
@@ -102,8 +110,25 @@ export function HomeDayAgendaCard({
   const [sessions, setSessions] = useState<TasksCalendarSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editSession, setEditSession] = useState<TasksCalendarSession | null>(null);
   const [cacheClearTick, setCacheClearTick] = useState(0);
+
+  const closeEntryDialog = useCallback(() => {
+    setDialogOpen(false);
+    setEditSession(null);
+  }, []);
+
+  const openCreateDialog = useCallback(() => {
+    setEditSession(null);
+    setDialogOpen(true);
+  }, []);
+
+  const openEditDialog = useCallback((session: TasksCalendarSession) => {
+    if (session.source !== "manual") return;
+    setEditSession(session);
+    setDialogOpen(true);
+  }, []);
 
   const loadDay = useCallback(async (ymd: string) => {
     setLoading(true);
@@ -202,6 +227,8 @@ export function HomeDayAgendaCard({
                 {sessions.map((s) => {
                   const colorVar = s.colorMeta?.colorVar ?? null;
                   const typeLabel = sessionTypeLabel(s);
+                  const isWorkSession = s.source === "task_work_session";
+                  const isManual = s.source === "manual";
                   const abbr =
                     s.project_id === TASKS_PAGE_INTERNAL_PROJECT_ID
                       ? "INT"
@@ -214,21 +241,27 @@ export function HomeDayAgendaCard({
                   ]
                     .filter(Boolean)
                     .join(" · ");
-                  return (
-                    <li
-                      key={s.source_id}
-                      className="rounded-[8px] border px-2 py-1"
-                      style={{
-                        borderColor: "var(--app-border)",
-                        background: colorVar
-                          ? `color-mix(in oklab, var(${colorVar}) 10%, var(--app-surface))`
-                          : "var(--app-surface)",
-                      }}
-                    >
+                  const titleText = s.title || "Untitled";
+                  const rowLabel = isWorkSession
+                    ? `${titleText}. Logged from a work session`
+                    : isManual
+                      ? `Edit ${titleText}`
+                      : titleText;
+                  const rowStyle = {
+                    borderColor: "var(--app-border)",
+                    "--row-bg": colorVar
+                      ? `color-mix(in oklab, var(${colorVar}) 10%, var(--app-surface))`
+                      : "var(--app-surface)",
+                    "--row-bg-hover": colorVar
+                      ? `color-mix(in oklab, var(${colorVar}) 16%, var(--app-surface))`
+                      : "var(--app-surface-alt)",
+                  } as CSSProperties;
+                  const rowInner = (
+                    <>
                       <div className="flex min-w-0 items-center justify-between gap-2">
-                        <p className="min-w-0 truncate text-[11px] tabular-nums text-muted-canvas">
+                        <span className="min-w-0 truncate text-[11px] tabular-nums text-muted-canvas">
                           {timeLine}
-                        </p>
+                        </span>
                         <span
                           className="inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium"
                           style={{
@@ -241,20 +274,50 @@ export function HomeDayAgendaCard({
                         </span>
                       </div>
                       <div className="mt-0.5 flex min-w-0 items-center justify-between gap-2">
-                        <p
-                          className="min-w-0 flex-1 truncate text-sm font-medium"
+                        <span
+                          className="flex min-w-0 flex-1 items-center gap-1 text-sm font-medium"
                           style={{ color: "var(--app-text)" }}
-                          title={s.title}
+                          title={isWorkSession ? `${titleText} · Logged from a work session` : titleText}
                         >
-                          {s.title || "Untitled"}
-                        </p>
-                        <p
+                          {isWorkSession ? (
+                            <span
+                              className="inline-flex shrink-0"
+                              style={{
+                                color: "color-mix(in oklab, var(--app-action) 75%, var(--app-text) 25%)",
+                              }}
+                              aria-hidden
+                            >
+                              <TaskEffortIcon size={12} />
+                            </span>
+                          ) : null}
+                          <span className="min-w-0 truncate">{titleText}</span>
+                        </span>
+                        <span
                           className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-canvas"
                           title={s.project_name || undefined}
                         >
                           {abbr}
-                        </p>
+                        </span>
                       </div>
+                    </>
+                  );
+                  return (
+                    <li key={s.source_id}>
+                      {isManual ? (
+                        <button
+                          type="button"
+                          className="w-full cursor-pointer rounded-[8px] border bg-[var(--row-bg)] px-2 py-1 text-left transition-colors hover:bg-[var(--row-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+                          style={rowStyle}
+                          aria-label={rowLabel}
+                          onClick={() => openEditDialog(s)}
+                        >
+                          {rowInner}
+                        </button>
+                      ) : (
+                        <div className="rounded-[8px] border bg-[var(--row-bg)] px-2 py-1" style={rowStyle} title={rowLabel}>
+                          {rowInner}
+                        </div>
+                      )}
                     </li>
                   );
                 })}
@@ -266,18 +329,18 @@ export function HomeDayAgendaCard({
         <HomeCardFab
           className="absolute bottom-3 right-3 z-10"
           aria-label="Add calendar entry"
-          onClick={() => setCreateOpen(true)}
+          onClick={openCreateDialog}
         />
       </div>
 
       <HomeCalendarEntryDialog
-        open={createOpen}
+        open={dialogOpen}
         todayIso={todayIso}
         projects={projects}
         tracks={tracks}
-        onClose={() => setCreateOpen(false)}
+        editSession={editSession}
+        onClose={closeEntryDialog}
         onCreated={async () => {
-          setCreateOpen(false);
           await loadDay(todayIso);
           onCalendarEntryCreated?.();
         }}
