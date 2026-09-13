@@ -28,8 +28,7 @@ export async function loadWorkForecastTrackActuals(
   const { data: projectRows, error: projErr } = await supabase
     .from("projects")
     .select("id")
-    .eq("owner_id", ownerId)
-    .is("completed_at", null);
+    .eq("owner_id", ownerId);
 
   if (projErr) {
     console.error("[work-forecast-track-actuals] projects load failed", projErr);

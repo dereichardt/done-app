@@ -1466,6 +1466,8 @@ export async function completeProject(
   revalidatePath("/projects");
   revalidatePath(`/projects/${projectId}`);
   revalidatePath(`/projects/${projectId}/integrations`);
+  revalidatePath("/utilization");
+  revalidatePath("/home");
   return {};
 }
 
@@ -1495,6 +1497,8 @@ export async function reopenProject(projectId: string): Promise<{ error?: string
 
   revalidatePath("/projects");
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/utilization");
+  revalidatePath("/home");
   return {};
 }
 

@@ -18,21 +18,6 @@ export default async function TimesheetPage() {
     );
   }
 
-  if (snapshot.projects.length === 0) {
-    return (
-      <div>
-        <h1 className="heading-page">Timesheet</h1>
-        <p className="subheading-page mt-2">
-          You don&apos;t have any active projects yet. Create a project to start tracking time here, or use{" "}
-          <a href="/internal" className="font-medium hover:underline" style={{ color: "var(--app-action)" }}>
-            Internal
-          </a>{" "}
-          for Admin, Development, and initiative work.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <Suspense>
       <TimesheetPageClient initialSnapshot={snapshot} />

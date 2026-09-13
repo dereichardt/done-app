@@ -396,8 +396,8 @@ async function appendInternalTrackManualCalendarSessions(
 }
 
 /**
- * Load all work sessions and manual effort entries across the user's active projects
- * for a given wall-clock window [startIso, endExclusiveIso).
+ * Load all work sessions and manual effort entries across the user's projects
+ * (including completed) for a given wall-clock window [startIso, endExclusiveIso).
  *
  * Includes project color metadata so the Tasks calendar can tint blocks by project.
  */
@@ -410,12 +410,11 @@ export async function loadTasksCalendarSessions(
   if (!user) return { error: "Not signed in" };
   const supabase = await createClient();
 
-  // 1. Active projects
+  // 1. Owner projects (completed included so historical actuals stay visible)
   const { data: projectRows, error: projectErr } = await supabase
     .from("projects")
     .select("id, customer_name, project_color_key")
-    .eq("owner_id", user.id)
-    .is("completed_at", null);
+    .eq("owner_id", user.id);
   if (projectErr) return { error: projectErr.message };
 
   const sessions: TasksCalendarSession[] = [];

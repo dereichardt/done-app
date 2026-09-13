@@ -1,6 +1,8 @@
 /**
  * Utilization quarter loader: target vs actuals vs forecast across Sunday weeks.
- * Scope: all active projects + ICP initiatives (forecast flag not required for attainment).
+ * Scope: all owner projects + ICP initiatives (including completed). Forecast flag is
+ * not required for attainment. Completed work keeps actuals and past/current-week
+ * forecast; future-week forecast from completed work is excluded.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -33,6 +35,59 @@ import {
 } from "@/lib/time-off";
 import { sundayWeekWindowFromAnchorYmd } from "@/lib/timesheet-week";
 import { DEFAULT_WEEKLY_CAPACITY_HOURS } from "@/lib/user-preferences";
+
+/** Completed work keeps past and current-week forecast for historical comparison. */
+export function includeCompletedWorkForecastHours(
+  completedAt: string | null | undefined,
+  weekRelative: "past" | "current" | "future",
+): boolean {
+  if (!completedAt) return true;
+  return weekRelative !== "future";
+}
+
+type SupabaseLikeError = {
+  message?: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+  name?: string;
+};
+
+function formatSupabaseError(error: unknown): string {
+  if (error == null) return "";
+  if (typeof error !== "object") return String(error);
+  const e = error as SupabaseLikeError;
+  const parts = [e.name, e.message, e.code, e.details, e.hint].filter(
+    (part) => typeof part === "string" && part.trim().length > 0,
+  );
+  return parts.join(" | ");
+}
+
+function isRetryableSupabaseError(error: unknown): boolean {
+  const text = formatSupabaseError(error).toLowerCase();
+  return text.length === 0 || text.includes("abort") || text.includes("fetcherror");
+}
+
+function logUtilizationError(label: string, error: unknown) {
+  if (isRetryableSupabaseError(error)) return;
+  const message = formatSupabaseError(error);
+  if (message) console.error(`[utilization] ${label}`, message);
+}
+
+async function queryWithRetry<T>(
+  label: string,
+  run: () => PromiseLike<{ data: T | null; error: unknown }>,
+): Promise<T | null> {
+  let { data, error } = await run();
+  if (error && data == null && isRetryableSupabaseError(error)) {
+    ({ data, error } = await run());
+  }
+  if (error && data == null) {
+    logUtilizationError(label, error);
+    return null;
+  }
+  return data;
+}
 
 export type UtilizationInsightStatus =
   | "on_track"
@@ -404,22 +459,21 @@ async function loadProjectWeekHours(
   quarterStart: Date,
   quarterEndExclusive: Date,
   weekFractions: Map<string, number>,
+  todayYmd: string,
 ): Promise<{ actualByWeek: Map<string, number>; forecastByWeek: Map<string, number> }> {
   const actualByWeek = new Map<string, number>(weeks.map((w) => [w, 0]));
   const forecastByWeek = new Map<string, number>(weeks.map((w) => [w, 0]));
 
-  const { data: projectRows, error: projErr } = await supabase
-    .from("projects")
-    .select("id")
-    .eq("owner_id", ownerId)
-    .is("completed_at", null);
+  const projectRows = await queryWithRetry<Array<{ id: string; completed_at: string | null }>>(
+    "projects load failed",
+    () => supabase.from("projects").select("id, completed_at").eq("owner_id", ownerId),
+  );
+  if (!projectRows) return { actualByWeek, forecastByWeek };
 
-  if (projErr) {
-    console.error("[utilization] projects load failed", projErr);
-    return { actualByWeek, forecastByWeek };
-  }
-
-  const projectIds = (projectRows ?? []).map((p) => p.id as string);
+  const projectIds = projectRows.map((p) => p.id);
+  const completedAtByProjectId = new Map(
+    projectRows.map((p) => [p.id, p.completed_at ?? null]),
+  );
   if (projectIds.length === 0) return { actualByWeek, forecastByWeek };
 
   const { data: trackRows } = await supabase
@@ -467,13 +521,22 @@ async function loadProjectWeekHours(
   ]);
 
   if (forecastRes.error) {
-    console.error("[utilization] project forecast load failed", forecastRes.error);
+    logUtilizationError("project forecast load failed", forecastRes.error);
   }
   for (const row of forecastRes.data ?? []) {
     const week = String(row.week_start_date).slice(0, 10);
     if (!forecastByWeek.has(week)) continue;
     const fraction = weekFractions.get(week) ?? 0;
     if (fraction <= 0) continue;
+    const relative = weekRelativeToToday(week, todayYmd);
+    if (
+      !includeCompletedWorkForecastHours(
+        completedAtByProjectId.get(row.project_id as string),
+        relative,
+      )
+    ) {
+      continue;
+    }
     const hours = Math.max(0, Number(row.hours) || 0) * fraction;
     forecastByWeek.set(week, (forecastByWeek.get(week) ?? 0) + hours);
   }
@@ -552,23 +615,26 @@ async function loadIcpInitiativeWeekHours(
   quarterStart: Date,
   quarterEndExclusive: Date,
   weekFractions: Map<string, number>,
+  todayYmd: string,
 ): Promise<{ actualByWeek: Map<string, number>; forecastByWeek: Map<string, number> }> {
   const actualByWeek = new Map<string, number>(weeks.map((w) => [w, 0]));
   const forecastByWeek = new Map<string, number>(weeks.map((w) => [w, 0]));
 
-  const { data: initiatives, error } = await supabase
-    .from("internal_initiatives")
-    .select("id")
-    .eq("owner_id", ownerId)
-    .eq("icp", true)
-    .is("completed_at", null);
+  const initiatives = await queryWithRetry<Array<{ id: string; completed_at: string | null }>>(
+    "ICP initiatives load failed",
+    () =>
+      supabase
+        .from("internal_initiatives")
+        .select("id, completed_at")
+        .eq("owner_id", ownerId)
+        .eq("icp", true),
+  );
+  if (!initiatives) return { actualByWeek, forecastByWeek };
 
-  if (error) {
-    console.error("[utilization] ICP initiatives load failed", error);
-    return { actualByWeek, forecastByWeek };
-  }
-
-  const initiativeIds = (initiatives ?? []).map((row) => row.id as string);
+  const initiativeIds = initiatives.map((row) => row.id);
+  const completedAtByInitiativeId = new Map(
+    initiatives.map((row) => [row.id, row.completed_at ?? null]),
+  );
   if (initiativeIds.length === 0) return { actualByWeek, forecastByWeek };
 
   const { data: tasks } = await supabase
@@ -611,13 +677,22 @@ async function loadIcpInitiativeWeekHours(
   ]);
 
   if (forecastRes.error) {
-    console.error("[utilization] initiative forecast load failed", forecastRes.error);
+    logUtilizationError("initiative forecast load failed", forecastRes.error);
   }
   for (const row of forecastRes.data ?? []) {
     const week = String(row.week_start_date).slice(0, 10);
     if (!forecastByWeek.has(week)) continue;
     const fraction = weekFractions.get(week) ?? 0;
     if (fraction <= 0) continue;
+    const relative = weekRelativeToToday(week, todayYmd);
+    if (
+      !includeCompletedWorkForecastHours(
+        completedAtByInitiativeId.get(row.initiative_id as string),
+        relative,
+      )
+    ) {
+      continue;
+    }
     const hours = Math.max(0, Number(row.hours) || 0) * fraction;
     forecastByWeek.set(week, (forecastByWeek.get(week) ?? 0) + hours);
   }
@@ -743,21 +818,20 @@ async function loadTimeOffDays(
   startYmd: string,
   endExclusiveYmd: string,
 ): Promise<TimeOffDay[]> {
-  const { data, error } = await supabase
-    .from("time_off_days")
-    .select("day_date, off_type, other_label")
-    .eq("owner_id", ownerId)
-    .gte("day_date", startYmd)
-    .lt("day_date", endExclusiveYmd)
-    .order("day_date", { ascending: true });
-
-  if (error) {
-    console.error("[utilization] time off load failed", error);
-    return [];
-  }
+  const rows = await queryWithRetry<
+    Array<{ day_date: string; off_type: string; other_label: string | null }>
+  >("time off load failed", () =>
+    supabase
+      .from("time_off_days")
+      .select("day_date, off_type, other_label")
+      .eq("owner_id", ownerId)
+      .gte("day_date", startYmd)
+      .lt("day_date", endExclusiveYmd)
+      .order("day_date", { ascending: true }),
+  );
 
   const out: TimeOffDay[] = [];
-  for (const row of data ?? []) {
+  for (const row of rows ?? []) {
     const dayYmd = String(row.day_date).slice(0, 10);
     if (!isTimeOffType(row.off_type)) continue;
     out.push({
@@ -802,13 +876,6 @@ export async function loadUtilizationQuarter(
   const windowStartYmd = identity.quarterStartYmd;
   const windowEndExclusiveYmd = identity.endExclusiveYmd;
 
-  const timeOffPromise = loadTimeOffDays(
-    supabase,
-    ownerId,
-    windowStartYmd,
-    windowEndExclusiveYmd,
-  );
-
   // Build week fractions first so forecast proration is correct.
   const weekFractions = new Map<string, number>();
   for (const w of weeksYmcs) {
@@ -816,38 +883,43 @@ export async function loadUtilizationQuarter(
     weekFractions.set(w, overlap.fraction);
   }
 
-  const [targetRes, projectHours, initiativeHours, timeOffDays] = await Promise.all([
-    supabase
-      .from("utilization_quarter_targets")
-      .select("target_hours")
-      .eq("owner_id", ownerId)
-      .eq("quarter_start_date", identity.quarterStartYmd)
-      .maybeSingle(),
-    loadProjectWeekHours(
-      supabase,
-      ownerId,
-      weeksYmcs,
-      windowStartYmd,
-      windowEndExclusiveYmd,
-      identity.start,
-      identity.endExclusive,
-      weekFractions,
-    ),
-    loadIcpInitiativeWeekHours(
-      supabase,
-      ownerId,
-      weeksYmcs,
-      windowStartYmd,
-      windowEndExclusiveYmd,
-      identity.start,
-      identity.endExclusive,
-      weekFractions,
-    ),
-    timeOffPromise,
-  ]);
+  const targetRes = await supabase
+    .from("utilization_quarter_targets")
+    .select("target_hours")
+    .eq("owner_id", ownerId)
+    .eq("quarter_start_date", identity.quarterStartYmd)
+    .maybeSingle();
+  const projectHours = await loadProjectWeekHours(
+    supabase,
+    ownerId,
+    weeksYmcs,
+    windowStartYmd,
+    windowEndExclusiveYmd,
+    identity.start,
+    identity.endExclusive,
+    weekFractions,
+    todayYmd,
+  );
+  const initiativeHours = await loadIcpInitiativeWeekHours(
+    supabase,
+    ownerId,
+    weeksYmcs,
+    windowStartYmd,
+    windowEndExclusiveYmd,
+    identity.start,
+    identity.endExclusive,
+    weekFractions,
+    todayYmd,
+  );
+  const timeOffDays = await loadTimeOffDays(
+    supabase,
+    ownerId,
+    windowStartYmd,
+    windowEndExclusiveYmd,
+  );
 
   if (targetRes.error) {
-    console.error("[utilization] target load failed", targetRes.error);
+    logUtilizationError("target load failed", targetRes.error);
   }
 
   const timeOffYmds = new Set(timeOffDays.map((d) => d.dayYmd));

@@ -149,6 +149,26 @@ export function sumForecastItemsForWeek(
   return sumTotals(items.map((item) => item.byWeek[week] ?? makeWeekTotals(0, 0)));
 }
 
+/** True when a completed item still has actual or forecast hours in the lookback. */
+export function forecastItemHasLookbackHours(
+  item: HomeActualsVsForecastProject,
+  weeks: string[],
+): boolean {
+  return weeks.some((week) => {
+    const totals = item.byWeek[week];
+    return Boolean(totals && (totals.actual > 0 || totals.forecast > 0));
+  });
+}
+
+function keepPortfolioForecastItem(
+  item: HomeActualsVsForecastProject,
+  weeks: string[],
+  completed: boolean,
+): boolean {
+  if (!completed) return true;
+  return forecastItemHasLookbackHours(item, weeks);
+}
+
 async function loadHomeInitiativeRows(
   supabase: SupabaseClient,
   ownerId: string,
@@ -158,10 +178,9 @@ async function loadHomeInitiativeRows(
 ): Promise<HomeActualsVsForecastProject[]> {
   const { data: initiatives, error } = await supabase
     .from("internal_initiatives")
-    .select("id, title, icp")
+    .select("id, title, icp, completed_at")
     .eq("owner_id", ownerId)
     .eq("include_in_forecast", true)
-    .is("completed_at", null)
     .order("starts_on", { ascending: true });
   if (error || !initiatives?.length) {
     if (error) console.error("[home-actuals-vs-forecast] initiatives load failed", error);
@@ -256,23 +275,27 @@ async function loadHomeInitiativeRows(
     addSession(row.internal_initiative_id, row, "manual");
   }
 
-  return initiatives.map((initiative) => {
-    const byWeek = emptyByWeek(weeks);
-    const sessions = sessionsByInitiative.get(initiative.id) ?? [];
-    for (const week of weeks) {
-      byWeek[week] = makeWeekTotals(
-        forecastByItemWeek.get(`${initiative.id}|${week}`) ?? 0,
-        hoursForSundayWeek(sessions, week),
-      );
-    }
-    return {
-      id: initiative.id,
-      name: String(initiative.title ?? "").trim() || "Untitled initiative",
-      kind: "initiative" as const,
-      isIcp: Boolean(initiative.icp),
-      byWeek,
-    };
-  });
+  return initiatives
+    .map((initiative) => {
+      const byWeek = emptyByWeek(weeks);
+      const sessions = sessionsByInitiative.get(initiative.id) ?? [];
+      for (const week of weeks) {
+        byWeek[week] = makeWeekTotals(
+          forecastByItemWeek.get(`${initiative.id}|${week}`) ?? 0,
+          hoursForSundayWeek(sessions, week),
+        );
+      }
+      return {
+        id: initiative.id,
+        name: String(initiative.title ?? "").trim() || "Untitled initiative",
+        kind: "initiative" as const,
+        isIcp: Boolean(initiative.icp),
+        byWeek,
+        completed: initiative.completed_at != null,
+      };
+    })
+    .filter((row) => keepPortfolioForecastItem(row, weeks, row.completed))
+    .map(({ completed: _completed, ...item }) => item);
 }
 
 export async function loadHomeActualsVsForecast(
@@ -298,14 +321,13 @@ export async function loadHomeActualsVsForecast(
 
   let projectQuery = supabase
     .from("projects")
-    .select("id, customer_name")
+    .select("id, customer_name, completed_at")
     .eq("owner_id", ownerId);
 
   if (onlyProjectId) {
     projectQuery = projectQuery.eq("id", onlyProjectId);
   } else {
     projectQuery = projectQuery
-      .is("completed_at", null)
       .order("active_dashboard_order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false });
   }
@@ -320,6 +342,7 @@ export async function loadHomeActualsVsForecast(
   const projects = (projectRows ?? []).map((p) => ({
     id: p.id as string,
     name: String(p.customer_name ?? "").trim() || "Untitled project",
+    completed: p.completed_at != null,
   }));
 
   if (projects.length === 0) {
@@ -465,16 +488,26 @@ export async function loadHomeActualsVsForecast(
     });
   }
 
-  const resultProjects: HomeActualsVsForecastProject[] = projects.map((p) => {
-    const byWeek = emptyByWeek(weeks);
-    const sessions = sessionsByProject.get(p.id) ?? [];
-    for (const week of weeks) {
-      const forecast = forecastByProjectWeek.get(`${p.id}|${week}`) ?? 0;
-      const actual = hoursForSundayWeek(sessions, week);
-      byWeek[week] = makeWeekTotals(forecast, actual);
-    }
-    return { id: p.id, name: p.name, kind: "project" as const, isIcp: false, byWeek };
-  });
+  const resultProjects: HomeActualsVsForecastProject[] = projects
+    .map((p) => {
+      const byWeek = emptyByWeek(weeks);
+      const sessions = sessionsByProject.get(p.id) ?? [];
+      for (const week of weeks) {
+        const forecast = forecastByProjectWeek.get(`${p.id}|${week}`) ?? 0;
+        const actual = hoursForSundayWeek(sessions, week);
+        byWeek[week] = makeWeekTotals(forecast, actual);
+      }
+      return {
+        id: p.id,
+        name: p.name,
+        kind: "project" as const,
+        isIcp: false,
+        byWeek,
+        completed: p.completed,
+      };
+    })
+    .filter((row) => onlyProjectId || keepPortfolioForecastItem(row, weeks, row.completed))
+    .map(({ completed: _completed, ...item }) => item);
 
   if (!onlyProjectId) {
     resultProjects.push(

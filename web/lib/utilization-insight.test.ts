@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   blendedQuarterProjection,
   buildInsight,
+  includeCompletedWorkForecastHours,
   quarterPulseMetrics,
   type UtilizationWeekRow,
 } from "@/lib/utilization-data";
@@ -19,6 +20,21 @@ function week(
     ...partial,
   };
 }
+
+describe("includeCompletedWorkForecastHours", () => {
+  it("keeps all forecast weeks for active work", () => {
+    expect(includeCompletedWorkForecastHours(null, "past")).toBe(true);
+    expect(includeCompletedWorkForecastHours(null, "current")).toBe(true);
+    expect(includeCompletedWorkForecastHours(undefined, "future")).toBe(true);
+  });
+
+  it("keeps past and current forecast for completed work, not future", () => {
+    const completedAt = "2026-08-05T12:00:00.000Z";
+    expect(includeCompletedWorkForecastHours(completedAt, "past")).toBe(true);
+    expect(includeCompletedWorkForecastHours(completedAt, "current")).toBe(true);
+    expect(includeCompletedWorkForecastHours(completedAt, "future")).toBe(false);
+  });
+});
 
 describe("blendedQuarterProjection", () => {
   it("on Monday morning keeps the full current-week forecast (today not burned)", () => {
