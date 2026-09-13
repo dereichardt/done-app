@@ -826,6 +826,39 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   animation: active-work-session-indicator-live 2s infinite;
 }
 
+@keyframes active-work-session-indicator-live-dark {
+  0% {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--app-cta-dark-fg) 48%, transparent);
+    animation-timing-function: ease-out;
+  }
+  35% {
+    box-shadow: 0 0 0 10px transparent;
+    animation-timing-function: linear;
+  }
+  35.1%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes active-work-session-bolt-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.active-work-session-indicator--live-dark {
+  animation: active-work-session-indicator-live-dark 2s infinite;
+}
+
+.active-work-session-indicator--live-dark svg {
+  animation: active-work-session-bolt-pulse 2s var(--easing-standard) infinite;
+}
+
 @keyframes active-work-session-banner-live {
   0%,
   100% {
@@ -847,6 +880,14 @@ span.nav-item.nav-item-placeholder:hover .nav-icon-slot {
   }
 
   .active-work-session-indicator--live {
+    animation: none;
+  }
+
+  .active-work-session-indicator--live-dark {
+    animation: none;
+  }
+
+  .active-work-session-indicator--live-dark svg {
     animation: none;
   }
 

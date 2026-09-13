@@ -2,10 +2,9 @@
 
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { HomeCardFab } from "@/components/home-card-fab";
-import { TaskWorkRow } from "@/components/integration-tasks-panel";
+import { TaskWorkRow, type CompactWorkSessionContext } from "@/components/integration-tasks-panel";
 import {
   HomeSkinnyTaskRow,
-  IntegrationIdBadge,
   type HomeSkinnyTaskMeta,
 } from "@/components/home-skinny-task-row";
 import { HomeEditTaskDialog } from "@/components/home-edit-task-dialog";
@@ -23,6 +22,7 @@ import {
 } from "@/lib/actions/integration-tasks";
 import { startOrReplaceInternalActiveWorkSession } from "@/lib/actions/internal-tasks";
 import {
+  deleteAnyTask,
   reorderTaskWithinGroup,
   rescheduleTaskByDrag,
   toggleAnyTaskCompletion,
@@ -315,6 +315,36 @@ export function HomeOpenTasksCard({
     [crumbForTask, integrationById, projectById],
   );
 
+  const compactContextForTask = useCallback(
+    (task: TasksPageTask): CompactWorkSessionContext => {
+      const crumb = crumbForTask(task);
+      if (task.scope === "internal") {
+        return {
+          projectAbbreviation: internalAbbreviation(task),
+          projectName: "Internal",
+          projectColorVar: null,
+          href: crumb.href,
+          integrationIdOrLabel: task.internal_context_label,
+        };
+      }
+      const project = projectById.get(task.project_id);
+      const integration =
+        task.project_integration_id != null
+          ? integrationById.get(task.project_integration_id)
+          : undefined;
+      const integrationCode = (integration?.integrationCode ?? "").trim();
+      return {
+        projectAbbreviation:
+          project?.abbreviation || deriveProjectAbbreviation(project?.name ?? "") || "PRJ",
+        projectName: crumb.projectName,
+        projectColorVar: project?.colorVar ?? null,
+        href: crumb.href,
+        integrationIdOrLabel: integrationCode || crumb.integrationLabel,
+      };
+    },
+    [crumbForTask, integrationById, projectById],
+  );
+
   const groups = useMemo(
     () => computeHomeTaskGroups({ openTasks, todayIso, mode }),
     [openTasks, todayIso, mode],
@@ -394,6 +424,22 @@ export function HomeOpenTasksCard({
       }
     },
     [activeWorkSession?.task_id, expandedWorkTaskId, markTaskCompletedLocally],
+  );
+
+  const deleteEditedTask = useCallback(
+    async (task: TasksPageTask) => {
+      const res = await deleteAnyTask(task.id, task.scope);
+      if (res?.error) return { error: res.error };
+      setOpenTasks((prev) => prev.filter((t) => t.id !== task.id));
+      if (activeWorkSession?.task_id === task.id || expandedWorkTaskId === task.id) {
+        closeWorkRow({ refresh: false });
+      }
+      setEditTask(null);
+      clearCalendarSessionCache();
+      router.refresh();
+      return {};
+    },
+    [activeWorkSession?.task_id, closeWorkRow, expandedWorkTaskId, router],
   );
 
   const startWorkOnTask = useCallback(
@@ -745,15 +791,14 @@ export function HomeOpenTasksCard({
                         taskTitle={activeTaskOutsideFilter.title}
                         finishSessionIntegrationLabel={crumbForTask(activeTaskOutsideFilter).integrationLabel}
                         finishSessionProjectLabel={crumbForTask(activeTaskOutsideFilter).projectName}
+                        taskCrumb={crumbForTask(activeTaskOutsideFilter)}
+                        compactContext={compactContextForTask(activeTaskOutsideFilter)}
                         activeSession={activeWorkSession}
                         onActiveSessionChange={setActiveWorkSession}
                         onClose={closeWorkRow}
                         onActionError={setWorkSessionActionError}
                         onSessionPersisted={onEffortChanged}
                         compact
-                        compactBadge={
-                          <IntegrationIdBadge meta={metaForTask(activeTaskOutsideFilter)} />
-                        }
                         subtasks={activeTaskOutsideFilter.subtasks ?? []}
                         subtaskScope={activeTaskOutsideFilter.scope === "internal" ? "internal" : "project"}
                         onSubtasksChange={(next) => patchTaskSubtasks(activeTaskOutsideFilter.id, next)}
@@ -788,13 +833,14 @@ export function HomeOpenTasksCard({
                                       taskTitle={task.title}
                                       finishSessionIntegrationLabel={crumb.integrationLabel}
                                       finishSessionProjectLabel={crumb.projectName}
+                                      taskCrumb={crumb}
+                                      compactContext={compactContextForTask(task)}
                                       activeSession={activeWorkSession}
                                       onActiveSessionChange={setActiveWorkSession}
                                       onClose={closeWorkRow}
                                       onActionError={setWorkSessionActionError}
                                       onSessionPersisted={onEffortChanged}
                                       compact
-                                      compactBadge={<IntegrationIdBadge meta={metaForTask(task)} />}
                                       subtasks={task.subtasks ?? []}
                                       subtaskScope={task.scope === "internal" ? "internal" : "project"}
                                       onSubtasksChange={(next) => patchTaskSubtasks(task.id, next)}
@@ -942,6 +988,7 @@ export function HomeOpenTasksCard({
         onSavePriority={saveTaskPriority}
         onSaveDueDate={saveTaskDueDate}
         onSubtasksChange={patchTaskSubtasks}
+        onDelete={deleteEditedTask}
       />
 
       <TaskOnlyManualLogDialog

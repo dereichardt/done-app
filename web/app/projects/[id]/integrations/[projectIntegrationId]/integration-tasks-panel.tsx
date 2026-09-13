@@ -22,6 +22,7 @@ import {
   roundedMsToDurationHours,
   totalPausedMsForDisplay,
 } from "@/lib/work-session-duration";
+import { EllipsisVerticalIcon, TrashIcon } from "@/components/action-icons";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { SubtaskDialogProvider } from "@/components/subtask-dialog";
@@ -61,7 +62,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   type RefObject,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -481,6 +481,383 @@ function WorkSessionStartedAtMiniCard({
     </div>
   );
 }
+
+function positionFixedPopover(
+  trigger: HTMLElement,
+  popover: HTMLElement,
+  align: "start" | "end" = "start",
+) {
+  const margin = 8;
+  const gap = 6;
+  const triggerRect = trigger.getBoundingClientRect();
+  const popoverRect = popover.getBoundingClientRect();
+  let left = align === "end" ? triggerRect.right - popoverRect.width : triggerRect.left;
+  left = Math.min(window.innerWidth - popoverRect.width - margin, Math.max(margin, left));
+  const top =
+    triggerRect.bottom + gap + popoverRect.height <= window.innerHeight - margin
+      ? triggerRect.bottom + gap
+      : Math.max(margin, triggerRect.top - popoverRect.height - gap);
+  popover.style.position = "fixed";
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+}
+
+const compactSessionIconButtonClass =
+  "inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border transition-colors hover:bg-[var(--app-surface-alt)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]";
+
+function CompactSessionCheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={14} height={14} aria-hidden className="shrink-0">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20 6 9 17l-5-5"
+      />
+    </svg>
+  );
+}
+
+function CompactSessionCloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width={14} height={14} aria-hidden className="shrink-0">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+        d="M4 4l8 8M12 4l-8 8"
+      />
+    </svg>
+  );
+}
+
+function CompactSessionOverflowMenu({
+  isPaused,
+  onPause,
+  onDiscard,
+}: {
+  isPaused: boolean;
+  onPause: () => void;
+  onDiscard: () => void;
+}) {
+  const popoverId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  const positionPopover = useCallback(() => {
+    const trigger = triggerRef.current;
+    const popover = popoverRef.current;
+    if (!trigger || !popover || !popover.matches(":popover-open")) return;
+    positionFixedPopover(trigger, popover, "end");
+  }, []);
+
+  useEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+    function onToggle(e: Event) {
+      const toggle = e as ToggleEvent;
+      if (toggle.newState === "open") {
+        requestAnimationFrame(() => {
+          positionPopover();
+          requestAnimationFrame(positionPopover);
+        });
+      }
+    }
+    el.addEventListener("toggle", onToggle);
+    return () => el.removeEventListener("toggle", onToggle);
+  }, [positionPopover]);
+
+  function hideMenu() {
+    const popover = popoverRef.current;
+    if (popover?.matches(":popover-open")) {
+      try {
+        popover.hidePopover();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={compactSessionIconButtonClass}
+        style={{
+          borderColor: "var(--app-border)",
+          background: "var(--app-surface)",
+          color: "var(--app-text)",
+        }}
+        popoverTarget={popoverId}
+        popoverTargetAction="toggle"
+        title="Session actions"
+        aria-label="Session actions"
+        aria-haspopup="menu"
+      >
+        <EllipsisVerticalIcon size={14} />
+      </button>
+      <div
+        ref={popoverRef}
+        id={popoverId}
+        popover="auto"
+        role="menu"
+        className="z-[300] m-0 inset-auto w-[10.5rem] rounded-[10px] border p-1 shadow-lg"
+        style={{
+          borderColor: "var(--app-border)",
+          background: "var(--app-surface)",
+          color: "var(--app-text)",
+        }}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors hover:bg-[var(--app-surface-alt)]"
+          aria-pressed={isPaused}
+          onClick={() => {
+            hideMenu();
+            onPause();
+          }}
+        >
+          {isPaused ? <ResumeIcon /> : <PauseIcon />}
+          {isPaused ? "Resume" : "Pause"}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors hover:bg-[color-mix(in_oklab,var(--app-danger)_8%,var(--app-surface)_92%)]"
+          style={{ color: "var(--app-danger)" }}
+          onClick={() => {
+            hideMenu();
+            onDiscard();
+          }}
+        >
+          <TrashIcon size={12} />
+          Discard
+        </button>
+      </div>
+    </>
+  );
+}
+
+function CompactSessionTimerChip({
+  startMs,
+  durationLive,
+  onCommitStart,
+}: {
+  startMs: number;
+  durationLive: string;
+  onCommitStart: (ms: number) => boolean | void | Promise<boolean | void>;
+}) {
+  const popoverId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [draftMs, setDraftMs] = useState(startMs);
+  const [pending, setPending] = useState(false);
+
+  const positionPopover = useCallback(() => {
+    const trigger = triggerRef.current;
+    const popover = popoverRef.current;
+    if (!trigger || !popover || !popover.matches(":popover-open")) return;
+    positionFixedPopover(trigger, popover, "start");
+  }, []);
+
+  useEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+    function onToggle(e: Event) {
+      const toggle = e as ToggleEvent;
+      if (toggle.newState === "open") {
+        setDraftMs(startMs);
+        setPending(false);
+        requestAnimationFrame(() => {
+          positionPopover();
+          requestAnimationFrame(positionPopover);
+        });
+      }
+    }
+    el.addEventListener("toggle", onToggle);
+    return () => el.removeEventListener("toggle", onToggle);
+  }, [positionPopover, startMs]);
+
+  function hideEditor() {
+    const popover = popoverRef.current;
+    if (popover?.matches(":popover-open")) {
+      try {
+        popover.hidePopover();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async function acceptDraft() {
+    setPending(true);
+    const ok = await onCommitStart(draftMs);
+    setPending(false);
+    if (ok !== false) hideEditor();
+  }
+
+  return (
+    <div
+      className="inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-[var(--app-radius)] px-2 py-1"
+      style={workMiniCardSurface}
+    >
+      <span className="text-xs font-medium text-muted-canvas">Started at</span>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="cursor-pointer rounded-md px-0.5 text-base tabular-nums font-medium leading-none transition-colors hover:bg-[color-mix(in_oklab,var(--app-info)_10%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+        style={{ color: "var(--app-text)" }}
+        popoverTarget={popoverId}
+        popoverTargetAction="toggle"
+        aria-label="Edit session start time"
+        aria-haspopup="dialog"
+      >
+        {formatSessionClockDisplay(startMs)}
+      </button>
+      <span className="text-xs text-muted-canvas" aria-hidden>
+        ·
+      </span>
+      <span className="text-xs font-medium text-muted-canvas">Duration</span>
+      <span className="text-base tabular-nums font-medium leading-none" style={{ color: "var(--app-text)" }}>
+        {durationLive}
+      </span>
+      <div
+        ref={popoverRef}
+        id={popoverId}
+        popover="auto"
+        role="dialog"
+        aria-label="Edit session start time"
+        className="z-[300] m-0 inset-auto rounded-[10px] border p-2 shadow-lg"
+        style={{
+          borderColor: "var(--app-border)",
+          background: "var(--app-surface)",
+          color: "var(--app-text)",
+        }}
+      >
+        <div className="flex items-center gap-1.5">
+          <SessionTimeCanvasPickers
+            valueMs={draftMs}
+            disabled={pending}
+            onTimeCommit={(ms) => {
+              setDraftMs(ms);
+            }}
+            selectListClassName={finishModalSessionTimeSelectListClass}
+            className="!min-w-min"
+          />
+          <button
+            type="button"
+            className={compactSessionIconButtonClass}
+            style={{
+              borderColor: "var(--app-border)",
+              background: "var(--app-surface)",
+              color: "var(--app-text)",
+            }}
+            disabled={pending}
+            aria-label="Accept start time"
+            title="Accept start time"
+            onClick={() => void acceptDraft()}
+          >
+            <CompactSessionCheckIcon />
+          </button>
+          <button
+            type="button"
+            className={compactSessionIconButtonClass}
+            style={{
+              borderColor: "var(--app-border)",
+              background: "var(--app-surface)",
+              color: "var(--app-text-muted)",
+            }}
+            disabled={pending}
+            aria-label="Cancel start time"
+            title="Cancel start time"
+            onClick={hideEditor}
+          >
+            <CompactSessionCloseIcon />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const compactProjectAbbrClass =
+  "inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold tracking-wide no-underline outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--app-surface-alt)_70%,var(--app-text)_8%)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]";
+
+function CompactProjectAbbr({
+  abbreviation,
+  colorVar,
+  href,
+  projectName,
+}: {
+  abbreviation: string;
+  colorVar: string | null;
+  href?: string;
+  projectName?: string;
+}) {
+  const inner = (
+    <>
+      {colorVar ? (
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: `var(${colorVar})` }}
+          aria-hidden
+        />
+      ) : null}
+      {abbreviation}
+    </>
+  );
+  const style = { color: "var(--app-text)", background: "var(--app-surface-alt)" } as const;
+  if (href) {
+    return (
+      <a
+        href={href}
+        className={compactProjectAbbrClass}
+        style={style}
+        title={projectName}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <span className={`${compactProjectAbbrClass} cursor-default`} style={style} title={projectName}>
+      {inner}
+    </span>
+  );
+}
+
+function CompactIntegrationLabel({ label, href }: { label: string; href?: string }) {
+  const className =
+    "min-w-0 flex-1 truncate text-xs leading-snug text-muted-canvas transition-colors hover:text-[var(--app-text)] hover:underline underline-offset-2";
+  if (href) {
+    return (
+      <a href={href} className={className} title={label} onClick={(e) => e.stopPropagation()}>
+        {label}
+      </a>
+    );
+  }
+  return (
+    <p className="min-w-0 flex-1 truncate text-xs leading-snug text-muted-canvas" title={label}>
+      {label}
+    </p>
+  );
+}
+
+export type CompactWorkSessionContext = {
+  projectAbbreviation: string;
+  projectName: string;
+  projectColorVar: string | null;
+  href: string;
+  /** Integration ID when present; otherwise the track / context name. */
+  integrationIdOrLabel: string;
+};
 
 /** Very pale info tint for finish-modal timer cards. */
 const finishDialogTimeCardSurface = {
@@ -1076,7 +1453,7 @@ export function TaskWorkRow({
   onActionError,
   onSessionPersisted,
   compact = false,
-  compactBadge = null,
+  compactContext = null,
   subtasks = [],
   onSubtasksChange,
   subtaskScope = "project",
@@ -1096,12 +1473,11 @@ export function TaskWorkRow({
   /** Called after a finished session is successfully persisted (Hours / Actuals refresh). */
   onSessionPersisted?: () => void;
   /**
-   * Home skinny-task card: title can wrap to two lines; Started at / Duration sit under
-   * Pause / Discard / Finish, right-aligned.
+   * Home skinny-task card: two-row session strip (project abbr + truncated title + overflow/finish,
+   * then combined timer chip + integration ID/label).
    */
   compact?: boolean;
-  /** When set (typically with `compact`), replaces the project · integration crumb. */
-  compactBadge?: ReactNode;
+  compactContext?: CompactWorkSessionContext | null;
   subtasks?: TaskSubtask[];
   onSubtasksChange?: (next: TaskSubtask[]) => void;
   subtaskScope?: "project" | "internal";
@@ -1305,7 +1681,7 @@ export function TaskWorkRow({
     : "";
 
   const sessionMetaCards = (
-    <div className={`flex flex-wrap gap-1.5 ${compact ? "justify-end" : "sm:shrink-0"}`}>
+    <div className="flex flex-wrap gap-1.5 sm:shrink-0">
       <WorkSessionStartedAtMiniCard
         valueMs={startMs}
         ariaLabel="Edit session start time"
@@ -1387,19 +1763,12 @@ export function TaskWorkRow({
         Working on
       </p>
       <p
-        className={
-          compact
-            ? "mt-0.5 line-clamp-2 break-words leading-snug font-medium"
-            : "mt-0.5 inline-block w-fit max-w-full break-words leading-snug font-medium"
-        }
+        className="mt-0.5 inline-block w-fit max-w-full break-words leading-snug font-medium"
         style={{ color: "var(--app-text)" }}
-        title={compact ? taskTitle : undefined}
       >
         {taskTitle}
       </p>
-      {compact && compactBadge ? (
-        <div className="mt-1.5">{compactBadge}</div>
-      ) : taskCrumb ? (
+      {taskCrumb ? (
         <p className="mt-1 truncate text-xs leading-snug text-muted-canvas">
           {taskCrumb.projectColorVar ? (
             <span
@@ -1419,7 +1788,7 @@ export function TaskWorkRow({
           </a>
         </p>
       ) : null}
-      {!compact && taskDueDateIso !== undefined ? (
+      {taskDueDateIso !== undefined ? (
         <p className="mt-1 text-xs leading-snug tabular-nums text-muted-canvas">
           {formatDateDisplay(taskDueDateIso)}
         </p>
@@ -1430,7 +1799,7 @@ export function TaskWorkRow({
   return (
     <>
       <div
-        className="integration-task-row border"
+        className={compact ? "group integration-task-row border !px-2 !py-2" : "integration-task-row border"}
         style={{
           borderColor: "color-mix(in oklab, var(--app-border) 80%, transparent)",
           background: "var(--app-info-surface)",
@@ -1440,25 +1809,72 @@ export function TaskWorkRow({
         role="presentation"
       >
         {compact ? (
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-start gap-2">
-              <div
-                className="active-work-session-indicator--live inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[var(--app-info)]"
-                style={{
-                  borderColor: "color-mix(in oklab, var(--app-border) 80%, transparent)",
-                  background: "color-mix(in oklab, var(--app-info) 8%, var(--app-surface) 92%)",
-                }}
-                aria-hidden
+          <div className="flex flex-col gap-1.5">
+            <div className="flex min-w-0 items-center gap-2">
+              {compactContext ? (
+                <CompactProjectAbbr
+                  abbreviation={compactContext.projectAbbreviation}
+                  colorVar={compactContext.projectColorVar}
+                  href={compactContext.href}
+                  projectName={compactContext.projectName}
+                />
+              ) : null}
+              <p
+                className="min-w-0 flex-1 truncate text-sm font-medium"
+                style={{ color: "var(--app-text)" }}
+                title={taskTitle}
               >
-                <WorkOnTaskIcon />
+                {taskTitle}
+              </p>
+              <div className="flex h-8 shrink-0 items-center justify-end">
+                <div
+                  className="flex items-center justify-end gap-1 overflow-hidden opacity-0 pointer-events-none max-w-0 transition-[max-width,opacity,margin] duration-150 ease-[var(--easing-standard)] group-hover:mr-1 group-hover:max-w-[4.25rem] group-hover:opacity-100 group-hover:pointer-events-auto focus-within:mr-1 focus-within:max-w-[4.25rem] focus-within:opacity-100 focus-within:pointer-events-auto has-[:popover-open]:mr-1 has-[:popover-open]:max-w-[4.25rem] has-[:popover-open]:opacity-100 has-[:popover-open]:pointer-events-auto motion-reduce:transition-none"
+                >
+                  <SubtaskPopoverButton
+                    taskId={taskId}
+                    scope={subtaskScope}
+                    taskTitle={taskTitle}
+                    projectName={taskCrumb?.projectName ?? finishSessionProjectLabel}
+                    integrationLabel={taskCrumb?.integrationLabel ?? finishSessionIntegrationLabel}
+                    subtasks={subtasks}
+                    onSubtasksChange={(next) => onSubtasksChange?.(next)}
+                  />
+                  <CompactSessionOverflowMenu
+                    isPaused={isPaused}
+                    onPause={() => void togglePause()}
+                    onDiscard={() => discardDialogRef.current?.showModal()}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={[
+                    "btn-cta-dark inline-flex h-8 w-8 shrink-0 items-center justify-center !rounded-full !p-0",
+                    isPaused ? "" : "active-work-session-indicator--live-dark",
+                  ].join(" ")}
+                  onClick={openFinishModal}
+                  title={isPaused ? "Finish work session (paused)" : "Finish work session"}
+                  aria-label={isPaused ? "Finish work session (paused)" : "Finish work session"}
+                >
+                  <WorkOnTaskIcon />
+                </button>
               </div>
-              {titleBlock}
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-1.5">
-              {actionButtons}
-              {sessionMetaCards}
-              {actionErrors}
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              {compactContext ? (
+                <CompactIntegrationLabel
+                  label={compactContext.integrationIdOrLabel}
+                  href={compactContext.href}
+                />
+              ) : (
+                <span className="min-w-0 flex-1" />
+              )}
+              <CompactSessionTimerChip
+                startMs={startMs}
+                durationLive={durationLive}
+                onCommitStart={commitInRowStartTime}
+              />
             </div>
+            {actionErrors}
           </div>
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

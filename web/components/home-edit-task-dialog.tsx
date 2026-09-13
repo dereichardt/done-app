@@ -8,12 +8,18 @@ import {
   DueDatePickerControl,
   syncAddTaskTitleHeight,
 } from "@/components/task-row";
-import { taskPriorityOptions } from "@/lib/integration-task-helpers";
+import { taskPriorityOptions, formatDateDisplay } from "@/lib/integration-task-helpers";
 import type { TaskSubtask, TasksPageTask } from "@/lib/tasks-page-shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const dialogClass =
   "app-catalog-dialog fixed left-1/2 top-1/2 z-[220] max-h-[min(92dvh,52rem)] w-[min(100vw-2rem,44rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden border-0 p-0 shadow-xl";
+
+const confirmDialogClass =
+  "app-catalog-dialog fixed left-1/2 top-1/2 z-[240] w-[min(100vw-2rem,28rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden border-0 p-0 shadow-xl";
+
+const deleteButtonClass =
+  "cursor-pointer rounded-[var(--app-radius)] bg-[var(--app-danger)] px-3 text-xs font-medium text-[var(--app-surface)] transition-[background-color] duration-150 ease-out hover:bg-[color-mix(in_oklab,var(--app-danger)_78%,var(--app-text)_22%)] disabled:cursor-not-allowed disabled:opacity-50 h-9 min-h-9";
 
 export function HomeEditTaskDialog({
   open,
@@ -26,6 +32,7 @@ export function HomeEditTaskDialog({
   onSavePriority,
   onSaveDueDate,
   onSubtasksChange,
+  onDelete,
 }: {
   open: boolean;
   task: TasksPageTask | null;
@@ -40,13 +47,16 @@ export function HomeEditTaskDialog({
   ) => Promise<{ error?: string }>;
   onSaveDueDate: (taskId: string, dueDateIso: string) => Promise<{ error?: string }>;
   onSubtasksChange: (taskId: string, subtasks: TaskSubtask[]) => void;
+  onDelete: (task: TasksPageTask) => Promise<{ error?: string }>;
 }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement | null>(null);
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [priority, setPriority] = useState<"low" | "medium" | "high">("medium");
   const [dueDate, setDueDate] = useState(todayIso);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -58,12 +68,14 @@ export function HomeEditTaskDialog({
       setDueDate(task.due_date ?? todayIso);
       setError(null);
       setSaving(false);
+      setDeleting(false);
       if (!dialog.open) dialog.showModal();
       requestAnimationFrame(() => {
         titleRef.current?.focus();
         titleRef.current?.select();
       });
     } else if (dialog.open) {
+      deleteDialogRef.current?.close();
       dialog.close();
     }
     // Reset form when opening or switching tasks — not on every optimistic task field update.
@@ -74,11 +86,28 @@ export function HomeEditTaskDialog({
     if (open) syncAddTaskTitleHeight(titleRef.current);
   }, [open, titleDraft]);
 
-  const close = () => dialogRef.current?.close();
+  const close = () => {
+    deleteDialogRef.current?.close();
+    dialogRef.current?.close();
+  };
+
+  async function handleDelete() {
+    if (!task || deleting || saving) return;
+    setDeleting(true);
+    setError(null);
+    const res = await onDelete(task);
+    setDeleting(false);
+    if (res.error) {
+      setError(res.error);
+      deleteDialogRef.current?.close();
+      return;
+    }
+    close();
+  }
 
   async function handleSave(e: { preventDefault: () => void }) {
     e.preventDefault();
-    if (!task || saving) return;
+    if (!task || saving || deleting) return;
 
     const nextTitle = titleDraft.trim();
     if (!nextTitle) {
@@ -120,6 +149,7 @@ export function HomeEditTaskDialog({
   const projectOptions = [{ value: "proj", label: projectLabel || "—" }];
 
   return (
+    <>
     <dialog
       ref={dialogRef}
       aria-labelledby="home-edit-task-title"
@@ -248,22 +278,32 @@ export function HomeEditTaskDialog({
               />
             ) : null}
 
-            <div className="flex shrink-0 items-center justify-end gap-2">
+            <div className="flex shrink-0 items-center justify-between gap-2">
               <button
                 type="button"
-                className="btn-ghost h-9 min-h-9 px-3 text-xs"
-                disabled={saving}
-                onClick={close}
+                className={deleteButtonClass}
+                disabled={saving || deleting || !task}
+                onClick={() => deleteDialogRef.current?.showModal()}
               >
-                Cancel
+                Delete
               </button>
-              <button
-                type="submit"
-                disabled={saving || !task}
-                className="btn-cta-dark h-9 min-h-9 shrink-0 px-3 text-xs whitespace-nowrap"
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost h-9 min-h-9 px-3 text-xs"
+                  disabled={saving || deleting}
+                  onClick={close}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving || deleting || !task}
+                  className="btn-cta-dark h-9 min-h-9 shrink-0 px-3 text-xs whitespace-nowrap"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
             </div>
 
             {error ? (
@@ -275,5 +315,68 @@ export function HomeEditTaskDialog({
         </div>
       </div>
     </dialog>
+      <dialog
+        ref={deleteDialogRef}
+        aria-labelledby="home-edit-task-delete-title"
+        className={confirmDialogClass}
+        style={{
+          borderRadius: "12px",
+          background: "var(--app-surface)",
+          color: "var(--app-text)",
+        }}
+      >
+        <div className="flex flex-col gap-4 p-5">
+          <h2
+            id="home-edit-task-delete-title"
+            className="text-base font-semibold"
+            style={{ color: "var(--app-text)" }}
+          >
+            Delete this task?
+          </h2>
+          {task ? (
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="text-xs font-medium text-muted-canvas">Task</p>
+                <p className="mt-0.5 text-sm font-medium break-words" style={{ color: "var(--app-text)" }}>
+                  {task.title}
+                </p>
+              </div>
+              <p className="text-sm text-muted-canvas">
+                This permanently removes the task and its work session history.
+              </p>
+              <p className="text-sm text-muted-canvas">
+                Due date:{" "}
+                <span className="font-medium" style={{ color: "var(--app-text)" }}>
+                  {formatDateDisplay(task.due_date)}
+                </span>
+              </p>
+            </div>
+          ) : null}
+          {error ? (
+            <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="btn-ghost text-sm"
+              disabled={deleting}
+              onClick={() => deleteDialogRef.current?.close()}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="cursor-pointer rounded-[var(--app-radius)] bg-[var(--app-danger)] px-3 py-2 text-sm font-medium text-[var(--app-surface)] transition-[background-color] duration-150 ease-out hover:bg-[color-mix(in_oklab,var(--app-danger)_78%,var(--app-text)_22%)] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={deleting || !task}
+              onClick={() => void handleDelete()}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        </div>
+      </dialog>
+    </>
   );
 }

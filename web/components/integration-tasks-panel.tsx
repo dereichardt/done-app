@@ -2,6 +2,7 @@ export {
   ActiveWorkSessionDialog,
   IntegrationTasksPanel,
   TaskWorkRow,
+  type CompactWorkSessionContext,
   type IntegrationTaskRow,
   type IntegrationTasksPanelInternalCreate,
   type IntegrationTaskWorkSessionRow,
