@@ -115,14 +115,11 @@ export function IntegrationIdBadge({
   useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
 
   return (
-    <>
+    <span className={size === "compact" ? "relative inline-flex h-4 items-center" : "relative inline-flex h-6 items-center"}>
       <Link
         ref={triggerRef}
         href={meta.href}
-        className={[
-          "inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold tracking-wide no-underline outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--app-surface-alt)_70%,var(--app-text)_8%)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]",
-          size === "compact" ? "h-4" : "h-6",
-        ].join(" ")}
+        className="inline-flex h-full shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold leading-none tracking-wide no-underline outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--app-surface-alt)_70%,var(--app-text)_8%)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
         style={{
           color: "var(--app-text)",
           background: "var(--app-surface-alt)",
@@ -137,7 +134,7 @@ export function IntegrationIdBadge({
       >
         {meta.colorVar ? (
           <span
-            className="inline-block h-1.5 w-1.5 rounded-full"
+            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
             style={{ backgroundColor: `var(${meta.colorVar})` }}
             aria-hidden
           />
@@ -162,7 +159,7 @@ export function IntegrationIdBadge({
         </p>
         <p className="mt-0.5 text-xs text-muted-canvas">{meta.detailName}</p>
       </div>
-    </>
+    </span>
   );
 }
 

@@ -299,19 +299,20 @@ export function HomeDayAgendaCard({
                   } as CSSProperties;
                   const rowInner = (
                     <>
-                      <div className="flex min-w-0 items-center justify-between gap-2">
-                        <span className="min-w-0 truncate text-[11px] tabular-nums text-muted-canvas">
+                      <div className="flex h-4 min-w-0 items-center justify-between gap-2">
+                        <span className="inline-flex h-4 min-w-0 items-center truncate text-[11px] leading-none tabular-nums text-muted-canvas">
                           {timeLine}
                         </span>
-                        <span className="flex shrink-0 items-center gap-1">
+                        <span className="flex h-4 shrink-0 items-center gap-1">
                           <span
+                            className="inline-flex h-4 items-center"
                             onClick={(e) => e.stopPropagation()}
                             onKeyDown={(e) => e.stopPropagation()}
                           >
                             <IntegrationIdBadge meta={badge} size="compact" />
                           </span>
                           <span
-                            className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[10px] font-medium"
+                            className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[10px] font-medium leading-none"
                             style={{
                               borderColor: "var(--app-border)",
                               background: "var(--app-surface-alt)",
