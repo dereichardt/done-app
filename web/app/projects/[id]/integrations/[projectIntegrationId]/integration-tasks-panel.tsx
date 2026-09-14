@@ -733,7 +733,7 @@ function CompactSessionTimerChip({
         popover="auto"
         role="dialog"
         aria-label="Edit session start time"
-        className="z-[300] m-0 inset-auto rounded-[10px] border p-2 shadow-lg"
+        className="z-[300] m-0 inset-auto overflow-visible rounded-[10px] border p-2 shadow-lg"
         style={{
           borderColor: "var(--app-border)",
           background: "var(--app-surface)",
@@ -747,7 +747,6 @@ function CompactSessionTimerChip({
             onTimeCommit={(ms) => {
               setDraftMs(ms);
             }}
-            selectListClassName={finishModalSessionTimeSelectListClass}
             className="!min-w-min"
           />
           <button
