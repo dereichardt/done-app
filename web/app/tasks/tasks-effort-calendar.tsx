@@ -25,9 +25,11 @@ import {
 import {
   createTasksCalendarManualEntry,
   deleteTasksCalendarManualEntry,
+  deleteTasksCalendarWorkSession,
   rescheduleTasksCalendarSession,
   type TasksCalendarSession,
   updateTasksCalendarManualEntry,
+  updateTasksCalendarWorkSession,
 } from "@/lib/actions/tasks-calendar";
 import {
   clearCalendarSessionCache,
@@ -378,7 +380,8 @@ export function TasksEffortCalendar({
   const createDialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteDialogRef = useRef<HTMLDialogElement | null>(null);
   const [deleteContext, setDeleteContext] = useState<{
-    manualEntryId: string;
+    entryId: string;
+    source: "manual" | "task_work_session";
     title: string;
     durationLabel: string;
   } | null>(null);
@@ -419,6 +422,7 @@ export function TasksEffortCalendar({
 
   const [createDraft, setCreateDraft] = useState<{
     mode: "create" | "edit";
+    source: "manual" | "task_work_session";
     manualEntryId: string | null;
     dayYmd: string;
     startSlot: number;
@@ -504,6 +508,7 @@ export function TasksEffortCalendar({
       const end = clamp(start + 2, 1, 95);
       setCreateDraft({
         mode: "create",
+        source: "manual",
         manualEntryId: null,
         dayYmd,
         startSlot: start,
@@ -529,6 +534,7 @@ export function TasksEffortCalendar({
       setCalendarActionError(null);
       setCreateDraft({
         mode: "edit",
+        source: block.source === "task_work_session" ? "task_work_session" : "manual",
         manualEntryId: block.source_id,
         dayYmd: block.dayYmd,
         startSlot,
@@ -553,16 +559,18 @@ export function TasksEffortCalendar({
   const saveCreate = useCallback(async () => {
     if (!createDraft) return;
     if (createDraft.saving) return;
+    const isWorkSessionEdit =
+      createDraft.mode === "edit" && createDraft.source === "task_work_session";
     const title = createDraft.title.trim();
-    if (!title) {
+    if (!isWorkSessionEdit && !title) {
       setCreateDraft((prev) => (prev ? { ...prev, error: "Title is required" } : prev));
       return;
     }
-    if (!createDraft.selectedProjectId) {
+    if (!isWorkSessionEdit && !createDraft.selectedProjectId) {
       setCreateDraft((prev) => (prev ? { ...prev, error: "Choose a project" } : prev));
       return;
     }
-    if (!createDraft.projectTrackId) {
+    if (!isWorkSessionEdit && !createDraft.projectTrackId) {
       setCreateDraft((prev) => (prev ? { ...prev, error: "Choose a track" } : prev));
       return;
     }
@@ -577,30 +585,36 @@ export function TasksEffortCalendar({
     setCalendarActionError(null);
     const started = slotToLocalDateTime(createDraft.dayYmd, createDraft.startSlot);
     const finished = slotToLocalDateTime(createDraft.dayYmd, clamp(createDraft.endSlot, 1, 95));
+    const workAccomplished = createDraft.work_accomplished.trim()
+      ? createDraft.work_accomplished.trim()
+      : null;
 
     const res =
-      createDraft.mode === "edit" && createDraft.manualEntryId
-        ? await updateTasksCalendarManualEntry({
-            project_track_id: createDraft.projectTrackId,
-            manual_entry_id: createDraft.manualEntryId,
-            entry_type: createDraft.entry_type,
-            title,
+      isWorkSessionEdit && createDraft.manualEntryId
+        ? await updateTasksCalendarWorkSession({
+            source_id: createDraft.manualEntryId,
             started_at: started.toISOString(),
             finished_at: finished.toISOString(),
-            work_accomplished: createDraft.work_accomplished.trim()
-              ? createDraft.work_accomplished.trim()
-              : null,
+            work_accomplished: workAccomplished,
           })
-        : await createTasksCalendarManualEntry({
-            project_track_id: createDraft.projectTrackId,
-            entry_type: createDraft.entry_type,
-            title,
-            started_at: started.toISOString(),
-            finished_at: finished.toISOString(),
-            work_accomplished: createDraft.work_accomplished.trim()
-              ? createDraft.work_accomplished.trim()
-              : null,
-          });
+        : createDraft.mode === "edit" && createDraft.manualEntryId
+          ? await updateTasksCalendarManualEntry({
+              project_track_id: createDraft.projectTrackId,
+              manual_entry_id: createDraft.manualEntryId,
+              entry_type: createDraft.entry_type,
+              title,
+              started_at: started.toISOString(),
+              finished_at: finished.toISOString(),
+              work_accomplished: workAccomplished,
+            })
+          : await createTasksCalendarManualEntry({
+              project_track_id: createDraft.projectTrackId,
+              entry_type: createDraft.entry_type,
+              title,
+              started_at: started.toISOString(),
+              finished_at: finished.toISOString(),
+              work_accomplished: workAccomplished,
+            });
 
     if (res.error) {
       setCreateDraft((prev) => (prev ? { ...prev, saving: false, error: res.error ?? "Could not save" } : prev));
@@ -615,7 +629,8 @@ export function TasksEffortCalendar({
   const openDeleteConfirm = useCallback(() => {
     if (!createDraft || createDraft.mode !== "edit" || !createDraft.manualEntryId) return;
     setDeleteContext({
-      manualEntryId: createDraft.manualEntryId,
+      entryId: createDraft.manualEntryId,
+      source: createDraft.source,
       title: createDraft.title.trim() || (createDraft.entry_type === "meeting" ? "Meeting" : "Task"),
       durationLabel: formatDurationFromSlots(createDraft.startSlot, createDraft.endSlot),
     });
@@ -632,9 +647,12 @@ export function TasksEffortCalendar({
     if (deletePending) return;
     setDeletePending(true);
     setDeleteError(null);
-    const res = await deleteTasksCalendarManualEntry({
-      manual_entry_id: deleteContext.manualEntryId,
-    });
+    const res =
+      deleteContext.source === "task_work_session"
+        ? await deleteTasksCalendarWorkSession({ source_id: deleteContext.entryId })
+        : await deleteTasksCalendarManualEntry({
+            manual_entry_id: deleteContext.entryId,
+          });
     setDeletePending(false);
     if (res.error) {
       setDeleteError(res.error);
@@ -722,14 +740,10 @@ export function TasksEffortCalendar({
   const handleBlockClick = useCallback(
     (block: CalendarBlock) => {
       const session = sessionBySourceId.get(block.source_id) ?? null;
-      if (block.source === "manual") {
-        openEditManualModal(block, session);
-        setActiveBlock(null);
-        return;
-      }
-      showDetailPopover(block);
+      openEditManualModal(block, session);
+      setActiveBlock(null);
     },
-    [openEditManualModal, sessionBySourceId, showDetailPopover],
+    [openEditManualModal, sessionBySourceId],
   );
 
   const handleBlockDrop = useCallback(
@@ -789,6 +803,8 @@ export function TasksEffortCalendar({
   };
 
   const goToday = () => onAnchorChange(formatLocalYmd(new Date()));
+
+  const isWorkSessionEdit = createDraft?.source === "task_work_session";
 
   // ── Segmented control ──────────────────────────────────────────────────────
   const viewSegIndex = scope === "day" ? 0 : scope === "week" ? 1 : 2;
@@ -999,6 +1015,7 @@ export function TasksEffortCalendar({
                     name="tasks_calendar_manual_entry_project"
                     options={projectOptions}
                     value={createDraft.selectedProjectId}
+                    disabled={isWorkSessionEdit}
                     onValueChange={(projectId) => {
                       const nextTrackId =
                         scopedTracks.find((track) => track.projectId === projectId)?.id ?? "";
@@ -1029,6 +1046,7 @@ export function TasksEffortCalendar({
                         : [{ value: "", label: "No tracks for selected project" }]
                     }
                     value={createDraft.projectTrackId}
+                    disabled={isWorkSessionEdit}
                     onValueChange={(v) => {
                       if (v) onRememberIntegration(v);
                       setCreateDraft((prev) =>
@@ -1049,7 +1067,7 @@ export function TasksEffortCalendar({
                   <label className="text-xs font-medium text-muted-canvas sm:flex-1">
                     Title
                     <input
-                      className="input-canvas mt-1 h-9 w-full text-sm placeholder:text-sm placeholder:font-normal placeholder:text-muted-canvas"
+                      className="input-canvas mt-1 h-9 w-full text-sm placeholder:text-sm placeholder:font-normal placeholder:text-muted-canvas disabled:cursor-not-allowed disabled:opacity-70"
                       value={createDraft.title}
                       onChange={(e) =>
                         setCreateDraft((prev) =>
@@ -1058,6 +1076,8 @@ export function TasksEffortCalendar({
                       }
                       placeholder={createDraft.entry_type === "meeting" ? "e.g. Weekly sync" : "e.g. Fix auth bug"}
                       autoComplete="off"
+                      disabled={isWorkSessionEdit}
+                      readOnly={isWorkSessionEdit}
                     />
                   </label>
 
@@ -1084,16 +1104,20 @@ export function TasksEffortCalendar({
                         type="button"
                         role="tab"
                         aria-selected={createDraft.entry_type === "meeting"}
+                        aria-disabled={isWorkSessionEdit}
+                        disabled={isWorkSessionEdit}
                         className={[
-                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors cursor-pointer",
+                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors",
+                          isWorkSessionEdit ? "cursor-not-allowed" : "cursor-pointer",
                           createDraft.entry_type === "meeting"
                             ? "font-semibold text-[#f3f5f8]"
                             : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
                           "rounded-l-[10px]",
                         ].join(" ")}
-                        onClick={() =>
-                          setCreateDraft((prev) => (prev ? { ...prev, entry_type: "meeting" } : prev))
-                        }
+                        onClick={() => {
+                          if (isWorkSessionEdit) return;
+                          setCreateDraft((prev) => (prev ? { ...prev, entry_type: "meeting" } : prev));
+                        }}
                       >
                         Meeting
                       </button>
@@ -1101,16 +1125,20 @@ export function TasksEffortCalendar({
                         type="button"
                         role="tab"
                         aria-selected={createDraft.entry_type === "task"}
+                        aria-disabled={isWorkSessionEdit}
+                        disabled={isWorkSessionEdit}
                         className={[
-                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors cursor-pointer",
+                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors",
+                          isWorkSessionEdit ? "cursor-not-allowed" : "cursor-pointer",
                           createDraft.entry_type === "task"
                             ? "font-semibold text-[#f3f5f8]"
                             : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
                           "rounded-r-[10px]",
                         ].join(" ")}
-                        onClick={() =>
-                          setCreateDraft((prev) => (prev ? { ...prev, entry_type: "task" } : prev))
-                        }
+                        onClick={() => {
+                          if (isWorkSessionEdit) return;
+                          setCreateDraft((prev) => (prev ? { ...prev, entry_type: "task" } : prev));
+                        }}
                       >
                         Task
                       </button>
@@ -1234,6 +1262,9 @@ export function TasksEffortCalendar({
                 {deleteContext.title}
               </p>
               <p className="text-muted-canvas">{deleteContext.durationLabel}</p>
+              {deleteContext.source === "task_work_session" ? (
+                <p className="text-muted-canvas">This removes the logged session, not the task.</p>
+              ) : null}
             </div>
           ) : null}
           {deleteError ? (

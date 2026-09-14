@@ -11,7 +11,9 @@ import { defaultManualLogDayAndSlots } from "@/components/task-only-manual-log-d
 import {
   createTasksCalendarManualEntry,
   deleteTasksCalendarManualEntry,
+  deleteTasksCalendarWorkSession,
   updateTasksCalendarManualEntry,
+  updateTasksCalendarWorkSession,
   type TasksCalendarSession,
 } from "@/lib/actions/tasks-calendar";
 import { localDayStart, parseLocalYmd } from "@/lib/integration-effort-buckets";
@@ -47,7 +49,7 @@ export type HomeCalendarEntryDialogProps = {
   tracks: TasksPageTrack[];
   onClose: () => void;
   onCreated?: () => void | Promise<void>;
-  /** When set, the dialog opens in edit mode for this manual session. */
+  /** When set, the dialog opens in edit mode for this calendar session. */
   editSession?: TasksCalendarSession | null;
 };
 
@@ -63,6 +65,7 @@ export function HomeCalendarEntryDialog({
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteDialogRef = useRef<HTMLDialogElement | null>(null);
   const isEdit = Boolean(editSession);
+  const isWorkSessionEdit = editSession?.source === "task_work_session";
   const [dayYmd, setDayYmd] = useState(todayIso);
   const [startSlot, setStartSlot] = useState(0);
   const [endSlot, setEndSlot] = useState(2);
@@ -169,15 +172,15 @@ export function HomeCalendarEntryDialog({
 
   async function save() {
     const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
+    if (!isWorkSessionEdit && !trimmedTitle) {
       setError("Title is required");
       return;
     }
-    if (!selectedProjectId) {
+    if (!isWorkSessionEdit && !selectedProjectId) {
       setError("Choose a project");
       return;
     }
-    if (!projectTrackId) {
+    if (!isWorkSessionEdit && !projectTrackId) {
       setError("Choose a track");
       return;
     }
@@ -190,22 +193,34 @@ export function HomeCalendarEntryDialog({
     setError(null);
     const started = slotToLocalDateTime(dayYmd, startSlot);
     const finished = slotToLocalDateTime(dayYmd, clamp(endSlot, 1, 95));
-    const payload = {
-      project_track_id: projectTrackId,
-      entry_type: entryType,
-      title: trimmedTitle,
-      started_at: started.toISOString(),
-      finished_at: finished.toISOString(),
-      work_accomplished: workAccomplished.trim() ? workAccomplished.trim() : null,
-    };
+    const notes = workAccomplished.trim() ? workAccomplished.trim() : null;
     try {
       const res =
-        isEdit && editSession
-          ? await updateTasksCalendarManualEntry({
-              ...payload,
-              manual_entry_id: editSession.source_id,
+        isWorkSessionEdit && editSession
+          ? await updateTasksCalendarWorkSession({
+              source_id: editSession.source_id,
+              started_at: started.toISOString(),
+              finished_at: finished.toISOString(),
+              work_accomplished: notes,
             })
-          : await createTasksCalendarManualEntry(payload);
+          : isEdit && editSession
+            ? await updateTasksCalendarManualEntry({
+                project_track_id: projectTrackId,
+                entry_type: entryType,
+                title: trimmedTitle,
+                started_at: started.toISOString(),
+                finished_at: finished.toISOString(),
+                work_accomplished: notes,
+                manual_entry_id: editSession.source_id,
+              })
+            : await createTasksCalendarManualEntry({
+                project_track_id: projectTrackId,
+                entry_type: entryType,
+                title: trimmedTitle,
+                started_at: started.toISOString(),
+                finished_at: finished.toISOString(),
+                work_accomplished: notes,
+              });
       if (res.error) {
         setError(res.error);
         return;
@@ -226,9 +241,12 @@ export function HomeCalendarEntryDialog({
     setDeletePending(true);
     setDeleteError(null);
     try {
-      const res = await deleteTasksCalendarManualEntry({
-        manual_entry_id: editSession.source_id,
-      });
+      const res =
+        editSession.source === "task_work_session"
+          ? await deleteTasksCalendarWorkSession({ source_id: editSession.source_id })
+          : await deleteTasksCalendarManualEntry({
+              manual_entry_id: editSession.source_id,
+            });
       if (res.error) {
         setDeleteError(res.error);
         return;
@@ -294,6 +312,7 @@ export function HomeCalendarEntryDialog({
                         : [{ value: "", label: "No projects available" }]
                     }
                     value={selectedProjectId}
+                    disabled={isWorkSessionEdit}
                     onValueChange={(projectId) => {
                       const nextTrackId =
                         tracks.find((track) => track.projectId === projectId)?.id ?? "";
@@ -317,6 +336,7 @@ export function HomeCalendarEntryDialog({
                         : [{ value: "", label: "No tracks for selected project" }]
                     }
                     value={projectTrackId}
+                    disabled={isWorkSessionEdit}
                     onValueChange={(v) => {
                       setProjectTrackId(v);
                       setSelectedProjectId(trackById.get(v)?.projectId ?? selectedProjectId);
@@ -329,7 +349,7 @@ export function HomeCalendarEntryDialog({
                   <label className="text-xs font-medium text-muted-canvas sm:flex-1">
                     Title
                     <input
-                      className="input-canvas mt-1 h-9 w-full text-sm placeholder:text-sm placeholder:font-normal placeholder:text-muted-canvas"
+                      className="input-canvas mt-1 h-9 w-full text-sm placeholder:text-sm placeholder:font-normal placeholder:text-muted-canvas disabled:cursor-not-allowed disabled:opacity-70"
                       value={title}
                       onChange={(e) => {
                         setTitle(e.target.value);
@@ -337,6 +357,8 @@ export function HomeCalendarEntryDialog({
                       }}
                       placeholder={entryType === "meeting" ? "e.g. Weekly sync" : "e.g. Fix auth bug"}
                       autoComplete="off"
+                      disabled={isWorkSessionEdit}
+                      readOnly={isWorkSessionEdit}
                     />
                   </label>
 
@@ -363,13 +385,19 @@ export function HomeCalendarEntryDialog({
                         type="button"
                         role="tab"
                         aria-selected={entryType === "meeting"}
+                        aria-disabled={isWorkSessionEdit}
+                        disabled={isWorkSessionEdit}
                         className={[
-                          "relative z-[2] inline-flex h-9 w-24 cursor-pointer items-center justify-center rounded-l-[10px] px-3 text-center text-xs transition-colors",
+                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center rounded-l-[10px] px-3 text-center text-xs transition-colors",
+                          isWorkSessionEdit ? "cursor-not-allowed" : "cursor-pointer",
                           entryType === "meeting"
                             ? "font-semibold text-[var(--app-cta-dark-fg)]"
                             : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
                         ].join(" ")}
-                        onClick={() => setEntryType("meeting")}
+                        onClick={() => {
+                          if (isWorkSessionEdit) return;
+                          setEntryType("meeting");
+                        }}
                       >
                         Meeting
                       </button>
@@ -377,13 +405,19 @@ export function HomeCalendarEntryDialog({
                         type="button"
                         role="tab"
                         aria-selected={entryType === "task"}
+                        aria-disabled={isWorkSessionEdit}
+                        disabled={isWorkSessionEdit}
                         className={[
-                          "relative z-[2] inline-flex h-9 w-24 cursor-pointer items-center justify-center rounded-r-[10px] px-3 text-center text-xs transition-colors",
+                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center rounded-r-[10px] px-3 text-center text-xs transition-colors",
+                          isWorkSessionEdit ? "cursor-not-allowed" : "cursor-pointer",
                           entryType === "task"
                             ? "font-semibold text-[var(--app-cta-dark-fg)]"
                             : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
                         ].join(" ")}
-                        onClick={() => setEntryType("task")}
+                        onClick={() => {
+                          if (isWorkSessionEdit) return;
+                          setEntryType("task");
+                        }}
                       >
                         Task
                       </button>
@@ -512,6 +546,9 @@ export function HomeCalendarEntryDialog({
               {deleteTitle}
             </p>
             <p className="text-muted-canvas">{deleteDurationLabel}</p>
+            {isWorkSessionEdit ? (
+              <p className="text-muted-canvas">This removes the logged session, not the task.</p>
+            ) : null}
           </div>
           {deleteError ? (
             <p className="text-sm" style={{ color: "var(--app-danger)" }} role="alert">

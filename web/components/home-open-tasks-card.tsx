@@ -2,7 +2,7 @@
 
 import { DialogCloseButton } from "@/components/dialog-close-button";
 import { HomeCardFab } from "@/components/home-card-fab";
-import { TaskWorkRow, type CompactWorkSessionContext } from "@/components/integration-tasks-panel";
+import { TaskWorkRow } from "@/components/integration-tasks-panel";
 import {
   HomeSkinnyTaskRow,
   type HomeSkinnyTaskMeta,
@@ -310,36 +310,6 @@ export function HomeOpenTasksCard({
         detailName: crumb.integrationLabel,
         colorVar: project?.colorVar ?? null,
         href: crumb.href,
-      };
-    },
-    [crumbForTask, integrationById, projectById],
-  );
-
-  const compactContextForTask = useCallback(
-    (task: TasksPageTask): CompactWorkSessionContext => {
-      const crumb = crumbForTask(task);
-      if (task.scope === "internal") {
-        return {
-          projectAbbreviation: internalAbbreviation(task),
-          projectName: "Internal",
-          projectColorVar: null,
-          href: crumb.href,
-          integrationIdOrLabel: task.internal_context_label,
-        };
-      }
-      const project = projectById.get(task.project_id);
-      const integration =
-        task.project_integration_id != null
-          ? integrationById.get(task.project_integration_id)
-          : undefined;
-      const integrationCode = (integration?.integrationCode ?? "").trim();
-      return {
-        projectAbbreviation:
-          project?.abbreviation || deriveProjectAbbreviation(project?.name ?? "") || "PRJ",
-        projectName: crumb.projectName,
-        projectColorVar: project?.colorVar ?? null,
-        href: crumb.href,
-        integrationIdOrLabel: integrationCode || crumb.integrationLabel,
       };
     },
     [crumbForTask, integrationById, projectById],
@@ -792,7 +762,7 @@ export function HomeOpenTasksCard({
                         finishSessionIntegrationLabel={crumbForTask(activeTaskOutsideFilter).integrationLabel}
                         finishSessionProjectLabel={crumbForTask(activeTaskOutsideFilter).projectName}
                         taskCrumb={crumbForTask(activeTaskOutsideFilter)}
-                        compactContext={compactContextForTask(activeTaskOutsideFilter)}
+                        compactContext={metaForTask(activeTaskOutsideFilter)}
                         activeSession={activeWorkSession}
                         onActiveSessionChange={setActiveWorkSession}
                         onClose={closeWorkRow}
@@ -834,7 +804,7 @@ export function HomeOpenTasksCard({
                                       finishSessionIntegrationLabel={crumb.integrationLabel}
                                       finishSessionProjectLabel={crumb.projectName}
                                       taskCrumb={crumb}
-                                      compactContext={compactContextForTask(task)}
+                                      compactContext={metaForTask(task)}
                                       activeSession={activeWorkSession}
                                       onActiveSessionChange={setActiveWorkSession}
                                       onClose={closeWorkRow}

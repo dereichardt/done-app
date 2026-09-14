@@ -302,9 +302,9 @@ export function ActualsCalendarGrid({
    */
   onDayColumnClick?: (ymd: string, slot: number) => void;
   /**
-   * Called when the user clicks a manual effort entry block (instead of
-   * the built-in edit flow). When absent, clicks on manual entries fall
-   * through to the same popover as task sessions.
+   * Called when the user clicks a calendar block (manual entry or work
+   * session) instead of the built-in tooltip. When absent, clicks fall
+   * through to the popover.
    */
   onEditManualEntry?: (block: CalendarBlock) => void;
   /**
@@ -934,7 +934,7 @@ export function ActualsCalendarGrid({
                               onBlockClick(b);
                               return;
                             }
-                            if (b.source === "manual" && onEditManualEntry) {
+                            if (onEditManualEntry) {
                               onEditManualEntry(b);
                               return;
                             }

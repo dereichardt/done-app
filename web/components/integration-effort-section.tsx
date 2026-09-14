@@ -18,6 +18,10 @@ import {
   patchProjectIntegrationEstimatedEffort,
   patchProjectManagementEstimatedEffort,
 } from "@/lib/actions/projects";
+import {
+  deleteTasksCalendarWorkSession,
+  updateTasksCalendarWorkSession,
+} from "@/lib/actions/tasks-calendar";
 import { CanvasArrowLeftIcon, CanvasArrowRightIcon } from "@/components/canvas-arrow-icons";
 import { CanvasSelect, type CanvasSelectOption } from "@/components/canvas-select";
 import { DialogCloseButton } from "@/components/dialog-close-button";
@@ -41,6 +45,7 @@ import {
   type EffortSessionInput,
   type EffortView,
 } from "@/lib/integration-effort-buckets";
+import { clearCalendarSessionCache } from "@/lib/tasks-calendar-session-cache";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -232,7 +237,8 @@ export function IntegrationEffortSection({
   const createDialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteDialogRef = useRef<HTMLDialogElement | null>(null);
   const [deleteContext, setDeleteContext] = useState<{
-    manualEntryId: string;
+    entryId: string;
+    source: "manual" | "task_work_session";
     title: string;
     durationLabel: string;
   } | null>(null);
@@ -249,6 +255,7 @@ export function IntegrationEffortSection({
 
   const [createDraft, setCreateDraft] = useState<{
     mode: "create" | "edit";
+    source: "manual" | "task_work_session";
     manualEntryId: string | null;
     dayYmd: string;
     startSlot: number;
@@ -266,6 +273,7 @@ export function IntegrationEffortSection({
     const end = clamp(start + 2, 1, 95);
     setCreateDraft({
       mode: "create",
+      source: "manual",
       manualEntryId: null,
       dayYmd,
       startSlot: start,
@@ -285,6 +293,7 @@ export function IntegrationEffortSection({
     const endSlot = clamp(Math.round(b.endMsInDay / (15 * 60_000)), 1, 95);
     setCreateDraft({
       mode: "edit",
+      source: b.source === "task_work_session" ? "task_work_session" : "manual",
       manualEntryId: b.source_id,
       dayYmd: b.dayYmd,
       startSlot,
@@ -307,7 +316,9 @@ export function IntegrationEffortSection({
     if (createDraft.saving) return;
 
     const title = createDraft.title.trim();
-    if (!title) {
+    const isWorkSessionEdit =
+      createDraft.mode === "edit" && createDraft.source === "task_work_session";
+    if (!isWorkSessionEdit && !title) {
       setCreateDraft((prev) => (prev ? { ...prev, error: "Title is required" } : prev));
       return;
     }
@@ -323,44 +334,54 @@ export function IntegrationEffortSection({
     const finishedSlot = clamp(createDraft.endSlot, 1, 95);
     const finished = slotToLocalDateTime(createDraft.dayYmd, finishedSlot);
 
-    const manualPayload = {
-      entry_type: createDraft.entry_type,
-      title,
-      started_at: started.toISOString(),
-      finished_at: finished.toISOString(),
-      work_accomplished: createDraft.work_accomplished.trim()
-        ? createDraft.work_accomplished.trim()
-        : null,
-    };
+    const notes = createDraft.work_accomplished.trim()
+      ? createDraft.work_accomplished.trim()
+      : null;
 
     let res: { error?: string };
-    if (effortTarget.kind === "project_integration") {
-      res =
-        createDraft.mode === "edit" && createDraft.manualEntryId
-          ? await updateIntegrationManualEffortEntry(
-              effortTarget.projectIntegrationId,
-              createDraft.manualEntryId,
-              manualPayload,
-            )
-          : await createIntegrationManualEffortEntry(effortTarget.projectIntegrationId, manualPayload);
-    } else if (effortTarget.kind === "project_management") {
-      res =
-        createDraft.mode === "edit" && createDraft.manualEntryId
-          ? await updateProjectTrackManualEffortEntry(
-              effortTarget.projectTrackId,
-              createDraft.manualEntryId,
-              manualPayload,
-            )
-          : await createProjectTrackManualEffortEntry(effortTarget.projectTrackId, manualPayload);
+    if (isWorkSessionEdit && createDraft.manualEntryId) {
+      res = await updateTasksCalendarWorkSession({
+        source_id: createDraft.manualEntryId,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        work_accomplished: notes,
+      });
     } else {
-      res =
-        createDraft.mode === "edit" && createDraft.manualEntryId
-          ? await updateInternalInitiativeManualEffortEntry(
-              effortTarget.initiativeId,
-              createDraft.manualEntryId,
-              manualPayload,
-            )
-          : await createInternalInitiativeManualEffortEntry(effortTarget.initiativeId, manualPayload);
+      const manualPayload = {
+        entry_type: createDraft.entry_type,
+        title,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        work_accomplished: notes,
+      };
+      if (effortTarget.kind === "project_integration") {
+        res =
+          createDraft.mode === "edit" && createDraft.manualEntryId
+            ? await updateIntegrationManualEffortEntry(
+                effortTarget.projectIntegrationId,
+                createDraft.manualEntryId,
+                manualPayload,
+              )
+            : await createIntegrationManualEffortEntry(effortTarget.projectIntegrationId, manualPayload);
+      } else if (effortTarget.kind === "project_management") {
+        res =
+          createDraft.mode === "edit" && createDraft.manualEntryId
+            ? await updateProjectTrackManualEffortEntry(
+                effortTarget.projectTrackId,
+                createDraft.manualEntryId,
+                manualPayload,
+              )
+            : await createProjectTrackManualEffortEntry(effortTarget.projectTrackId, manualPayload);
+      } else {
+        res =
+          createDraft.mode === "edit" && createDraft.manualEntryId
+            ? await updateInternalInitiativeManualEffortEntry(
+                effortTarget.initiativeId,
+                createDraft.manualEntryId,
+                manualPayload,
+              )
+            : await createInternalInitiativeManualEffortEntry(effortTarget.initiativeId, manualPayload);
+      }
     }
 
     if (res.error) {
@@ -369,6 +390,7 @@ export function IntegrationEffortSection({
       );
       return;
     }
+    clearCalendarSessionCache();
     closeCreateModal();
     router.refresh();
   }, [createDraft, effortTarget, closeCreateModal, router]);
@@ -376,7 +398,8 @@ export function IntegrationEffortSection({
   const openDeleteConfirm = useCallback(() => {
     if (!createDraft || createDraft.mode !== "edit" || !createDraft.manualEntryId) return;
     setDeleteContext({
-      manualEntryId: createDraft.manualEntryId,
+      entryId: createDraft.manualEntryId,
+      source: createDraft.source,
       title: createDraft.title.trim() || (createDraft.entry_type === "meeting" ? "Meeting" : "Task"),
       durationLabel: formatDurationFromSlots(createDraft.startSlot, createDraft.endSlot),
     });
@@ -394,25 +417,28 @@ export function IntegrationEffortSection({
     setDeletePending(true);
     setDeleteError(null);
     const res =
-      effortTarget.kind === "project_integration"
-        ? await deleteIntegrationManualEffortEntry(
-            effortTarget.projectIntegrationId,
-            deleteContext.manualEntryId,
-          )
-        : effortTarget.kind === "project_management"
-          ? await deleteProjectTrackManualEffortEntry(
-              effortTarget.projectTrackId,
-              deleteContext.manualEntryId,
+      deleteContext.source === "task_work_session"
+        ? await deleteTasksCalendarWorkSession({ source_id: deleteContext.entryId })
+        : effortTarget.kind === "project_integration"
+          ? await deleteIntegrationManualEffortEntry(
+              effortTarget.projectIntegrationId,
+              deleteContext.entryId,
             )
-          : await deleteInternalInitiativeManualEffortEntry(
-              effortTarget.initiativeId,
-              deleteContext.manualEntryId,
-            );
+          : effortTarget.kind === "project_management"
+            ? await deleteProjectTrackManualEffortEntry(
+                effortTarget.projectTrackId,
+                deleteContext.entryId,
+              )
+            : await deleteInternalInitiativeManualEffortEntry(
+                effortTarget.initiativeId,
+                deleteContext.entryId,
+              );
     setDeletePending(false);
     if (res.error) {
       setDeleteError(res.error);
       return;
     }
+    clearCalendarSessionCache();
     deleteDialogRef.current?.close();
     closeCreateModal();
     router.refresh();
@@ -420,6 +446,7 @@ export function IntegrationEffortSection({
 
   const viewSegIndex = view === "day" ? 0 : view === "week" ? 1 : 2;
   const viewSegWidthPx = 76; // 4.75rem @ 16px root
+  const isWorkSessionEdit = createDraft?.source === "task_work_session";
 
   const viewTabBtn = (v: EffortView, label: string, pos: "left" | "mid" | "right") => {
     const active = view === v;
@@ -739,7 +766,7 @@ export function IntegrationEffortSection({
                   <label className="text-xs font-medium text-muted-canvas sm:flex-1">
                     Title
                     <input
-                      className="input-canvas mt-1 h-9 w-full text-sm placeholder:text-sm placeholder:font-normal placeholder:text-muted-canvas"
+                      className="input-canvas mt-1 h-9 w-full text-sm placeholder:text-sm placeholder:font-normal placeholder:text-muted-canvas disabled:cursor-not-allowed disabled:opacity-70"
                       value={createDraft.title}
                       onChange={(e) =>
                         setCreateDraft((prev) =>
@@ -750,6 +777,8 @@ export function IntegrationEffortSection({
                         createDraft.entry_type === "meeting" ? "e.g. Weekly sync" : "e.g. Fix auth bug"
                       }
                       autoComplete="off"
+                      disabled={isWorkSessionEdit}
+                      readOnly={isWorkSessionEdit}
                     />
                   </label>
 
@@ -776,18 +805,22 @@ export function IntegrationEffortSection({
                         type="button"
                         role="tab"
                         aria-selected={createDraft.entry_type === "meeting"}
+                        aria-disabled={isWorkSessionEdit}
+                        disabled={isWorkSessionEdit}
                         className={[
-                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors cursor-pointer",
+                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors",
+                          isWorkSessionEdit ? "cursor-not-allowed" : "cursor-pointer",
                           createDraft.entry_type === "meeting"
                             ? "font-semibold text-[#f3f5f8]"
                             : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
                           "rounded-l-[10px]",
                         ].join(" ")}
-                        onClick={() =>
+                        onClick={() => {
+                          if (isWorkSessionEdit) return;
                           setCreateDraft((prev) =>
                             prev ? { ...prev, entry_type: "meeting" } : prev,
-                          )
-                        }
+                          );
+                        }}
                       >
                         Meeting
                       </button>
@@ -795,16 +828,20 @@ export function IntegrationEffortSection({
                         type="button"
                         role="tab"
                         aria-selected={createDraft.entry_type === "task"}
+                        aria-disabled={isWorkSessionEdit}
+                        disabled={isWorkSessionEdit}
                         className={[
-                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors cursor-pointer",
+                          "relative z-[2] inline-flex h-9 w-24 items-center justify-center px-3 text-center text-xs transition-colors",
+                          isWorkSessionEdit ? "cursor-not-allowed" : "cursor-pointer",
                           createDraft.entry_type === "task"
                             ? "font-semibold text-[#f3f5f8]"
                             : "font-normal text-muted-canvas hover:text-[var(--app-text)]",
                           "rounded-r-[10px]",
                         ].join(" ")}
-                        onClick={() =>
-                          setCreateDraft((prev) => (prev ? { ...prev, entry_type: "task" } : prev))
-                        }
+                        onClick={() => {
+                          if (isWorkSessionEdit) return;
+                          setCreateDraft((prev) => (prev ? { ...prev, entry_type: "task" } : prev));
+                        }}
                       >
                         Task
                       </button>
@@ -936,6 +973,9 @@ export function IntegrationEffortSection({
                 {deleteContext.title}
               </p>
               <p className="text-muted-canvas">{deleteContext.durationLabel}</p>
+              {deleteContext.source === "task_work_session" ? (
+                <p className="text-muted-canvas">This removes the logged session, not the task.</p>
+              ) : null}
             </div>
           ) : null}
           {deleteError ? (

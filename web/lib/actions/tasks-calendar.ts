@@ -164,6 +164,110 @@ function revalidateInternalCalendarPaths(initiativeId: string | null) {
   if (initiativeId) revalidatePath(`/internal/initiatives/${initiativeId}`);
 }
 
+function parseCalendarTimeRange(
+  startedAt: string,
+  finishedAt: string,
+): { started: Date; finished: Date; durationHours: number } | { error: string } {
+  const started = new Date(startedAt);
+  if (Number.isNaN(started.getTime())) return { error: "Invalid start time" };
+  const finished = new Date(finishedAt);
+  if (Number.isNaN(finished.getTime())) return { error: "Invalid end time" };
+  if (finished.getTime() <= started.getTime()) return { error: "End time must be after start time" };
+  if (!isOnQuarterHour(started) || !isOnQuarterHour(finished)) {
+    return { error: "Times must be in 15-minute increments" };
+  }
+  const durationHours = normalizeQuarterDurationHours(finished.getTime() - started.getTime());
+  if (durationHours == null) return { error: "Duration must be in 15-minute increments" };
+  return { started, finished, durationHours };
+}
+
+type OwnedWorkSession =
+  | {
+      kind: "integration";
+      id: string;
+      project_id: string;
+      project_integration_id: string | null;
+    }
+  | {
+      kind: "internal";
+      id: string;
+      internal_initiative_id: string | null;
+    };
+
+async function loadOwnedCompletedWorkSession(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  sourceId: string,
+  action: "edit" | "delete",
+): Promise<{ session: OwnedWorkSession } | { error: string }> {
+  const activeError = action === "delete" ? "Cannot delete an active session" : "Cannot edit an active session";
+
+  const { data: workSession, error: workSessionErr } = await supabase
+    .from("integration_task_work_sessions")
+    .select("id, integration_task_id, finished_at")
+    .eq("id", sourceId)
+    .maybeSingle();
+  if (workSessionErr) return { error: workSessionErr.message };
+
+  if (workSession) {
+    if (!workSession.finished_at) return { error: activeError };
+    const { data: task } = await supabase
+      .from("integration_tasks")
+      .select("id, project_track_id")
+      .eq("id", workSession.integration_task_id)
+      .maybeSingle();
+    if (!task) return { error: "Not found" };
+    const track = await loadOwnedProjectTrack(supabase, userId, task.project_track_id);
+    if (!track) return { error: "Not found" };
+    return {
+      session: {
+        kind: "integration",
+        id: workSession.id,
+        project_id: track.project_id,
+        project_integration_id: track.project_integration_id,
+      },
+    };
+  }
+
+  const { data: internalWs, error: internalWsErr } = await supabase
+    .from("internal_task_work_sessions")
+    .select("id, internal_task_id, finished_at")
+    .eq("id", sourceId)
+    .maybeSingle();
+  if (internalWsErr) return { error: internalWsErr.message };
+  if (!internalWs) return { error: "Not found" };
+  if (!internalWs.finished_at) return { error: activeError };
+
+  const { data: internalTask } = await supabase
+    .from("internal_tasks")
+    .select("id, internal_track_id, internal_initiative_id")
+    .eq("id", internalWs.internal_task_id)
+    .maybeSingle();
+  if (!internalTask) return { error: "Not found" };
+
+  if (internalTask.internal_initiative_id) {
+    const owned = await loadOwnedInternalInitiative(
+      supabase,
+      userId,
+      internalTask.internal_initiative_id,
+    );
+    if (!owned) return { error: "Not found" };
+  } else if (internalTask.internal_track_id) {
+    const owned = await loadOwnedInternalTrack(supabase, userId, internalTask.internal_track_id);
+    if (!owned) return { error: "Not found" };
+  } else {
+    return { error: "Not found" };
+  }
+
+  return {
+    session: {
+      kind: "internal",
+      id: internalWs.id,
+      internal_initiative_id: internalTask.internal_initiative_id,
+    },
+  };
+}
+
 type InternalTaskJoin = {
   id: string;
   title: string | null;
@@ -1382,5 +1486,95 @@ export async function rescheduleTasksCalendarSession(payload: {
   if (intUpdErr) return { error: intUpdErr.message };
 
   revalidateInternalCalendarPaths(internalTask.internal_initiative_id);
+  return {};
+}
+
+export async function updateTasksCalendarWorkSession(payload: {
+  source_id: string;
+  started_at: string;
+  finished_at: string;
+  work_accomplished: string | null;
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  if (!payload.source_id || typeof payload.source_id !== "string") {
+    return { error: "Not found" };
+  }
+
+  const owned = await loadOwnedCompletedWorkSession(supabase, user.id, payload.source_id, "edit");
+  if ("error" in owned) return { error: owned.error };
+
+  const times = parseCalendarTimeRange(payload.started_at, payload.finished_at);
+  if ("error" in times) return { error: times.error };
+
+  const workAccomplished = payload.work_accomplished?.trim() ? payload.work_accomplished.trim() : null;
+  const nextFields = {
+    started_at: times.started.toISOString(),
+    finished_at: times.finished.toISOString(),
+    duration_hours: times.durationHours,
+    work_accomplished: workAccomplished,
+  };
+
+  if (owned.session.kind === "integration") {
+    const { error } = await supabase
+      .from("integration_task_work_sessions")
+      .update(nextFields)
+      .eq("id", payload.source_id);
+    if (error) return { error: error.message };
+    revalidateTasksCalendarPaths(owned.session.project_id, owned.session.project_integration_id);
+    return {};
+  }
+
+  const { error } = await supabase
+    .from("internal_task_work_sessions")
+    .update(nextFields)
+    .eq("id", payload.source_id);
+  if (error) return { error: error.message };
+  revalidateInternalCalendarPaths(owned.session.internal_initiative_id);
+  return {};
+}
+
+export async function deleteTasksCalendarWorkSession(payload: {
+  source_id: string;
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  if (!payload.source_id || typeof payload.source_id !== "string") {
+    return { error: "Not found" };
+  }
+
+  const owned = await loadOwnedCompletedWorkSession(supabase, user.id, payload.source_id, "delete");
+  if ("error" in owned) return { error: owned.error };
+
+  if (owned.session.kind === "integration") {
+    const { data: deleted, error } = await supabase
+      .from("integration_task_work_sessions")
+      .delete()
+      .eq("id", payload.source_id)
+      .select("id")
+      .maybeSingle();
+    if (error) return { error: error.message };
+    if (!deleted) return { error: "Not found" };
+    revalidateTasksCalendarPaths(owned.session.project_id, owned.session.project_integration_id);
+    return {};
+  }
+
+  const { data: deleted, error } = await supabase
+    .from("internal_task_work_sessions")
+    .delete()
+    .eq("id", payload.source_id)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!deleted) return { error: "Not found" };
+  revalidateInternalCalendarPaths(owned.session.internal_initiative_id);
   return {};
 }

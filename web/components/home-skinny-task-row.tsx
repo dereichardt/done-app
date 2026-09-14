@@ -45,7 +45,13 @@ export type HomeSkinnyTaskMeta = {
   href: string;
 };
 
-export function IntegrationIdBadge({ meta }: { meta: HomeSkinnyTaskMeta }) {
+export function IntegrationIdBadge({
+  meta,
+  size = "default",
+}: {
+  meta: HomeSkinnyTaskMeta;
+  size?: "default" | "compact";
+}) {
   const popoverId = useId();
   const triggerRef = useRef<HTMLAnchorElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -113,13 +119,17 @@ export function IntegrationIdBadge({ meta }: { meta: HomeSkinnyTaskMeta }) {
       <Link
         ref={triggerRef}
         href={meta.href}
-        className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold tracking-wide no-underline outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--app-surface-alt)_70%,var(--app-text)_8%)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+        className={[
+          "inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold tracking-wide no-underline outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--app-surface-alt)_70%,var(--app-text)_8%)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]",
+          size === "compact" ? "h-4" : "h-6",
+        ].join(" ")}
         style={{
           color: "var(--app-text)",
           background: "var(--app-surface-alt)",
         }}
         aria-describedby={popoverId}
         aria-label={`${meta.badgeLabel}. ${meta.projectName} · ${meta.detailName}. Open integration.`}
+        onClick={(e) => e.stopPropagation()}
         onMouseEnter={openPopover}
         onMouseLeave={scheduleClose}
         onFocus={openPopover}

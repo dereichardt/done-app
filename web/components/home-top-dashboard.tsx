@@ -92,14 +92,6 @@ export function HomeTopDashboard({
     return m;
   }, [tasksSnapshot?.projects]);
 
-  const projectAbbreviationById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const [id, meta] of projectById) {
-      m.set(id, meta.abbreviation);
-    }
-    return m;
-  }, [projectById]);
-
   const leftStackRef = useRef<HTMLDivElement>(null);
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   const collapseButtonRef = useRef<HTMLButtonElement>(null);
@@ -234,9 +226,9 @@ export function HomeTopDashboard({
             <HomeDayAgendaCard
               todayIso={todayIso}
               heightPx={calendarHeightPx}
-              projectAbbreviationById={projectAbbreviationById}
               projects={tasksSnapshot?.projects ?? []}
               tracks={tasksSnapshot?.tracks ?? []}
+              integrations={tasksSnapshot?.integrations ?? []}
               reloadKey={hoursReloadKey}
               onCalendarEntryCreated={refreshEffortSurfaces}
               onCollapse={collapseCalendar}

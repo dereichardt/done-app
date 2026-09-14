@@ -2,6 +2,7 @@
 
 import { HomeCalendarEntryDialog } from "@/components/home-calendar-entry-dialog";
 import { HomeCardFab } from "@/components/home-card-fab";
+import { IntegrationIdBadge, type HomeSkinnyTaskMeta } from "@/components/home-skinny-task-row";
 import {
   loadTasksCalendarSessions,
   type TasksCalendarSession,
@@ -13,9 +14,11 @@ import {
 } from "@/lib/integration-effort-buckets";
 import {
   TASKS_PAGE_INTERNAL_PROJECT_ID,
+  type TasksPageIntegration,
   type TasksPageProject,
   type TasksPageTrack,
 } from "@/lib/tasks-page-shared";
+import { deriveProjectAbbreviation } from "@/lib/project-abbreviation";
 import { subscribeCalendarSessionCacheCleared } from "@/lib/tasks-calendar-session-cache";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type Ref } from "react";
@@ -80,13 +83,50 @@ function TaskEffortIcon({ size = 12 }: { size?: number }) {
   );
 }
 
+function internalSessionBadgeLabel(integrationLabel: string): string {
+  const label = integrationLabel.trim().toLowerCase();
+  if (label === "admin") return "ADM";
+  if (label === "development") return "DEV";
+  return deriveProjectAbbreviation(integrationLabel) || "INT";
+}
+
+function sessionIntegrationBadge(
+  session: TasksCalendarSession,
+  projectById: Map<string, TasksPageProject>,
+  integrationById: Map<string, TasksPageIntegration>,
+): HomeSkinnyTaskMeta {
+  const colorVar = session.colorMeta?.colorVar ?? projectById.get(session.project_id)?.colorVar ?? null;
+  const href = session.integration_href || "/work";
+  const projectName = session.project_name || "Project";
+  const detailName = session.integration_label || "Track";
+  if (session.project_id === TASKS_PAGE_INTERNAL_PROJECT_ID) {
+    return {
+      badgeLabel: internalSessionBadgeLabel(session.integration_label),
+      projectName,
+      detailName,
+      colorVar,
+      href,
+    };
+  }
+  if (session.project_integration_id) {
+    const code = (integrationById.get(session.project_integration_id)?.integrationCode ?? "").trim();
+    if (code) {
+      return { badgeLabel: code, projectName, detailName, colorVar, href };
+    }
+  }
+  const project = projectById.get(session.project_id);
+  const fallback =
+    (project?.abbreviation ?? "").trim() || deriveProjectAbbreviation(project?.name ?? "") || "PRJ";
+  return { badgeLabel: fallback, projectName, detailName, colorVar, href };
+}
+
 /** Today's effort agenda — height matches the left dashboard stack when `heightPx` is set. */
 export function HomeDayAgendaCard({
   todayIso,
   heightPx = null,
-  projectAbbreviationById,
   projects = [],
   tracks = [],
+  integrations = [],
   reloadKey = 0,
   onCalendarEntryCreated,
   onCollapse,
@@ -95,10 +135,9 @@ export function HomeDayAgendaCard({
   todayIso: string;
   /** Total section height (header + card), aligned to left stack including Hours this week. */
   heightPx?: number | null;
-  /** Project id → abbreviation for compact agenda rows. */
-  projectAbbreviationById?: Map<string, string>;
   projects?: TasksPageProject[];
   tracks?: TasksPageTrack[];
+  integrations?: TasksPageIntegration[];
   /** Increment to refetch day sessions (e.g. after finishing a work session). */
   reloadKey?: number;
   /** Notifies parent so Hours this week (and related metrics) can reload. */
@@ -125,7 +164,6 @@ export function HomeDayAgendaCard({
   }, []);
 
   const openEditDialog = useCallback((session: TasksCalendarSession) => {
-    if (session.source !== "manual") return;
     setEditSession(session);
     setDialogOpen(true);
   }, []);
@@ -168,6 +206,12 @@ export function HomeDayAgendaCard({
     }
     return sum;
   }, [sessions]);
+
+  const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p] as const)), [projects]);
+  const integrationById = useMemo(
+    () => new Map(integrations.map((i) => [i.id, i] as const)),
+    [integrations],
+  );
 
   const calendarHref = `/work?view=calendar&scope=day&date=${encodeURIComponent(todayIso)}`;
   const dateLabel = formatLongDate(todayIso);
@@ -229,10 +273,7 @@ export function HomeDayAgendaCard({
                   const typeLabel = sessionTypeLabel(s);
                   const isWorkSession = s.source === "task_work_session";
                   const isManual = s.source === "manual";
-                  const abbr =
-                    s.project_id === TASKS_PAGE_INTERNAL_PROJECT_ID
-                      ? "INT"
-                      : (projectAbbreviationById?.get(s.project_id) ?? "").trim() || "PRJ";
+                  const badge = sessionIntegrationBadge(s, projectById, integrationById);
                   const timeLine = [
                     formatSessionTimeRange(s),
                     Number.isFinite(Number(s.duration_hours)) && Number(s.duration_hours) > 0
@@ -243,7 +284,7 @@ export function HomeDayAgendaCard({
                     .join(" · ");
                   const titleText = s.title || "Untitled";
                   const rowLabel = isWorkSession
-                    ? `${titleText}. Logged from a work session`
+                    ? `Edit ${titleText}`
                     : isManual
                       ? `Edit ${titleText}`
                       : titleText;
@@ -262,59 +303,69 @@ export function HomeDayAgendaCard({
                         <span className="min-w-0 truncate text-[11px] tabular-nums text-muted-canvas">
                           {timeLine}
                         </span>
-                        <span
-                          className="inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium"
-                          style={{
-                            borderColor: "var(--app-border)",
-                            background: "var(--app-surface-alt)",
-                            color: "var(--app-text-muted)",
-                          }}
-                        >
-                          {typeLabel}
+                        <span className="flex shrink-0 items-center gap-1">
+                          <span
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            <IntegrationIdBadge meta={badge} size="compact" />
+                          </span>
+                          <span
+                            className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[10px] font-medium"
+                            style={{
+                              borderColor: "var(--app-border)",
+                              background: "var(--app-surface-alt)",
+                              color: "var(--app-text-muted)",
+                            }}
+                            title={isWorkSession ? "Logged from a work session" : undefined}
+                          >
+                            {isWorkSession ? (
+                              <span
+                                className="inline-flex shrink-0"
+                                style={{
+                                  color: "color-mix(in oklab, var(--app-action) 75%, var(--app-text) 25%)",
+                                }}
+                                aria-hidden
+                              >
+                                <TaskEffortIcon size={10} />
+                              </span>
+                            ) : null}
+                            {typeLabel}
+                          </span>
                         </span>
                       </div>
-                      <div className="mt-0.5 flex min-w-0 items-center justify-between gap-2">
-                        <span
-                          className="flex min-w-0 flex-1 items-center gap-1 text-sm font-medium"
-                          style={{ color: "var(--app-text)" }}
-                          title={isWorkSession ? `${titleText} · Logged from a work session` : titleText}
-                        >
-                          {isWorkSession ? (
-                            <span
-                              className="inline-flex shrink-0"
-                              style={{
-                                color: "color-mix(in oklab, var(--app-action) 75%, var(--app-text) 25%)",
-                              }}
-                              aria-hidden
-                            >
-                              <TaskEffortIcon size={12} />
-                            </span>
-                          ) : null}
-                          <span className="min-w-0 truncate">{titleText}</span>
-                        </span>
-                        <span
-                          className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-canvas"
-                          title={s.project_name || undefined}
-                        >
-                          {abbr}
-                        </span>
-                      </div>
+                      <p
+                        className="mt-0.5 min-w-0 truncate text-sm font-medium"
+                        style={{ color: "var(--app-text)" }}
+                        title={isWorkSession ? `${titleText} · Logged from a work session` : titleText}
+                      >
+                        {titleText}
+                      </p>
                     </>
                   );
+                  const rowClassName =
+                    "w-full rounded-[8px] border bg-[var(--row-bg)] px-2 py-1 text-left transition-colors hover:bg-[var(--row-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]";
                   return (
                     <li key={s.source_id}>
-                      {isManual ? (
-                        <button
-                          type="button"
-                          className="w-full cursor-pointer rounded-[8px] border bg-[var(--row-bg)] px-2 py-1 text-left transition-colors hover:bg-[var(--row-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]"
+                      {isManual || isWorkSession ? (
+                        <div
+                          className={`${rowClassName} cursor-pointer`}
                           style={rowStyle}
+                          role="button"
+                          tabIndex={0}
                           aria-label={rowLabel}
                           onClick={() => openEditDialog(s)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openEditDialog(s);
+                            }
+                          }}
                         >
                           {rowInner}
-                        </button>
+                        </div>
                       ) : (
-                        <div className="rounded-[8px] border bg-[var(--row-bg)] px-2 py-1" style={rowStyle} title={rowLabel}>
+                        <div className={rowClassName} style={rowStyle} title={rowLabel}>
                           {rowInner}
                         </div>
                       )}

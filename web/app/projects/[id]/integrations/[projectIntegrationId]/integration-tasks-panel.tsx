@@ -30,6 +30,7 @@ import { SubtaskPopoverButton } from "@/components/subtask-popover-button";
 import { TaskOnlyManualLogDialog } from "@/components/task-only-manual-log-dialog";
 import { TaskQuickAdd, type TaskQuickAddInternalCreate } from "@/components/task-quick-add";
 import { TaskRow, type TaskRowCrumb } from "@/components/task-row";
+import { IntegrationIdBadge, type HomeSkinnyTaskMeta } from "@/components/home-skinny-task-row";
 import { WorkAccomplishedField } from "@/components/work-accomplished-field";
 import {
   formatDateDisplay,
@@ -785,78 +786,7 @@ function CompactSessionTimerChip({
   );
 }
 
-const compactProjectAbbrClass =
-  "inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold tracking-wide no-underline outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--app-surface-alt)_70%,var(--app-text)_8%)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--app-text)_35%,transparent)]";
-
-function CompactProjectAbbr({
-  abbreviation,
-  colorVar,
-  href,
-  projectName,
-}: {
-  abbreviation: string;
-  colorVar: string | null;
-  href?: string;
-  projectName?: string;
-}) {
-  const inner = (
-    <>
-      {colorVar ? (
-        <span
-          className="inline-block h-1.5 w-1.5 rounded-full"
-          style={{ backgroundColor: `var(${colorVar})` }}
-          aria-hidden
-        />
-      ) : null}
-      {abbreviation}
-    </>
-  );
-  const style = { color: "var(--app-text)", background: "var(--app-surface-alt)" } as const;
-  if (href) {
-    return (
-      <a
-        href={href}
-        className={compactProjectAbbrClass}
-        style={style}
-        title={projectName}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {inner}
-      </a>
-    );
-  }
-  return (
-    <span className={`${compactProjectAbbrClass} cursor-default`} style={style} title={projectName}>
-      {inner}
-    </span>
-  );
-}
-
-function CompactIntegrationLabel({ label, href }: { label: string; href?: string }) {
-  const className =
-    "min-w-0 flex-1 truncate text-xs leading-snug text-muted-canvas transition-colors hover:text-[var(--app-text)] hover:underline underline-offset-2";
-  if (href) {
-    return (
-      <a href={href} className={className} title={label} onClick={(e) => e.stopPropagation()}>
-        {label}
-      </a>
-    );
-  }
-  return (
-    <p className="min-w-0 flex-1 truncate text-xs leading-snug text-muted-canvas" title={label}>
-      {label}
-    </p>
-  );
-}
-
-export type CompactWorkSessionContext = {
-  projectAbbreviation: string;
-  projectName: string;
-  projectColorVar: string | null;
-  href: string;
-  /** Integration ID when present; otherwise the track / context name. */
-  integrationIdOrLabel: string;
-};
+export type CompactWorkSessionContext = HomeSkinnyTaskMeta;
 
 /** Very pale info tint for finish-modal timer cards. */
 const finishDialogTimeCardSurface = {
@@ -1472,8 +1402,8 @@ export function TaskWorkRow({
   /** Called after a finished session is successfully persisted (Hours / Actuals refresh). */
   onSessionPersisted?: () => void;
   /**
-   * Home skinny-task card: two-row session strip (project abbr + truncated title + overflow/finish,
-   * then combined timer chip + integration ID/label).
+   * Home skinny-task card: two-row session strip (truncated title + overflow/finish,
+   * then integration ID badge + timer chip).
    */
   compact?: boolean;
   compactContext?: CompactWorkSessionContext | null;
@@ -1810,14 +1740,6 @@ export function TaskWorkRow({
         {compact ? (
           <div className="flex flex-col gap-1.5">
             <div className="flex min-w-0 items-center gap-2">
-              {compactContext ? (
-                <CompactProjectAbbr
-                  abbreviation={compactContext.projectAbbreviation}
-                  colorVar={compactContext.projectColorVar}
-                  href={compactContext.href}
-                  projectName={compactContext.projectName}
-                />
-              ) : null}
               <p
                 className="min-w-0 flex-1 truncate text-sm font-medium"
                 style={{ color: "var(--app-text)" }}
@@ -1859,14 +1781,7 @@ export function TaskWorkRow({
               </div>
             </div>
             <div className="flex min-w-0 items-center justify-between gap-2">
-              {compactContext ? (
-                <CompactIntegrationLabel
-                  label={compactContext.integrationIdOrLabel}
-                  href={compactContext.href}
-                />
-              ) : (
-                <span className="min-w-0 flex-1" />
-              )}
+              {compactContext ? <IntegrationIdBadge meta={compactContext} /> : <span className="min-w-0 flex-1" />}
               <CompactSessionTimerChip
                 startMs={startMs}
                 durationLive={durationLive}
