@@ -12,7 +12,7 @@ import { LockIcon, UndoIcon } from "@/components/action-icons";
 const BAR_MAX_PX = 100;
 /**
  * Default hours that fill a forecast week bar to capacity (target weekly load).
- * Overridden by user_preferences.weekly_capacity_hours when provided.
+ * All projects uses Utilization pace when present, otherwise this fallback.
  */
 export const TARGET_WEEKLY_FORECAST_HOURS = 32;
 /** Portfolio “All projects” bar: full height at this load. */
@@ -62,6 +62,14 @@ function parseWholeHoursInput(value: string): number | null {
   return Number(value);
 }
 
+/** Compact All projects target (e.g. 32h, 25.5h) to the right of the pace line. */
+export function formatPortfolioTargetLabel(hours: number): string {
+  if (!Number.isFinite(hours) || hours <= 0) return "0h";
+  const q = Math.round(hours * 4) / 4;
+  const s = Number.isInteger(q) ? String(q) : String(parseFloat(q.toFixed(2)));
+  return `${s}h`;
+}
+
 export function ForecastWeekCell({
   hours,
   editable,
@@ -100,7 +108,7 @@ export function ForecastWeekCell({
   cellId?: string;
   /** Hours that fill the bar to max height (defaults to {@link TARGET_WEEKLY_FORECAST_HOURS}). */
   barScaleHours?: number;
-  /** Weekly capacity target line / tone threshold (from Settings). */
+  /** Weekly capacity target line / tone threshold (Utilization pace, else 32h). */
   targetWeeklyHours?: number;
   capacityTint?: boolean;
   sessionBaselineHours?: number | null;
@@ -130,6 +138,11 @@ export function ForecastWeekCell({
   const fillPx = barHeightPx(displayHours, scaleHours, visualBarMaxPx);
   const targetLineBottomPx = Math.round(
     (targetWeeklyHours / PORTFOLIO_BAR_MAX_HOURS) * BAR_MAX_PX,
+  );
+  const targetLabel = formatPortfolioTargetLabel(targetWeeklyHours);
+  const targetLabelBottomPx = Math.min(
+    BAR_MAX_PX - 6,
+    Math.max(6, targetLineBottomPx),
   );
 
   const commit = useCallback(
@@ -331,9 +344,20 @@ export function ForecastWeekCell({
           <div
             className="pointer-events-none absolute inset-x-[-2px] z-[1] h-px bg-[var(--app-text-muted)]"
             style={{ bottom: targetLineBottomPx }}
-            title={`${targetWeeklyHours}h target`}
+            title={`${targetLabel} target`}
             aria-hidden
           />
+          <span
+            className="pointer-events-none absolute left-[calc(100%+3px)] z-[1] whitespace-nowrap text-[0.6rem] font-medium leading-none tabular-nums text-[var(--app-text-muted)]"
+            style={{
+              bottom: targetLabelBottomPx,
+              transform: "translateY(50%)",
+            }}
+            title={`${targetLabel} target`}
+            aria-hidden
+          >
+            {targetLabel}
+          </span>
         </div>
       ) : (
         <div

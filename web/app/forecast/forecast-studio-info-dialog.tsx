@@ -210,8 +210,9 @@ export function ForecastStudioInfoDialog() {
                 <p>
                   Bar height represents weekly hours. Project bars use 32 hours as their full
                   weekly reference. The All projects row adds every active project for each week;
-                  its target marker is 32 hours, turns green at or above target, and shows a
-                  warning above 40 hours.
+                  its target marker follows Utilization pace for that week (32 hours when no
+                  quarter pace is set), with the target hours shown to the right of the line. The
+                  bar turns green at or above target and shows a warning above 40 hours.
                 </p>
               </GuideSection>
 

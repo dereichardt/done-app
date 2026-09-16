@@ -44,10 +44,14 @@ import {
 } from "@/lib/project-forecast";
 import { sundayWeekStartsInclusive, formatSundayWeekLabel } from "@/lib/project-weekly-effort";
 import type { DeploymentEffortByPhase } from "@/lib/user-preferences";
-import { DEFAULT_WEEKLY_CAPACITY_HOURS } from "@/lib/user-preferences";
+import {
+  portfolioWeekTargetHours,
+  type PaceHoursByWeek,
+} from "@/lib/utilization-pace";
 import {
   ForecastWeekCell,
   PORTFOLIO_BAR_MAX_HOURS,
+  TARGET_WEEKLY_FORECAST_HOURS,
   portfolioCapacityTone,
 } from "./forecast-week-cell";
 import { ForecastWeekPhaseHeader } from "./forecast-week-phase-header";
@@ -173,13 +177,14 @@ export function ForecastStudio({
   projects: initialProjects,
   todayIso,
   deploymentEffortByPhase,
-  weeklyCapacityHours = DEFAULT_WEEKLY_CAPACITY_HOURS,
+  paceHoursByWeek = {},
   focusProjectId,
 }: {
   projects: ForecastProjectDTO[];
   todayIso: string;
   deploymentEffortByPhase: DeploymentEffortByPhase;
-  weeklyCapacityHours?: number;
+  /** Utilization pace by Sunday week; omitted weeks fall back to 32h. */
+  paceHoursByWeek?: PaceHoursByWeek;
   focusProjectId: string | null;
 }) {
   const router = useRouter();
@@ -1020,7 +1025,11 @@ export function ForecastStudio({
                       <span
                         className={`text-xs tabular-nums ${portfolioCapacityTextClass(
                           portfolioTotalsByWeek[w] ?? 0,
-                          weeklyCapacityHours,
+                          portfolioWeekTargetHours(
+                            w,
+                            paceHoursByWeek,
+                            TARGET_WEEKLY_FORECAST_HOURS,
+                          ),
                         )}`}
                         title={`${portfolioTotalsByWeek[w] ?? 0} forecast hours`}
                       >
@@ -1111,7 +1120,11 @@ export function ForecastStudio({
                         }
                         capacityTint
                         barScaleHours={PORTFOLIO_BAR_MAX_HOURS}
-                        targetWeeklyHours={weeklyCapacityHours}
+                        targetWeeklyHours={portfolioWeekTargetHours(
+                          w,
+                          paceHoursByWeek,
+                          TARGET_WEEKLY_FORECAST_HOURS,
+                        )}
                         cellId={`portfolio:total:${w}`}
                         onCommitHours={() => {}}
                         onToggleLock={() =>
@@ -1407,7 +1420,6 @@ export function ForecastStudio({
                                   : `Lock ${formatSundayWeekLabel(w)} for ${project.customer_name}`
                               }
                               cellId={`${project.id}:project:${w}`}
-                              targetWeeklyHours={weeklyCapacityHours}
                               {...editProps}
                               onCommitHours={(next) =>
                                 applyProjectEdit(project, w, next)
