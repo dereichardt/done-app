@@ -251,8 +251,15 @@ function UtilizationWeekStrip({
               w.paceHours > 0 && w.forecastHours + 0.25 < w.paceHours;
             const actualMetPace =
               w.paceHours > 0 && w.actualHours + 0.25 >= w.paceHours;
+            const pastMissedPace =
+              w.relative === "past" && w.paceHours > 0 && !actualMetPace;
             const label = weekLabel(w.weekStartYmd);
             const actualLabel = isFuture ? "—" : formatBarHours(w.actualHours);
+            const actualsFill = actualMetPace
+              ? "var(--app-success)"
+              : isCurrent
+                ? "var(--app-cta-dark-fill)"
+                : "color-mix(in oklab, var(--app-cta-dark-fill) 42%, var(--app-text-muted))";
             const inBarColor =
               w.actualHours > 0
                 ? actualMetPace
@@ -276,7 +283,9 @@ function UtilizationWeekStrip({
                   aria-label={
                     w.relative === "past" && actualMetPace
                       ? `Pace met (${formatBarHours(w.actualHours)} actual vs ${formatBarHours(w.paceHours)} pace)`
-                      : undefined
+                      : pastMissedPace
+                        ? `Pace missed (${formatBarHours(w.actualHours)} actual vs ${formatBarHours(w.paceHours)} pace)`
+                        : undefined
                   }
                 >
                   {w.relative === "past" && actualMetPace ? (
@@ -288,6 +297,25 @@ function UtilizationWeekStrip({
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                      />
+                    </svg>
+                  ) : pastMissedPace ? (
+                    <svg viewBox="0 0 16 16" width={14} height={14} aria-hidden>
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M4.5 4.5 11.5 11.5"
+                      />
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M11.5 4.5 4.5 11.5"
                       />
                     </svg>
                   ) : (
@@ -333,9 +361,7 @@ function UtilizationWeekStrip({
                       className="absolute bottom-0 left-0 right-0 motion-safe:[transition:height_300ms_cubic-bezier(0.2,0,0.2,1)]"
                       style={{
                         height: `${actualPct}%`,
-                        background: actualMetPace
-                          ? "var(--app-success)"
-                          : "var(--app-cta-dark-fill)",
+                        background: actualsFill,
                       }}
                       aria-hidden
                     />
